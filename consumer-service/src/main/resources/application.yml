@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: consumer-service
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+apicurio:
+  registry:
+    url: ${APICURIO_REGISTRY_URL:http://localhost:8080}
+  cache:
+    max-size: 100
+    ttl: 600s
+    refresh-after-write: 300s
+  # T-6.6: Set to OFF to fail fast on startup if a pinned schema version is not registered.
+  auto-register: ${APICURIO_AUTO_REGISTER:ON}
+
+# T-4.7 (spec §10.5): Schema version pinning.
+schema:
+  orders:
+    pinned-version: ${SCHEMA_ORDERS_PINNED_VERSION:}
+  customers:
+    pinned-version: ${SCHEMA_CUSTOMERS_PINNED_VERSION:}
+
+server:
+  port: 8082
+
+# T-6.2: Actuator — expose health + prometheus endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  # T-6.3: OTel OTLP tracing
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+
+---
+# T-6.4: Structured JSON logging for prod profile (Spring Boot 4.0 native)
+spring:
+  config:
+    activate:
+      on-profile: prod
+  application:
+    name: consumer-service
+logging:
+  structured:
+    format:
+      console: ecs

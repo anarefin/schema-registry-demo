@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package com.example.contracts.orders;
+
+option java_package = "com.example.contracts.orders";
+option java_outer_classname = "OrderCreatedProto";
+option java_multiple_files = true;
+
+// INCOMPATIBLE v3 demo — DO NOT REGISTER.
+// Changes order_id field 1 from string to int64: wire-type mismatch with all existing messages.
+// Registering this against the BACKWARD compatibility rule MUST fail.
+// Demo: ./mvnw -pl order-contracts apicurio-registry:test -Pincompatible-demo
+message OrderCreated {
+  int64  order_id    = 1;  // INCOMPATIBLE: was string, now int64 (same field number, incompatible wire type)
+  string customer_id = 2;
+  string product_id  = 3;
+  int32  quantity    = 4;
+  double total_amount = 5;
+  string currency    = 6;
+  string created_at  = 7;
+  optional string promo_code  = 8;
+}

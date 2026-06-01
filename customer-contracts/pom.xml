@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>schema-registry-demo-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <!-- T-2.7: JSON Schema contracts jar. Depends only on Jackson (no Spring, no core). -->
+  <artifactId>customer-contracts</artifactId>
+  <packaging>jar</packaging>
+
+  <properties>
+    <!-- Override on CLI: ./mvnw apicurio-registry:register -Dapicurio.registry.url=http://host:8080 -->
+    <apicurio.registry.url>http://localhost:8080</apicurio.registry.url>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- T-2.2: Generate CustomerRegistered POJO from customer-registered.json (Draft 2020-12). -->
+      <plugin>
+        <groupId>org.jsonschema2pojo</groupId>
+        <artifactId>jsonschema2pojo-maven-plugin</artifactId>
+        <version>${jsonschema2pojo-maven-plugin.version}</version>
+        <configuration>
+          <sourceDirectory>${project.basedir}/src/main/resources/schemas</sourceDirectory>
+          <targetPackage>com.example.contracts.customers</targetPackage>
+          <annotationStyle>jackson2</annotationStyle>
+          <sourceType>jsonschema</sourceType>
+          <generateBuilders>true</generateBuilders>
+          <includeHashcodeAndEquals>true</includeHashcodeAndEquals>
+          <includeToString>true</includeToString>
+          <useTitleAsClassname>true</useTitleAsClassname>
+          <dateTimeType>java.lang.String</dateTimeType>
+          <initializeCollections>false</initializeCollections>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>generate</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- T-2.4 / T-4.1: Register CustomerRegistered and attach BACKWARD rule.
+           Run: ./mvnw -pl customer-contracts apicurio-registry:register
+           Override URL: -Dapicurio.registry.url=http://host:8080
+           v2 (promoCode optional property) is BACKWARD-compatible: old consumers ignore it. -->
+      <plugin>
+        <groupId>io.apicurio</groupId>
+        <artifactId>apicurio-registry-maven-plugin</artifactId>
+        <version>${apicurio-registry-maven-plugin.version}</version>
+        <configuration>
+          <registryUrl>${apicurio.registry.url}</registryUrl>
+          <artifacts>
+            <!-- v1: fields without promoCode — registered first to establish the baseline version. -->
+            <artifact>
+              <groupId>events.customers</groupId>
+              <artifactId>CustomerRegistered</artifactId>
+              <file>${project.basedir}/src/test/resources/schemas/customer-registered-v1.json</file>
+              <artifactType>JSON</artifactType>
+              <ifExists>FIND_OR_CREATE_VERSION</ifExists>
+            </artifact>
+            <!-- v2: adds optional promoCode property — BACKWARD-compatible addition. -->
+            <artifact>
+              <groupId>events.customers</groupId>
+              <artifactId>CustomerRegistered</artifactId>
+              <file>${project.basedir}/src/main/resources/schemas/customer-registered.json</file>
+              <artifactType>JSON</artifactType>
+              <ifExists>FIND_OR_CREATE_VERSION</ifExists>
+            </artifact>
+          </artifacts>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- T-4.5 CI merge gate: checks the current schema is BACKWARD-compatible with what is
+         registered. Requires a running registry. Run during CI after docker compose up:
+         ./mvnw -pl customer-contracts verify -Pcompat-check
+         Or explicitly: ./mvnw -pl customer-contracts apicurio-registry:test -Pcompat-check -->
+    <profile>
+      <id>compat-check</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.apicurio</groupId>
+            <artifactId>apicurio-registry-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>compat-gate</id>
+                <phase>verify</phase>
+                <goals><goal>register</goal></goals>
+                <configuration>
+                  <registryUrl>${apicurio.registry.url}</registryUrl>
+                  <dryRun>true</dryRun>
+                  <artifacts>
+                    <artifact>
+                      <groupId>events.customers</groupId>
+                      <artifactId>CustomerRegistered</artifactId>
+                      <file>${project.basedir}/src/main/resources/schemas/customer-registered.json</file>
+                      <artifactType>JSON</artifactType>
+                    </artifact>
+                  </artifacts>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!-- T-4.4 / T-4.6 incompatible demo: runs apicurio-registry:test with a schema that
+         removes the required 'email' field — BACKWARD incompatible.
+         This MUST fail with a clear compatibility rejection message.
+         Demo: ./mvnw -pl customer-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
+         (requires v1 or v2 already registered with BACKWARD rule) -->
+    <profile>
+      <id>incompatible-demo</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.apicurio</groupId>
+            <artifactId>apicurio-registry-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>incompatible-compat-check</id>
+                <phase>verify</phase>
+                <goals><goal>register</goal></goals>
+                <configuration>
+                  <registryUrl>${apicurio.registry.url}</registryUrl>
+                  <dryRun>true</dryRun>
+                  <artifacts>
+                    <artifact>
+                      <groupId>events.customers</groupId>
+                      <artifactId>CustomerRegistered</artifactId>
+                      <file>${project.basedir}/src/test/resources/schemas/customer-registered-incompatible.json</file>
+                      <artifactType>JSON</artifactType>
+                    </artifact>
+                  </artifacts>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>
