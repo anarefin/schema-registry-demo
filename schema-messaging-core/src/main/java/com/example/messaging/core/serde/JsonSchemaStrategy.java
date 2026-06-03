@@ -7,6 +7,8 @@ import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
@@ -15,21 +17,43 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * JSON Schema serialization strategy (spec §6).
  * Validates payload via networknt json-schema-validator (Draft 2020-12),
  * then serializes / deserializes with Jackson.
+ *
+ * <p>Compiled {@link JsonSchema} objects are cached by globalId — parsing the schema
+ * content string on every call is expensive and the result is always identical for the
+ * same globalId.
+ *
+ * <p>Consumer-side validation ({@code validateOnDeserialize}) is enabled by default so
+ * that structurally invalid inbound JSON (wrong field types, missing required fields from
+ * a mis-deployed producer) is caught and routed to DLQ rather than silently deserializing
+ * into a partial POJO.
  */
 public class JsonSchemaStrategy implements SerializationStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(JsonSchemaStrategy.class);
 
     private final ObjectMapper objectMapper;
+    private final boolean validateOnDeserialize;
+
+    // Compiled JsonSchema objects are immutable and thread-safe; cache by globalId.
+    private final Cache<Long, JsonSchema> compiledSchemaCache = Caffeine.newBuilder()
+            .maximumSize(200)
+            .build();
+
+    public JsonSchemaStrategy(ObjectMapper objectMapper, boolean validateOnDeserialize) {
+        this.objectMapper = objectMapper;
+        this.validateOnDeserialize = validateOnDeserialize;
+    }
 
     public JsonSchemaStrategy(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+        this(objectMapper, true);
     }
 
     @Override
@@ -56,7 +80,12 @@ public class JsonSchemaStrategy implements SerializationStrategy {
             throws DeserializationException {
         String ctx = targetType.getSimpleName();
         try {
+            if (validateOnDeserialize) {
+                validate(bytes, schema);
+            }
             return objectMapper.readValue(bytes, targetType);
+        } catch (SchemaValidationException e) {
+            throw e;
         } catch (Exception e) {
             log.debug("JSON deserialization failed for type={}", ctx, e);
             throw new DeserializationException(ctx, e);
@@ -66,25 +95,26 @@ public class JsonSchemaStrategy implements SerializationStrategy {
     // ---- private -----------------------------------------------------------
 
     private void validate(byte[] jsonBytes, ResolvedSchema resolvedSchema) throws SchemaValidationException {
-        String schemaContent = new String(resolvedSchema.rawContent(), StandardCharsets.UTF_8);
         String coordinatesCtx = "globalId=" + resolvedSchema.globalId();
         try {
-            JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
-            JsonSchema jsonSchema = factory.getSchema(schemaContent);
+            JsonSchema jsonSchema = compiledSchemaCache.get(resolvedSchema.globalId(), id -> {
+                JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
+                return factory.getSchema(new String(resolvedSchema.rawContent(), StandardCharsets.UTF_8));
+            });
             JsonNode node = objectMapper.readTree(jsonBytes);
             Set<ValidationMessage> errors = jsonSchema.validate(node);
             if (!errors.isEmpty()) {
-                String detail = errors.stream()
+                List<String> errorMessages = errors.stream()
                         .map(ValidationMessage::getMessage)
                         .limit(5)
-                        .reduce((a, b) -> a + "; " + b)
-                        .orElse("validation error");
-                throw new SchemaValidationException(coordinatesCtx, detail);
+                        .collect(Collectors.toList());
+                throw new SchemaValidationException(coordinatesCtx, errorMessages);
             }
         } catch (SchemaValidationException e) {
             throw e;
         } catch (Exception e) {
-            throw new SchemaValidationException(coordinatesCtx, "Failed to compile/validate JSON schema: " + e.getMessage(), e);
+            throw new SchemaValidationException(coordinatesCtx,
+                    "Failed to compile/validate JSON schema: " + e.getMessage(), e);
         }
     }
 }

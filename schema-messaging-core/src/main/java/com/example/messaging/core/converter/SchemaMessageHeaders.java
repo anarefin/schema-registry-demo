@@ -35,17 +35,34 @@ public final class SchemaMessageHeaders {
 
     // ---- write helpers ----------------------------------------------------
 
+    /**
+     * Populates all {@code X-Schema-*} identity headers and sets the AMQP content-type.
+     *
+     * @param contentType MIME type from the {@link com.example.messaging.core.serde.SerializationStrategy};
+     *                    allows strategies to advertise a custom content-type (e.g. avro-binary)
+     *                    independent of the {@link SchemaType} enum.
+     */
     public static void setSchemaHeaders(
             MessageProperties props,
             long globalId,
             SchemaCoordinates coords,
-            SchemaType schemaType) {
+            SchemaType schemaType,
+            String contentType) {
         props.setHeader(GLOBAL_ID, globalId);
         props.setHeader(GROUP_ID, coords.groupId());
         props.setHeader(ARTIFACT_ID, coords.artifactId());
         props.setHeader(VERSION, coords.versionExpression());
         props.setHeader(TYPE, schemaType.name());
-        props.setContentType(schemaType.contentType());
+        props.setContentType(contentType);
+    }
+
+    /** Convenience overload — uses {@link SchemaType#contentType()} as the content-type. */
+    public static void setSchemaHeaders(
+            MessageProperties props,
+            long globalId,
+            SchemaCoordinates coords,
+            SchemaType schemaType) {
+        setSchemaHeaders(props, globalId, coords, schemaType, schemaType.contentType());
     }
 
     // ---- read helpers ----------------------------------------------------

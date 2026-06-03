@@ -21,6 +21,55 @@ grep -A4 "jdk" ~/.m2/toolchains.xml   # must show version 25
 
 ---
 
+## Background: Apicurio Registry Primer
+
+> Skip this if you already know what a schema registry is. Come back to it if something in a
+> later step doesn't make sense.
+
+**What is it?** Think of Apicurio Registry as **Git, but for message schemas**. Just like Git
+stores every version of your code and lets you compare or roll back, Apicurio stores every
+version of your message contracts and enforces that new versions don't break existing readers.
+
+### The three-level hierarchy
+
+Apicurio organises schemas in three levels: Group → Artifact → Version.
+
+```
+Group  (events.orders)
+  └── Artifact  (OrderCreated)
+        ├── Version 1  → globalId: N   ← original schema, immutable forever
+        └── Version 2  → globalId: M   ← + optional promo_code field
+```
+
+| Concept | Value in this project | Plain-English meaning |
+|---------|----------------------|----------------------|
+| **Group** | `events.orders` / `events.customers` | Namespace — a folder for related schemas |
+| **Artifact** | `OrderCreated` / `CustomerRegistered` | The schema itself |
+| **Version** | `1`, `2`, … | An immutable snapshot; once stored it never changes |
+| **Global ID** | e.g. `1`, `7`, `12` | A registry-wide unique number assigned to each version |
+| **Compatibility rule** | `BACKWARD` | Policy stored in Apicurio; checked on every new registration |
+
+### What "BACKWARD" means (one rule, one sentence)
+
+> A **consumer** using the new schema can still read messages that were **produced** with the
+> old schema.
+
+In practice:
+- **Allowed** — add an optional field (old messages simply don't have it; the consumer treats it as absent)
+- **Rejected** — remove a field, rename a field, or add a *required* field (old messages would fail the new contract)
+
+### Why is there a `schema-registrar` container?
+
+On a cold start Apicurio has no schemas and no rules. The `schema-registrar` Docker service is
+a one-shot Maven job that:
+1. Registers v1 and v2 of both schemas
+2. Attaches the `BACKWARD` rule to each artifact as a **standing policy**
+
+Once attached, Apicurio checks every future registration against that policy automatically —
+whether it comes from your laptop, from CI, or from a deployment pipeline.
+
+---
+
 ## Step 1 — Start Infrastructure
 
 ```bash
@@ -50,12 +99,30 @@ BACKWARD compatibility rules. It exits 0 after success. If it exited non-zero, r
 docker compose run --rm schema-registrar
 ```
 
-Verify schemas are registered in the Apicurio UI at http://localhost:8888, or via API:
+Verify schemas are registered via API:
 ```bash
 curl -s http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts | jq '.count'
 curl -s http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts | jq '.count'
 # Both should return at least 1 (likely 2 after evolution registration)
 ```
+
+**Exploring the Apicurio UI (http://localhost:8888):**
+
+This is the easiest way to understand what the registry has stored. Follow these clicks:
+
+1. Open http://localhost:8888 → click **"Explore"** in the left nav
+2. You see two groups: **`events.orders`** and **`events.customers`**
+3. Click **`events.orders`** → click **`OrderCreated`**
+   - You see **2 versions** listed with their Global IDs
+   - Click **Version 1**: shows the original `.proto` content (fields 1–7, no `promo_code`)
+   - Click **Version 2**: shows the evolved content (same fields + optional `promo_code` field 8)
+   - Click the **"Rules"** tab: shows the `BACKWARD` compatibility rule attached to this artifact
+4. Note the **Global ID** number next to each version. This exact number is what the producer
+   stamps in the `X-Schema-GlobalId` header on every message it sends. The consumer reads that
+   header to fetch the schema in a single call — no coordinate lookup needed.
+5. Repeat for **`events.customers`** → **`CustomerRegistered`** to see the JSON Schema versions
+   - Version 1: original schema (no `promoCode` property)
+   - Version 2: adds optional `promoCode` (not in `required` array — BACKWARD-compatible)
 
 ---
 
@@ -265,14 +332,34 @@ docker compose start apicurio-registry
 
 ## Step 9 — Schema Governance: Compatibility Gate
 
+> **What is Apicurio actually checking?**
+>
+> When you register (or test) a new schema version, Apicurio compares it against the
+> previously stored versions using the artifact's `BACKWARD` compatibility rule. The question
+> it answers is:
+>
+> *"Can a consumer that was built against the new schema still correctly read a message that
+> was produced with the old schema?"*
+>
+> For **Protobuf**: safe to add optional fields at the end (field numbers are preserved, old
+> messages simply have the new field absent). Unsafe: change a field's type or number, remove
+> a field.
+>
+> For **JSON Schema**: safe to add new properties that are not listed in `required` (old
+> messages without that property still validate). Unsafe: add a new required field, remove an
+> existing required field, or change a type.
+
 ### 9a. Test that the registered schemas are BACKWARD-compatible
 
 ```bash
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:test \
+./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
   -Dapicurio.registry.url=http://localhost:8080
 ```
 
 **Expected:** Both goals succeed (exit 0) — current schemas are compatible.
+
+**Note:** `compat-check` runs in **dryRun mode** — it asks Apicurio "would this schema pass?",
+but never stores anything. The version count in the UI stays the same before and after.
 
 ### 9b. Attempt to register an INCOMPATIBLE schema (should fail)
 
@@ -288,12 +375,59 @@ The `order-contracts` POM has an `incompatible-demo` profile that registers
 **Expected:** Maven goal FAILS with `INCOMPATIBLE` from Apicurio. This is the CI merge gate in
 action — an incompatible schema change would block the PR.
 
+**What you'll see in the Maven output:** a message like `RuleViolationException: INCOMPATIBLE`.
+This error comes directly from Apicurio's compatibility API — Maven is just surfacing it. The
+incompatible schema is **never stored**; the UI version count remains unchanged.
+
 Same for JSON Schema (adds new required field `accountType` — old messages don't have it, so old data fails the new schema):
 ```bash
 ./mvnw -pl customer-contracts verify \
   -Pincompatible-demo \
   -Dapicurio.registry.url=http://localhost:8080
 ```
+
+### 9c. Schema versioning lifecycle walkthrough (how to add a v3 yourself)
+
+This is a hands-on exercise that ties together everything you've learned. It takes about
+5 minutes and shows the full loop from code change → registry → running producer.
+
+**Step 1** — Add a new optional field to the Protobuf schema:
+```proto
+// order-contracts/src/main/resources/schemas/order-created.proto
+// Add this line after field 8:
+optional string notes = 9;
+```
+
+**Step 2** — Check compatibility *before* registering (dryRun, safe to run):
+```bash
+./mvnw -pl order-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
+```
+This should **pass** — adding an optional field is BACKWARD-compatible.
+
+**Step 3** — Register the new version:
+```bash
+./mvnw -pl order-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
+```
+Apicurio creates **Version 3** and assigns it a new Global ID.
+
+**Step 4** — Verify in the UI:
+Open http://localhost:8888 → `events.orders` → `OrderCreated` → you now see **3 versions**.
+Version 3 shows your new `notes` field. The Global ID for version 3 is different from versions 1 and 2.
+
+**Step 5** — Restart the producer (picks up the new "latest" schema):
+```bash
+# Ctrl+C the running producer, then:
+./mvnw -pl producer-service spring-boot:run
+```
+After restart, new messages will carry `X-Schema-GlobalId: <version-3-id>` and
+`X-Schema-Version: 3` in their headers.
+
+**Step 6** — Confirm backward compatibility is preserved:
+The consumer still processes v1 and v2 messages correctly — old messages simply don't have
+the `notes` field and it defaults to absent/empty.
+
+> **Key insight:** You never had to touch the consumer to add this field. That's the point of
+> BACKWARD compatibility — producers can evolve independently as long as they follow the rules.
 
 ---
 
@@ -337,7 +471,13 @@ curl -s http://localhost:8081/actuator/health | jq .
 curl -s http://localhost:8082/actuator/health | jq .
 ```
 
-Both should show `{"status":"UP"}` with `registry` and (consumer only) `queueDepth` components.
+Producer should show `{"status":"UP"}` with `registry` and `rabbit` components.
+Consumer should show `{"status":"UP"}` with `registry`, `rabbit`, and `queueDepth` components.
+
+**Note:** If you ran Step 8 (poison message demo) before this step, the consumer's `queueDepth`
+component will report `DOWN` — that is correct, intentional behaviour: the indicator signals DOWN
+whenever a DLQ is non-empty. To reset before re-checking health, purge the DLQ via the RabbitMQ
+Management UI (http://localhost:15672) → Queues → `orders.created.dlq` → Purge Messages.
 
 ### 11c. Distributed Tracing (Jaeger)
 
@@ -384,7 +524,7 @@ docker compose down -v
 
 | Scenario | Pass Criterion |
 |---|---|
-| `./mvnw test` | Zero failures, all 23+ unit tests green |
+| `./mvnw test` | Zero failures, all 48+ unit tests green |
 | `./mvnw verify` | All 6 IT classes green (OrderCreatedIT, CustomerRegisteredIT, DlxRoutingIT, etc.) |
 | POST /api/orders (valid) | HTTP 201, consumer logs receipt, queue depth returns to 0 |
 | POST /api/orders (invalid) | HTTP 400, no message emitted |

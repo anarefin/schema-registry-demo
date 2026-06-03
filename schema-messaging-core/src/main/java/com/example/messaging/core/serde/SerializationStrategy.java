@@ -11,11 +11,23 @@ import com.example.messaging.core.model.SchemaType;
  *
  * <p>Implementations: {@link ProtobufStrategy} (binary, no magic byte/length prefix — spec §6),
  * {@link JsonSchemaStrategy} (networknt validation + Jackson).
+ *
+ * <p>To add a new format (e.g. Avro), implement this interface and register the bean with Spring.
+ * Override {@link #contentType()} if the MIME type differs from the {@link SchemaType} default.
  */
 public interface SerializationStrategy {
 
     /** Schema type this strategy handles. */
     SchemaType schemaType();
+
+    /**
+     * MIME content-type for the wire format, used to populate the AMQP content-type header.
+     * Defaults to {@link SchemaType#contentType()}; override when the strategy uses a
+     * non-standard variant (e.g. {@code application/avro-binary}).
+     */
+    default String contentType() {
+        return schemaType().contentType();
+    }
 
     /**
      * Validate {@code payload} against {@code schema} then serialize to raw bytes.

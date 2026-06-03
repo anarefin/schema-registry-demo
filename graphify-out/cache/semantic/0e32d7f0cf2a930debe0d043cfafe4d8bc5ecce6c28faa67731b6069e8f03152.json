@@ -1,0 +1,1 @@
+{"nodes": [{"id": "producer_config_amqpconfiguration", "label": "AmqpConfiguration (producer)", "file_type": "code", "source_file": "producer-service/src/main/java/com/example/producer/config/AmqpConfiguration.java", "source_location": "class AmqpConfiguration", "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}

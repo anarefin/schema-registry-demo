@@ -102,7 +102,7 @@ public class SchemaMessagingAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public JsonSchemaStrategy jsonSchemaStrategy(ObjectMapper objectMapper) {
-        return new JsonSchemaStrategy(objectMapper);
+        return new JsonSchemaStrategy(objectMapper, true);
     }
 
     @Bean

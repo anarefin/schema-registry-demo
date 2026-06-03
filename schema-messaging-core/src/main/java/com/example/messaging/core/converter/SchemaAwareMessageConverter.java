@@ -59,6 +59,14 @@ public class SchemaAwareMessageConverter implements MessageConverter {
         this.strategies = strategies.stream()
                 .collect(Collectors.toUnmodifiableMap(SerializationStrategy::schemaType, Function.identity()));
         this.metrics = metrics;
+        // Fail fast: every registered TypeMapping must have a matching strategy available.
+        typeMappingRegistry.all().forEach(mapping -> {
+            if (!this.strategies.containsKey(mapping.schemaType())) {
+                throw new IllegalStateException(
+                        "No SerializationStrategy registered for SchemaType." + mapping.schemaType()
+                        + " (required by TypeMapping for " + mapping.javaType().getName() + ")");
+            }
+        });
     }
 
     // ---- produce path -----------------------------------------------------
@@ -90,7 +98,8 @@ public class SchemaAwareMessageConverter implements MessageConverter {
         }
 
         ensureMessageId(messageProperties);
-        SchemaMessageHeaders.setSchemaHeaders(messageProperties, schema.globalId(), mapping.coordinates(), mapping.schemaType());
+        SchemaMessageHeaders.setSchemaHeaders(messageProperties, schema.globalId(), mapping.coordinates(),
+                mapping.schemaType(), strategy.contentType());
         metrics.recordPublish(mapping.schemaType());
 
         log.info("Serialized {} to {} bytes [globalId={}, routingKey={}]",

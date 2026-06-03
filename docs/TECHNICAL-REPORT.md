@@ -100,6 +100,10 @@ The flow in words:
 If validation fails in step 1, **no message is ever sent** — the bad data is stopped at the
 door.
 
+> **Browse it live:** The Apicurio UI at http://localhost:8888 lets you explore all registered
+> schemas, their versions, and their compatibility rules interactively. See §13 for a guided
+> walkthrough of what to click once everything is running.
+
 ---
 
 ## 4. The actors: who talks to whom
@@ -445,6 +449,59 @@ producer pins a version that isn't registered, the app **fails to start** (via
 `StartupSchemaValidator`) instead of failing later at runtime. Failing early and loudly is
 safer than failing mysteriously in production.
 
+### What the registry stores per artifact
+
+Apicurio organises schemas in a three-level hierarchy:
+
+```
+Group  (events.orders)
+  └── Artifact  (OrderCreated)
+        ├── Version 1  → globalId: N   ← original schema, immutable forever
+        ├── Version 2  → globalId: M   ← + optional promo_code field 8
+        └── ... future versions
+```
+
+| Term | Meaning | Example in this project |
+|------|---------|------------------------|
+| **Group** | Logical namespace | `events.orders`, `events.customers` |
+| **Artifact** | The schema name | `OrderCreated`, `CustomerRegistered` |
+| **Version** | Auto-incremented integer; immutable once stored | `1`, `2` |
+| **Global ID** | Registry-wide unique long, never reused | stamped in `X-Schema-GlobalId` header |
+
+The **Global ID** is the key to the "fast path" for consumers: knowing the global ID means a
+single HTTP call returns the schema bytes directly, with no coordinate lookup needed.
+
+The maven plugin uses `FIND_OR_CREATE_VERSION` as its conflict strategy. This means if you
+re-register the exact same schema bytes, Apicurio returns the existing version rather than
+creating a duplicate. Only genuinely different bytes produce a new version number.
+
+### How the schema-registrar wires up compatibility rules
+
+The `schema-registrar` Docker service is a one-shot Maven container that runs at cold start
+and does three things before exiting:
+
+1. Registers v1 and v2 of both schemas (`apicurio-registry:register` on both contracts modules)
+2. POSTs a `BACKWARD` compatibility rule to `events.orders/OrderCreated`
+3. POSTs a `BACKWARD` compatibility rule to `events.customers/CustomerRegistered`
+
+Once those rules are attached they become **standing policy** stored inside Apicurio itself.
+Every future registration attempt — from a developer's local machine, from CI, or from a
+deployment pipeline — is automatically validated against that policy. The rules do not need to
+be re-applied on restart because they are persisted in Postgres alongside the schemas.
+
+```mermaid
+sequenceDiagram
+    participant SR as schema-registrar (one-shot)
+    participant AP as Apicurio Registry
+
+    SR->>AP: register OrderCreated v1 + v2
+    SR->>AP: register CustomerRegistered v1 + v2
+    SR->>AP: POST /groups/events.orders/artifacts/OrderCreated/rules {BACKWARD}
+    SR->>AP: POST /groups/events.customers/artifacts/CustomerRegistered/rules {BACKWARD}
+    SR-->>SR: exit 0
+    Note over AP: BACKWARD rule now enforced on every future registration
+```
+
 ---
 
 ## 11. When things go wrong: the failure topology
@@ -561,6 +618,20 @@ This brings up Postgres, Apicurio (+ UI), RabbitMQ, Prometheus, Grafana, and Jae
 one-shot `schema-registrar` container registers both schemas and applies the BACKWARD rule,
 then exits.
 
+**Step 1.5 — browse the Apicurio UI to see the registered schemas:**
+
+Open http://localhost:8888 and follow these clicks:
+
+1. Click **"Explore"** in the left nav → you see a list of groups
+2. Click **`events.orders`** → click **`OrderCreated`** → you see 2 versions listed
+3. Click **Version 1**: the v1 `.proto` content is shown (fields 1–7, no `promo_code`)
+4. Click **Version 2**: the v2 content appears (same fields + optional `promo_code` field 8)
+5. Click the **"Rules"** tab on the artifact → the `BACKWARD` compatibility rule is shown
+6. Note the **Global ID** value next to each version — this is the number the producer stamps
+   in the `X-Schema-GlobalId` header on every message
+
+Repeat for **`events.customers`** → **`CustomerRegistered`** to see the JSON Schema versions.
+
 **Step 2 — run the services (in two terminals):**
 ```bash
 ./mvnw -pl producer-service spring-boot:run   # http://localhost:8081
@@ -589,12 +660,12 @@ curl -X POST http://localhost:8081/api/orders/poison
 
 **Useful UIs once everything is up:**
 
-| URL | What |
-|-----|------|
-| http://localhost:8888 | Apicurio Registry UI (browse schemas) |
-| http://localhost:15672 | RabbitMQ management (guest/guest) |
-| http://localhost:3000 | Grafana (admin/admin) |
-| http://localhost:16686 | Jaeger tracing UI |
+| URL | What you'll see |
+|-----|----------------|
+| http://localhost:8888 | Apicurio Registry UI — browse groups, artifacts, versions, compatibility rules, and raw schema content |
+| http://localhost:15672 | RabbitMQ management (guest/guest) — queue depths, bindings, DLQ message inspection |
+| http://localhost:3000 | Grafana (admin/admin) — pre-wired Prometheus datasource; `schema_*` metrics dashboards |
+| http://localhost:16686 | Jaeger tracing UI — produce→consume spans linked by `X-Correlation-Id` |
 
 > **Testing note:** the test split is load-bearing. `*Test.java` files run under Surefire on
 > `mvn test` and must stay fast and mock-based. `*IT.java` files run under Failsafe on

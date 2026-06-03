@@ -1,0 +1,382 @@
+{
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/mvnw": {
+    "mtime": 1716282720.0,
+    "ast_hash": "2fe09837c0b4dfabab4c4b206bcd0850",
+    "semantic_hash": "2fe09837c0b4dfabab4c4b206bcd0850"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/customer-contracts/src/test/resources/schemas/customer-registered-incompatible.json": {
+    "mtime": 1780304829.4766777,
+    "ast_hash": "0721166c1dac618bc14bf58e44dc06a4",
+    "semantic_hash": "0721166c1dac618bc14bf58e44dc06a4"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/customer-contracts/src/test/resources/schemas/customer-registered-v1.json": {
+    "mtime": 1780304512.1802785,
+    "ast_hash": "fee3805bb3b69ecc6c029db6e76d8e2b",
+    "semantic_hash": "fee3805bb3b69ecc6c029db6e76d8e2b"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/customer-contracts/src/test/java/com/example/contracts/customers/CustomerRegisteredEvolutionTest.java": {
+    "mtime": 1780209903.851794,
+    "ast_hash": "24ae013a4ed24b525f63098022cace08",
+    "semantic_hash": "24ae013a4ed24b525f63098022cace08"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/customer-contracts/src/test/java/com/example/contracts/customers/CustomerRegisteredTest.java": {
+    "mtime": 1780202723.2166576,
+    "ast_hash": "2b544845f65402ab363cba2158f26107",
+    "semantic_hash": "2b544845f65402ab363cba2158f26107"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/customer-contracts/src/main/resources/schemas/customer-registered.json": {
+    "mtime": 1780304494.351794,
+    "ast_hash": "641300c16b82a7023d0ee16680abcb02",
+    "semantic_hash": "641300c16b82a7023d0ee16680abcb02"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/customer-contracts/src/main/java/com/example/contracts/customers/package-info.java": {
+    "mtime": 1780191312.6630478,
+    "ast_hash": "ae0626d111459dc54230172446c86f05",
+    "semantic_hash": "ae0626d111459dc54230172446c86f05"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/test/java/com/example/messaging/core/converter/SchemaAwareMessageConverterTest.java": {
+    "mtime": 1780214375.4195468,
+    "ast_hash": "5f2264f455121336013758c0a2e54326",
+    "semantic_hash": "5f2264f455121336013758c0a2e54326"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/test/java/com/example/messaging/core/registry/SchemaResolverTest.java": {
+    "mtime": 1780214861.9605865,
+    "ast_hash": "3292b82e152b61dc69e430acce61e6ff",
+    "semantic_hash": "3292b82e152b61dc69e430acce61e6ff"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/test/java/com/example/messaging/core/consumer/EventConsumerSupportTest.java": {
+    "mtime": 1780200781.3105257,
+    "ast_hash": "9a8522fe46b06c7492d90ba28637be9b",
+    "semantic_hash": "9a8522fe46b06c7492d90ba28637be9b"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/package-info.java": {
+    "mtime": 1780191293.9615414,
+    "ast_hash": "dc50d09ebaf055668b57fe369ea86d79",
+    "semantic_hash": "dc50d09ebaf055668b57fe369ea86d79"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/mapping/TypeMappingRegistry.java": {
+    "mtime": 1780200781.3316827,
+    "ast_hash": "cc1a94e273a21c1dad32142abd2d0617",
+    "semantic_hash": "cc1a94e273a21c1dad32142abd2d0617"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/mapping/TypeMapping.java": {
+    "mtime": 1780200781.3238816,
+    "ast_hash": "19c24f8904145b2dcc00cde0c5835f46",
+    "semantic_hash": "19c24f8904145b2dcc00cde0c5835f46"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/converter/SchemaMessageHeaders.java": {
+    "mtime": 1780200781.3107483,
+    "ast_hash": "fd080390369edc9c4b94a7e1b498e0df",
+    "semantic_hash": "fd080390369edc9c4b94a7e1b498e0df"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/converter/SchemaAwareMessageConverter.java": {
+    "mtime": 1780214672.413841,
+    "ast_hash": "cefd5006f5f737c925f28c7e4d3c0539",
+    "semantic_hash": "cefd5006f5f737c925f28c7e4d3c0539"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/config/SchemaMessagingAutoConfiguration.java": {
+    "mtime": 1780214827.9390824,
+    "ast_hash": "60870c49503446a6a0c1675525ec42c5",
+    "semantic_hash": "60870c49503446a6a0c1675525ec42c5"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/publisher/EventPublisher.java": {
+    "mtime": 1780200781.3316638,
+    "ast_hash": "64d1637092d3598c7bc058e50cf7e804",
+    "semantic_hash": "64d1637092d3598c7bc058e50cf7e804"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/health/RegistryHealthIndicator.java": {
+    "mtime": 1780214811.0468645,
+    "ast_hash": "1b1ecdb232e7c302a6656480435f3ad7",
+    "semantic_hash": "1b1ecdb232e7c302a6656480435f3ad7"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/observability/SchemaMessagingMetrics.java": {
+    "mtime": 1780200781.3238087,
+    "ast_hash": "5708014c01055014f84112cbbe083ab4",
+    "semantic_hash": "5708014c01055014f84112cbbe083ab4"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/model/ResolvedSchema.java": {
+    "mtime": 1780200781.3317745,
+    "ast_hash": "565d50e7fa23f62e9a5ca215d7d6b5b5",
+    "semantic_hash": "565d50e7fa23f62e9a5ca215d7d6b5b5"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/model/SchemaCoordinates.java": {
+    "mtime": 1780296426.2137234,
+    "ast_hash": "fc6a754e48e501f6aea4eb9ddfc6fe17",
+    "semantic_hash": "fc6a754e48e501f6aea4eb9ddfc6fe17"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/model/SchemaType.java": {
+    "mtime": 1780200781.3316805,
+    "ast_hash": "5b1904fa5a3b232a243cc339a8841dc6",
+    "semantic_hash": "5b1904fa5a3b232a243cc339a8841dc6"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/registry/CachePreWarmer.java": {
+    "mtime": 1780214493.5622244,
+    "ast_hash": "dcc35433ab11ae553b6d4767dfdf308a",
+    "semantic_hash": "dcc35433ab11ae553b6d4767dfdf308a"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/registry/ApicurioClient.java": {
+    "mtime": 1780200781.3107579,
+    "ast_hash": "d1f1add690b1deb076013b60267dda28",
+    "semantic_hash": "d1f1add690b1deb076013b60267dda28"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/registry/SchemaResolver.java": {
+    "mtime": 1780214300.6984017,
+    "ast_hash": "edd84449bf16db00a706a9d21f159ce8",
+    "semantic_hash": "edd84449bf16db00a706a9d21f159ce8"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/registry/StartupSchemaValidator.java": {
+    "mtime": 1780214568.3932853,
+    "ast_hash": "74c32280fd1a2549251d7c37165de09f",
+    "semantic_hash": "74c32280fd1a2549251d7c37165de09f"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/registry/ApicurioCacheProperties.java": {
+    "mtime": 1780200781.3316498,
+    "ast_hash": "7f33e4da05d2cafdafb16ad1ac8c18c6",
+    "semantic_hash": "7f33e4da05d2cafdafb16ad1ac8c18c6"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/consumer/RoutingDecision.java": {
+    "mtime": 1780200781.3277555,
+    "ast_hash": "d9d09e1da5d5a1ba6a5b94ec0865c115",
+    "semantic_hash": "d9d09e1da5d5a1ba6a5b94ec0865c115"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/consumer/EventConsumerSupport.java": {
+    "mtime": 1780212457.7475586,
+    "ast_hash": "d70c2faddb0c14fe3a150d6729ca7a30",
+    "semantic_hash": "d70c2faddb0c14fe3a150d6729ca7a30"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/consumer/IdempotencyFilter.java": {
+    "mtime": 1780211488.920389,
+    "ast_hash": "fe8680bc19cab7f4f1a25f901a0dd64e",
+    "semantic_hash": "fe8680bc19cab7f4f1a25f901a0dd64e"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/exception/SchemaMessagingException.java": {
+    "mtime": 1780200781.3415296,
+    "ast_hash": "861d86dd60e707387cb51c4d1ddb8ea2",
+    "semantic_hash": "861d86dd60e707387cb51c4d1ddb8ea2"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/exception/SchemaNotFoundException.java": {
+    "mtime": 1780200781.3415277,
+    "ast_hash": "37f18d36be57e46c341009883a8a967c",
+    "semantic_hash": "37f18d36be57e46c341009883a8a967c"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/exception/SchemaValidationException.java": {
+    "mtime": 1780200781.3415554,
+    "ast_hash": "a84dc07dd54f6c7dc2a2b2fcf7fbb13b",
+    "semantic_hash": "a84dc07dd54f6c7dc2a2b2fcf7fbb13b"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/exception/DeserializationException.java": {
+    "mtime": 1780200781.3415158,
+    "ast_hash": "17cb1e0f060753856167750c29fe754f",
+    "semantic_hash": "17cb1e0f060753856167750c29fe754f"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/exception/SerializationException.java": {
+    "mtime": 1780200781.3415048,
+    "ast_hash": "7c28962a60210d149058c65801f6e387",
+    "semantic_hash": "7c28962a60210d149058c65801f6e387"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/exception/IncompatibleSchemaTypeException.java": {
+    "mtime": 1780200781.331803,
+    "ast_hash": "bd142c5b4c5f46e57ff29ff8ffa8ebe6",
+    "semantic_hash": "bd142c5b4c5f46e57ff29ff8ffa8ebe6"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/exception/RegistryUnavailableException.java": {
+    "mtime": 1780200781.3316872,
+    "ast_hash": "4d3e0fc543e25c8a47d9ed5184c01035",
+    "semantic_hash": "4d3e0fc543e25c8a47d9ed5184c01035"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/serde/SerializationStrategy.java": {
+    "mtime": 1780200781.3317003,
+    "ast_hash": "6c298ac77f7bcdfd54d0c4e05d4006d3",
+    "semantic_hash": "6c298ac77f7bcdfd54d0c4e05d4006d3"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/serde/ProtobufStrategy.java": {
+    "mtime": 1780200781.3385496,
+    "ast_hash": "d7862cb0a3056e7ba450b58fe78b8318",
+    "semantic_hash": "d7862cb0a3056e7ba450b58fe78b8318"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/schema-messaging-core/src/main/java/com/example/messaging/core/serde/JsonSchemaStrategy.java": {
+    "mtime": 1780200781.310273,
+    "ast_hash": "724aba99561198830642a5ef67fc5c9a",
+    "semantic_hash": "724aba99561198830642a5ef67fc5c9a"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/test/java/com/example/consumer/OrderCreatedIT.java": {
+    "mtime": 1780212044.5735292,
+    "ast_hash": "58b8d2649c7da7782f8342749de37886",
+    "semantic_hash": "58b8d2649c7da7782f8342749de37886"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/test/java/com/example/consumer/StartupSchemaValidatorIT.java": {
+    "mtime": 1780296245.7852669,
+    "ast_hash": "07f8d551890fc6c7fddfa949a53ef48f",
+    "semantic_hash": "07f8d551890fc6c7fddfa949a53ef48f"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/test/java/com/example/consumer/PrometheusMetricsIT.java": {
+    "mtime": 1780214933.586377,
+    "ast_hash": "dcad85df1bd4c6f9afda49232d92d89c",
+    "semantic_hash": "dcad85df1bd4c6f9afda49232d92d89c"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/test/java/com/example/consumer/SchemaVersionPinningIT.java": {
+    "mtime": 1780209927.9668486,
+    "ast_hash": "2f16ab88cdc9880e929775b9d4271674",
+    "semantic_hash": "2f16ab88cdc9880e929775b9d4271674"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/test/java/com/example/consumer/CustomerRegisteredIT.java": {
+    "mtime": 1780212040.5509984,
+    "ast_hash": "10dac8cf2680d61df4ba62a91572497e",
+    "semantic_hash": "10dac8cf2680d61df4ba62a91572497e"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/test/java/com/example/consumer/DlxRoutingIT.java": {
+    "mtime": 1780212703.6274579,
+    "ast_hash": "0d1d7b978dcac2d05491a2b9baed7caf",
+    "semantic_hash": "0d1d7b978dcac2d05491a2b9baed7caf"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/ConsumerApplication.java": {
+    "mtime": 1780191327.96457,
+    "ast_hash": "208ece3fa7ecd9d1dc5f90b53742d979",
+    "semantic_hash": "208ece3fa7ecd9d1dc5f90b53742d979"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/listener/CustomerEventListener.java": {
+    "mtime": 1780211536.4950237,
+    "ast_hash": "f904687277b206084052d9132aec5b49",
+    "semantic_hash": "f904687277b206084052d9132aec5b49"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/listener/OrderEventListener.java": {
+    "mtime": 1780211677.8092468,
+    "ast_hash": "9b75f0150313525108b382659f98cdd9",
+    "semantic_hash": "9b75f0150313525108b382659f98cdd9"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/config/CustomerContractsConfiguration.java": {
+    "mtime": 1780209818.5991032,
+    "ast_hash": "efe5c1d19a97ce8b935d2bffd791e07b",
+    "semantic_hash": "efe5c1d19a97ce8b935d2bffd791e07b"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/config/AmqpConfiguration.java": {
+    "mtime": 1780214552.7819638,
+    "ast_hash": "b9be3d031f19b6b82f6cc84abdf38566",
+    "semantic_hash": "b9be3d031f19b6b82f6cc84abdf38566"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/config/OrderContractsConfiguration.java": {
+    "mtime": 1780209811.2800667,
+    "ast_hash": "97ae90758827b00179e7230801e76342",
+    "semantic_hash": "97ae90758827b00179e7230801e76342"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/health/QueueDepthHealthIndicator.java": {
+    "mtime": 1780214822.017565,
+    "ast_hash": "7effa983686581340a5e2c49bce12ad1",
+    "semantic_hash": "7effa983686581340a5e2c49bce12ad1"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/amqp/DlxMessageRecoverer.java": {
+    "mtime": 1780211503.4922209,
+    "ast_hash": "94f57f5b809e5826655d7b43fb9d4534",
+    "semantic_hash": "94f57f5b809e5826655d7b43fb9d4534"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/java/com/example/consumer/amqp/DlxRoutingAdvice.java": {
+    "mtime": 1780212302.3413048,
+    "ast_hash": "4c0312d461da33fce4a98a2a94ed9ec5",
+    "semantic_hash": "4c0312d461da33fce4a98a2a94ed9ec5"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/producer-service/src/test/java/com/example/producer/controller/ProducerValidationTest.java": {
+    "mtime": 1780211795.5311813,
+    "ast_hash": "50e0871eadd62be4bd0b7d958fdf9109",
+    "semantic_hash": "50e0871eadd62be4bd0b7d958fdf9109"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/producer-service/src/main/java/com/example/producer/ProducerApplication.java": {
+    "mtime": 1780191319.5009246,
+    "ast_hash": "d708cc3b745b6ee3077f57bf52da6381",
+    "semantic_hash": "d708cc3b745b6ee3077f57bf52da6381"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/producer-service/src/main/java/com/example/producer/config/CustomerContractsConfiguration.java": {
+    "mtime": 1780209803.0386014,
+    "ast_hash": "5add4ac78933d2fd65cc77663866e770",
+    "semantic_hash": "5add4ac78933d2fd65cc77663866e770"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/producer-service/src/main/java/com/example/producer/config/AmqpConfiguration.java": {
+    "mtime": 1780202723.2088916,
+    "ast_hash": "86df8c3a697fc9b1b4ec5eefa978106d",
+    "semantic_hash": "86df8c3a697fc9b1b4ec5eefa978106d"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/producer-service/src/main/java/com/example/producer/config/OrderContractsConfiguration.java": {
+    "mtime": 1780209795.6780145,
+    "ast_hash": "bff587af25bf494445eea05a472ef553",
+    "semantic_hash": "bff587af25bf494445eea05a472ef553"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/producer-service/src/main/java/com/example/producer/controller/OrderController.java": {
+    "mtime": 1780304559.9936934,
+    "ast_hash": "fb5da4f3570c2bafb6c7649feef46d16",
+    "semantic_hash": "fb5da4f3570c2bafb6c7649feef46d16"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/producer-service/src/main/java/com/example/producer/controller/CustomerController.java": {
+    "mtime": 1780202723.2083724,
+    "ast_hash": "205370c6a2f81ccdfd13fbd54186214f",
+    "semantic_hash": "205370c6a2f81ccdfd13fbd54186214f"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/order-contracts/src/test/java/com/example/contracts/orders/OrderCreatedTest.java": {
+    "mtime": 1780207621.569341,
+    "ast_hash": "7e0c821adaa5370292fd3ffe67e054e2",
+    "semantic_hash": "7e0c821adaa5370292fd3ffe67e054e2"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/order-contracts/src/test/java/com/example/contracts/orders/OrderCreatedEvolutionTest.java": {
+    "mtime": 1780209862.0654755,
+    "ast_hash": "ed8c2b6f6f1800707d0ecf108c729ed0",
+    "semantic_hash": "ed8c2b6f6f1800707d0ecf108c729ed0"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/order-contracts/src/main/java/com/example/contracts/orders/package-info.java": {
+    "mtime": 1780191299.1416535,
+    "ast_hash": "30fdafa86ab673fc5155b9de6a267c4b",
+    "semantic_hash": "30fdafa86ab673fc5155b9de6a267c4b"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/README.md": {
+    "mtime": 1780304614.8228474,
+    "ast_hash": "e2aa43ecae5035f6071ebb6c9d469139",
+    "semantic_hash": "e2aa43ecae5035f6071ebb6c9d469139"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/docker-compose.yml": {
+    "mtime": 1780295632.4418294,
+    "ast_hash": "0e7e0bc13b432a7c9ff97d278facaefe",
+    "semantic_hash": "0e7e0bc13b432a7c9ff97d278facaefe"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/prometheus.yml": {
+    "mtime": 1780294394.4277713,
+    "ast_hash": "5a0e5c9127aa08dbf220fca96ed0f739",
+    "semantic_hash": "5a0e5c9127aa08dbf220fca96ed0f739"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/CLAUDE.md": {
+    "mtime": 1780305088.7636716,
+    "ast_hash": "b81c0f68f5f231167f77826a58a96e25",
+    "semantic_hash": "b81c0f68f5f231167f77826a58a96e25"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/consumer-service/src/main/resources/application.yml": {
+    "mtime": 1780214443.7326035,
+    "ast_hash": "da20ab26dddc9a51580ccf7ee2fb449c",
+    "semantic_hash": "da20ab26dddc9a51580ccf7ee2fb449c"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/producer-service/src/main/resources/application.yml": {
+    "mtime": 1780214436.8682413,
+    "ast_hash": "a34f0c7b2614d0e445d9f156694ae784",
+    "semantic_hash": "a34f0c7b2614d0e445d9f156694ae784"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/grafana/provisioning/datasources/prometheus.yaml": {
+    "mtime": 1780295617.8428197,
+    "ast_hash": "cc685207754695fbe5f0b088058c7ecf",
+    "semantic_hash": "cc685207754695fbe5f0b088058c7ecf"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/docs/TECHNICAL-REPORT.md": {
+    "mtime": 1780305436.4757094,
+    "ast_hash": "3e0de9ef1af25ced03bcc033f99d420f",
+    "semantic_hash": "3e0de9ef1af25ced03bcc033f99d420f"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/docs/TODO.md": {
+    "mtime": 1780293717.9645007,
+    "ast_hash": "47df65e6cdac239d2e7056c8fd28d10b",
+    "semantic_hash": "47df65e6cdac239d2e7056c8fd28d10b"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/docs/POC-Implementation-Plan.md": {
+    "mtime": 1780150978.126885,
+    "ast_hash": "4666c698b2dcdd83ab6f99dfe0970993",
+    "semantic_hash": "4666c698b2dcdd83ab6f99dfe0970993"
+  },
+  "/Users/ahmadnaqibularefin/Projects/schema-registry-demo/docs/TESTING-GUIDE.md": {
+    "mtime": 1780304834.410347,
+    "ast_hash": "6d674ed89da4109b057052cc35318fa2",
+    "semantic_hash": "6d674ed89da4109b057052cc35318fa2"
+  }
+}

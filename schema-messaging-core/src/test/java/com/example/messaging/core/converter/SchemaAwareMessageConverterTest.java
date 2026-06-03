@@ -50,6 +50,7 @@ class SchemaAwareMessageConverterTest {
     @BeforeEach
     void setUp() {
         when(strategy.schemaType()).thenReturn(SchemaType.PROTOBUF);
+        lenient().when(strategy.contentType()).thenReturn(SchemaType.PROTOBUF.contentType());
 
         TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.PROTOBUF, "orders.created");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
@@ -139,5 +140,21 @@ class SchemaAwareMessageConverterTest {
 
         assertThatThrownBy(() -> converter.fromMessage(msg))
                 .isInstanceOf(com.example.messaging.core.exception.DeserializationException.class);
+    }
+
+    /**
+     * TC-1.15: constructor rejects TypeMapping whose SchemaType has no registered strategy.
+     * Prevents a silent NPE at message-processing time from becoming a startup-time IllegalStateException.
+     */
+    @Test
+    void constructor_missingStrategy_throwsIllegalState() {
+        TypeMapping jsonMapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.json");
+        TypeMappingRegistry registry = new TypeMappingRegistry(List.of(jsonMapping));
+
+        // Only PROTOBUF strategy provided — JSON mapping has no matching strategy
+        assertThatThrownBy(() ->
+                new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy), new SchemaMessagingMetrics()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SchemaType.JSON");
     }
 }

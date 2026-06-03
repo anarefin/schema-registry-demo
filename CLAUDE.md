@@ -43,8 +43,8 @@ The build uses the **committed Maven Wrapper** (`./mvnw`) — always prefer it o
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check
 
 # Incompatible-change demo (triggers rejection from a running registry)
-./mvnw -pl order-contracts    apicurio-registry:test -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
-./mvnw -pl customer-contracts apicurio-registry:test -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
+./mvnw -pl order-contracts    verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
+./mvnw -pl customer-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
 
 # Run services (producer :8081, consumer :8082)
 ./mvnw -pl producer-service spring-boot:run
