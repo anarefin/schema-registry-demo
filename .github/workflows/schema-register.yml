@@ -1,0 +1,38 @@
+name: Schema Registration
+
+# Post-merge WRITE path. After a contract change lands on main, register the new schema version
+# to the standing Apicurio registry. Runs on the SELF-HOSTED runner that shares a machine with the
+# registry (http://localhost:8080). `register` is idempotent (FIND_OR_CREATE_VERSION), so
+# registering both modules every time is safe and keeps the workflow simple.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'order-contracts/**'
+      - 'customer-contracts/**'
+
+env:
+  REGISTRY_URL: http://localhost:8080
+
+jobs:
+  register:
+    name: Register schemas (orders + customers)
+    runs-on: [self-hosted, apicurio-local]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Register schemas
+        run: |
+          ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+            -Dapicurio.registry.url=${REGISTRY_URL} \
+            --no-transfer-progress

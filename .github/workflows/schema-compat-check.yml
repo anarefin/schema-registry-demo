@@ -1,0 +1,43 @@
+name: Schema Compatibility Check
+
+# Runs on every PR that touches a schema contract module.
+# Executes on a SELF-HOSTED runner that shares a machine with the standing Apicurio registry
+# (docker compose), reachable at http://localhost:8080. The check is READ-ONLY: the
+# `compat-check` profile runs `apicurio-registry:register` with dryRun=true, so it validates the
+# PR schema against the registry's real registered history without writing anything.
+#
+# Prereqs (see docs/self-hosted-runner-setup.md):
+#   - `docker compose up -d` is running on the runner host (registry healthy; the schema-registrar
+#     service has seeded both artifacts + their BACKWARD rules).
+#   - the runner is labelled `apicurio-local` and has JDK 25 + ~/.m2/toolchains.xml.
+
+on:
+  pull_request:
+    paths:
+      - 'order-contracts/**'
+      - 'customer-contracts/**'
+
+env:
+  REGISTRY_URL: http://localhost:8080
+
+jobs:
+  compat-check:
+    name: Compatibility check (orders + customers)
+    runs-on: [self-hosted, apicurio-local]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        # Provides JAVA_HOME for the Maven runtime; toolchains.xml supplies JDK 25 for compile.
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Run compatibility check (dry-run, no writes)
+        run: |
+          ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
+            -Dapicurio.registry.url=${REGISTRY_URL} \
+            --no-transfer-progress

@@ -3,12 +3,17 @@
 services:
   postgres:
     image: postgres:17
+    # Standing registry backend: persist data so registered schema versions survive restarts
+    # (this registry is the baseline the self-hosted CI compat-check reads against).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: apicurio
       POSTGRES_PASSWORD: apicurio
       POSTGRES_DB: apicurio
     ports:
       - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U apicurio -d apicurio"]
       interval: 5s
@@ -17,6 +22,8 @@ services:
 
   apicurio:
     image: apicurio/apicurio-registry:3.2.0
+    # Always-on so the self-hosted runner can reach it at http://localhost:8080 across reboots.
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,6 +45,7 @@ services:
 
   apicurio-ui:
     image: apicurio/apicurio-registry-ui:3.2.0
+    restart: unless-stopped
     depends_on:
       apicurio:
         condition: service_healthy
@@ -147,3 +155,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+# Named volume backing the standing Apicurio registry's Postgres data. Survives
+# `docker compose restart`/recreate; removed only on `docker compose down -v`.
+volumes:
+  pgdata:

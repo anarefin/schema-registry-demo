@@ -429,6 +429,10 @@ the `notes` field and it defaults to absent/empty.
 > **Key insight:** You never had to touch the consumer to add this field. That's the point of
 > BACKWARD compatibility — producers can evolve independently as long as they follow the rules.
 
+> **Automate this in CI:** The `compat-check` in Step 9a and the `register` command in Step
+> 9c are exactly what the GitHub Actions workflows automate. See **Step 14** for how to wire
+> them up so the PR gate and post-merge registration run automatically without any manual steps.
+
 ---
 
 ## Step 10 — Schema Version Pinning
@@ -520,6 +524,98 @@ docker compose down -v
 
 ---
 
+## Step 14 — GitHub Actions Schema Governance
+
+This step documents the CI/CD automation that replaces manual schema registration for a
+multi-domain project. The workflows live in `.github/workflows/` and complement the local
+dev workflow — they don't replace it.
+
+### The three workflows at a glance
+
+| Workflow file | Trigger | What it does |
+|---|---|---|
+| `schema-compat-check.yml` | Every PR that touches `order-contracts/**` or `customer-contracts/**` | Runs `verify -Pcompat-check` against the shared dev registry. Blocks merge if INCOMPATIBLE. Read-only. |
+| `schema-register.yml` | Push to `main` for the same paths | Runs `apicurio-registry:register` against the shared dev registry. Creates a new version only if the schema bytes changed. |
+| `schema-governance-bootstrap.yml` | Manual (`workflow_dispatch`) | One-time setup — attaches the `BACKWARD` rule to each domain's artifact. Run once per new registry. |
+
+### Why matrix jobs? (Domain isolation)
+
+Both `schema-compat-check.yml` and `schema-register.yml` use a **matrix strategy** with
+one entry per domain:
+
+```
+matrix:
+  - domain: orders,   module: order-contracts,   path: order-contracts/**
+  - domain: customers, module: customer-contracts, path: customer-contracts/**
+```
+
+Combined with a **path-filter step**, this means:
+- If you only touch `order-contracts/`, only the `orders` matrix job runs
+- The `customers` job detects no changes and skips
+- The Orders domain CI never registers anything for the Customers domain, and vice versa
+
+This is **domain isolation**: each domain owns its registration. As the project grows,
+adding a new domain (`payment-contracts`) means adding one more matrix entry.
+
+### Setting up the `DEV_REGISTRY_URL` secret
+
+1. Go to your GitHub repo → **Settings → Secrets and variables → Actions**
+2. Click **New repository secret**
+3. Name: `DEV_REGISTRY_URL`
+4. Value: the URL of your shared dev Apicurio instance, e.g. `http://your-dev-host:8080`
+
+For local testing, you can temporarily set it to your local registry, but the intended
+setup is a shared dev registry that all developers and CI point to.
+
+### One-time bootstrap (attach BACKWARD rules)
+
+Before the compat-check workflow can do anything useful, the `BACKWARD` rule must exist
+in the registry for each domain's artifact. Run the bootstrap workflow **once** per new
+registry:
+
+1. GitHub repo → **Actions** → **Schema Governance Bootstrap** → **Run workflow**
+2. Leave the URL blank to use the `DEV_REGISTRY_URL` secret, or enter a specific URL
+3. The workflow attaches the rule and then verifies it by GETting the rules endpoint
+
+The bootstrap is **idempotent** — HTTP 409 (rule already exists) is treated as success.
+Unlike the `docker-compose schema-registrar`'s `|| true`, this workflow fails loudly on
+any other error.
+
+### Local dev vs CI — the full flow
+
+```
+Developer laptop (docker-compose)
+  1. docker compose up  ← schema-registrar bootstraps local registry
+  2. Edit .proto / .json
+  3. ./mvnw -pl <module> verify -Pcompat-check \
+       -Dapicurio.registry.url=http://localhost:8080  ← optional early check
+
+GitHub Actions (shared dev registry)
+  4. Push branch + open PR
+  5. schema-compat-check.yml runs  ← automated, blocks merge if incompatible
+  6. PR approved + merged to main
+  7. schema-register.yml runs      ← automated, new version registered in shared registry
+```
+
+**Developers never manually register against the shared registry.** This prevents
+"someone accidentally registered an incompatible schema from their laptop" incidents.
+
+### Extending to new domains
+
+To add a `payment-contracts` domain:
+1. Create the `payment-contracts` Maven module
+2. Add a matrix entry to `schema-compat-check.yml` and `schema-register.yml`:
+   ```yaml
+   - domain: payments
+     module: payment-contracts
+     changed-path: payment-contracts/**
+   ```
+3. Re-run the bootstrap workflow to attach the BACKWARD rule to the new domain's artifact
+
+No changes to any other domain's workflows or configuration.
+
+---
+
 ## Verification Checklist
 
 | Scenario | Pass Criterion |
@@ -534,6 +630,10 @@ docker compose down -v
 | `/actuator/prometheus` | All `schema_*` meters present |
 | `/actuator/health` | status UP with registry component |
 | Jaeger UI | Produce→consume spans visible, linked by traceId |
+| `schema-compat-check.yml` (PR with compatible change) | GHA job passes, merge allowed |
+| `schema-compat-check.yml` (PR with incompatible change) | GHA job fails, merge blocked |
+| `schema-register.yml` (merge to main) | New version appears in Apicurio UI; version count +1 |
+| Bootstrap workflow | Rules endpoint returns `BACKWARD` for both domain artifacts |
 
 ---
 

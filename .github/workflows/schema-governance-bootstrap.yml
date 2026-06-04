@@ -1,0 +1,69 @@
+name: Schema Governance Bootstrap
+
+# Run this ONCE per new registry environment to attach BACKWARD compatibility rules.
+# It is safe to re-run — Apicurio returns 409 if the rule already exists, which this
+# workflow treats as success.
+#
+# Runs on the SELF-HOSTED runner so it can reach the standing local registry at
+# http://localhost:8080 (the default below). The schema-registrar compose service already
+# attaches these rules on `docker compose up`; this workflow is the manual/explicit equivalent.
+#
+# Usage: Actions → Schema Governance Bootstrap → Run workflow
+#        Optionally override the registry URL via the input.
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry_url:
+        description: 'Apicurio registry URL (leave blank to use the standing local registry)'
+        required: false
+        default: ''
+
+jobs:
+  bootstrap:
+    name: Attach BACKWARD compatibility rules
+    runs-on: [self-hosted, apicurio-local]
+
+    steps:
+      - name: Resolve registry URL
+        id: url
+        run: |
+          URL="${{ github.event.inputs.registry_url }}"
+          if [ -z "$URL" ]; then
+            URL="http://localhost:8080"
+          fi
+          echo "registry_url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Attach rule — orders.events / OrderCreated
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
+            -H 'Content-Type: application/json' \
+            -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}')
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
+            echo "orders.events/OrderCreated: BACKWARD rule attached (HTTP $STATUS)"
+          else
+            echo "ERROR: unexpected HTTP $STATUS for orders.events/OrderCreated" >&2
+            exit 1
+          fi
+
+      - name: Attach rule — events.customers / CustomerRegistered
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
+            -H 'Content-Type: application/json' \
+            -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}')
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
+            echo "events.customers/CustomerRegistered: BACKWARD rule attached (HTTP $STATUS)"
+          else
+            echo "ERROR: unexpected HTTP $STATUS for events.customers/CustomerRegistered" >&2
+            exit 1
+          fi
+
+      - name: Verify rules are active
+        run: |
+          echo "=== orders.events/OrderCreated rules ==="
+          curl -sf "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" | cat
+          echo ""
+          echo "=== events.customers/CustomerRegistered rules ==="
+          curl -sf "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" | cat
