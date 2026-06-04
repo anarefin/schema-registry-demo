@@ -117,6 +117,18 @@ git push origin main
 
 Makes the compat-check a **hard gate** — no PR with an incompatible schema change can merge.
 
+> ⚠️ **Plan limitation:** branch protection *and* rulesets require **GitHub Pro/Team/Enterprise
+> for a private repo**. On the **Free** plan a private repo returns HTTP 403
+> (`Upgrade to GitHub Pro or make this repository public`) for both
+> `PUT /branches/main/protection` and `POST /rulesets`. Since this setup **must** stay private
+> (self-hosted-runner RCE risk, section 2a), section 4 is **unavailable on Free**. Until you
+> upgrade: the compat-check still runs on every PR and shows a red ✗ / green ✓, but the block is
+> **advisory** — a maintainer could still click Merge. Treat the check as the signal and don't
+> merge on red. (Making the repo public would enable the gate but reintroduces the fork-PR RCE
+> risk — not recommended while a self-hosted runner is registered.)
+
+With Pro/Team (or a public repo):
+
 1. **Settings → Branches → Add branch protection rule**
 2. Branch name pattern: `main`
 3. Check **"Require a pull request before merging"**
@@ -211,12 +223,24 @@ Open a PR against `main`.
 
 ### 6b. Watch the gate block the merge
 
-1. **Compatibility check (orders + customers)** runs and **fails**:
+1. **Compatibility check (orders + customers)** runs and **fails** with a `BUILD FAILURE`.
+   The PR Checks section shows a red X; **Merge** is greyed out (with branch protection).
+2. **Where the failure surfaces depends on the edit.** Changing field 1 from `string` to `int64`
+   regenerates the `OrderCreated` Java class (`getOrderId()` now returns `long`), so the build
+   trips at **test compilation** first — the contract's unit tests pass a `String` order id to a
+   now-`long` setter:
    ```
-   [ERROR] RuleViolationException: INCOMPATIBLE
+   [ERROR] OrderCreatedTest.java:[17,28] error: incompatible types: String cannot be converted to long
    [ERROR] BUILD FAILURE
    ```
-2. The PR Checks section shows a red X; **Merge** is greyed out (with branch protection).
+   The merge is blocked either way. To see the **registry's own** rejection (the
+   `apicurio-registry` compatibility gate) cleanly, run the `incompatible-demo` profile locally —
+   it validates a test-only `.proto` against the registry without regenerating the main class:
+   ```bash
+   ./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
+   # [ERROR] Registry rule validation failure: RuleViolationException
+   # [ERROR] Incompatible artifact: OrderCreated [PROTOBUF] ... [Field type changed ... before: string, after int64]
+   ```
 
 ### 6c. Fix and re-run
 
@@ -264,9 +288,24 @@ A self-hosted runner changes the tradeoffs versus GitHub-hosted runners:
 filter). Changing only `docs/` correctly skips it. Touch a contract file to force a run.
 
 ### Job stays queued / "Waiting for a runner"
-**Cause:** the self-hosted runner is offline. **Fix:** on the runner machine,
-`cd ~/actions-runner && ./svc.sh status` (start it with `./svc.sh start`); confirm **Idle** in
-Settings → Actions → Runners.
+**Cause 1 — runner offline:** on the runner machine, `cd ~/actions-runner && ./svc.sh status`
+(start it with `./svc.sh start`); confirm **Idle** in Settings → Actions → Runners.
+
+**Cause 2 — runner online but missing the `apicurio-local` label.** The workflows target
+`runs-on: [self-hosted, apicurio-local]`; a runner registered without that custom label will
+show **Idle/online** yet never pick up the job (the label set must be a *superset* of what the
+workflow requests). Check the labels:
+```bash
+gh api repos/<owner>/<repo>/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'
+```
+**Fix (no re-register needed)** — add the label to the existing runner via the API:
+```bash
+RUNNER_ID=$(gh api repos/<owner>/<repo>/actions/runners --jq '.runners[0].id')
+gh api -X POST repos/<owner>/<repo>/actions/runners/$RUNNER_ID/labels -f 'labels[]=apicurio-local'
+```
+GitHub re-matches queued jobs against the runner within ~1 min. (Alternatively, re-run the
+runner config with `--labels apicurio-local`, or set it in `self-hosted-runner-setup.md` so new
+runners register with it from the start.)
 
 ### Check fails with connection refused / can't reach `localhost:8080`
 **Cause:** the standing registry isn't running. **Fix:** `docker compose up -d`; wait for
