@@ -47,7 +47,7 @@ throwaway containers are involved — the registry is the one you run via `docke
 ```
 Your machine (always-on)
 ├─ docker compose ──► apicurio :8080 ── postgres (pgdata volume)        ← the ONE registry
-│                         └─ schema-registrar seeds artifacts + BACKWARD rules on `up`
+│                         └─ host `./mvnw register` + rule curls seed artifacts after `up`
 └─ self-hosted runner (apicurio-local) ── reaches → http://localhost:8080
 
 Developer                         GitHub                          self-hosted runner
@@ -227,8 +227,8 @@ turns green.
 
 ## 7. Run the bootstrap workflow
 
-Attaches the `BACKWARD` rule to both artifacts. The `schema-registrar` compose service already
-does this on `docker compose up`; run this workflow if you need to (re)apply the rules explicitly.
+Attaches the `BACKWARD` rule to both artifacts. The host cold-start step (README §2) already
+does this after `docker compose up`; run this workflow if you need to (re)apply the rules explicitly.
 
 1. **Actions → Schema Governance Bootstrap → Run workflow**
 2. Leave **registry URL** blank to use the standing local registry (`http://localhost:8080`), or
@@ -273,9 +273,9 @@ Settings → Actions → Runners.
 `apicurio` healthy; re-run the job.
 
 ### `INCOMPATIBLE` on the very first run, or "artifact not found"
-**Cause:** the registry has no baseline because the `schema-registrar` didn't seed it. **Fix:**
-check `docker compose logs schema-registrar`; confirm the two `.../rules` curls (section 3) return
-the BACKWARD rule. Re-run `docker compose up -d` to re-seed if needed.
+**Cause:** the registry has no baseline because the host cold-start step (README §2) didn't seed
+it. **Fix:** re-run `./mvnw … apicurio-registry:register` against the registry and confirm the two
+`.../rules` curls return the BACKWARD rule.
 
 ### Compile fails with a Java/toolchain error on the runner
 **Cause:** the runner machine lacks JDK 25 or `~/.m2/toolchains.xml`. **Fix:** ensure a JDK-25

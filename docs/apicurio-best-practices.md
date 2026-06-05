@@ -137,10 +137,11 @@ The goal in dev is fast iteration without teaching bad habits that don't survive
   ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check
   ```
 
-- **Use a "prod-faithful" local bootstrap.** This repo's `schema-registrar` container in
-  `docker-compose.yml` runs the exact `register` command, then attaches the BACKWARD rules over
-  REST, then exits (`restart: "no"`). That mirrors the CI/prod pipeline locally far better than
-  letting the apps auto-register, and it's the recommended local pattern.
+- **Use a "prod-faithful" local bootstrap.** After `docker compose up`, register from the host
+  with the same `register` command CI runs, then attach the BACKWARD rules over REST (the
+  contracts modules carry the `apicurio-registry-maven-plugin`, so no Maven container is needed).
+  That mirrors the CI/prod pipeline locally far better than letting the apps auto-register, and
+  it's the recommended local pattern.
 - **Keep the test split honest.** Fast, mock-based checks gate every change; registry-backed
   integration checks run on `verify`. Don't move registry calls onto the fast path.
 
@@ -227,11 +228,11 @@ correctness check and an onboarding map.
 | **Schema source of truth = committed files** (git-first; see §9) | `*-contracts/src/main/resources/schemas/*.proto` / `*.json` — codegen reads these; the registry is fed from the same files. The registry is never the codegen source. |
 | Maven plugin registers schema **content** | `order-contracts/pom.xml`, `customer-contracts/pom.xml` — `apicurio-registry-maven-plugin` `register` goal (v1 baseline + v2 backward-compatible `promo_code` addition, `ifExists=FIND_OR_CREATE_VERSION`). |
 | Maven plugin as the **compat merge gate** | `compat-check` profile in both contracts POMs — `register` with `<dryRun>true</dryRun>` bound to `verify`. `incompatible-demo` profile proves rejection. |
-| REST API configures **rules** (not content) | `docker-compose.yml` `schema-registrar` and `.github/workflows/schema-compat-check.yml` — `curl POST .../artifacts/{id}/rules` attaches the `BACKWARD` rule. |
+| REST API configures **rules** (not content) | The host cold-start step (README §2) and `.github/workflows/schema-compat-check.yml` — `curl POST .../artifacts/{id}/rules` attaches the `BACKWARD` rule. |
 | **Schemas-as-code** CI gate on PRs | `.github/workflows/schema-compat-check.yml` — self-contained Apicurio+Postgres, registers a baseline, attaches rules, runs the per-domain dry-run check. Blocks merge on INCOMPATIBLE. |
 | Registration **on merge**, not by the app | `.github/workflows/schema-register.yml` (push to `main`) → registers to the shared dev registry. |
 | One-time governance **bootstrap over REST** | `.github/workflows/schema-governance-bootstrap.yml` (`workflow_dispatch`) — attaches `BACKWARD` to each artifact in a persistent registry; HTTP 409 on re-run = already-applied = success. |
-| **Prod-faithful local** bootstrap | `docker-compose.yml` `schema-registrar` (`restart: "no"`) runs the real `register` + REST rule calls, instead of app auto-register. |
+| **Prod-faithful local** bootstrap | Host-Maven step after `docker compose up` runs the real `register` + REST rule calls, instead of app auto-register. |
 | Apps are **fetch-only** at runtime | `ApicurioClient` exposes only `fetchByGlobalId` / `fetchByCoordinates` / `latestVersion`; producer/consumer run with `auto-register=OFF`. |
 | **Version pinning** + fail-fast | `schema.{orders,customers}.pinned-version` in `application.yml`; an unregistered pinned schema fails on startup. |
 | **Auth** hook for production | `ApicurioClient` accepts a bearer-token supplier (OIDC), off by default — the seam to enable §5.5. |
@@ -423,35 +424,33 @@ actually mean, because the answer is different in CI vs. locally.
 | Context | What runs Maven | The heavy container |
 |---------|-----------------|---------------------|
 | **CI** (`.github/workflows/schema-compat-check.yml`) | **Already native** — `actions/setup-java` + `./mvnw`. *No Maven container.* | The `apicurio/apicurio-registry:3.2.0` **service** (+ `postgres:17`), started **per matrix job** (orders *and* customers) — so the registry boots **twice** per PR. |
-| **Local** (`docker-compose.yml` `schema-registrar`) | `maven:3.9-eclipse-temurin-21` (~700MB) | The Maven image itself, used only to run `register` + curl the rules. |
+| **Local** | **Already native** — host `./mvnw register` + curl, *no Maven container.* | None — the standing Apicurio service is shared, not started per-registration. |
 
 So the direct answer to "can we initiate the plugin from the project?": **in CI you already do**
-(it's `./mvnw`, not a container); **locally you can too** (drop the Maven image — see §10.2). The
-remaining CI weight is the *registry* the check needs to compare against, not Maven.
+(it's `./mvnw`, not a container); **locally you now do too** (the Maven image is gone — see §10.2).
+The remaining CI weight is the *registry* the check needs to compare against, not Maven.
 
-### 10.2 Local — reclaim the 700MB Maven image
+### 10.2 Local — registration runs on the host (no Maven image)
 
-The `schema-registrar` container exists only so `docker compose up` is one self-contained command.
-Since you already have Java 25 + `./mvnw`, you don't need a Maven image at all.
+There used to be a `schema-registrar` container so `docker compose up` was one self-contained
+command. It has been **removed**: since you already have Java 25 + `./mvnw`, registration runs on
+the host and no Maven image is pulled.
 
-- **L1 — drop the container, register from the host (recommended, simplest).** Delete the
-  `schema-registrar` service and register with the wrapper after the registry is healthy:
+- **Current approach — register from the host (simplest).** After the registry is healthy:
 
   ```bash
   ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
     -Dapicurio.registry.url=http://localhost:8080
-  # then attach the BACKWARD rules (the two curl POST .../rules calls)
+  # then attach the BACKWARD rules (the two curl POST .../rules calls — see README §2)
   ```
 
   Wrap those lines in `scripts/register-schemas.sh` for ergonomics. Zero extra image. The only
-  cost: `docker compose up` no longer self-registers — it becomes a documented second step. (The
-  compose file already lists this as the "Dev alternative.")
+  cost: `docker compose up` no longer self-registers — it's a documented second step (README §2).
 
-- **L2 — keep one-command UX with a ~10MB image.** Registration is just *POSTing schema bytes to
-  the REST API* — the Maven plugin is a convenience wrapper, not a requirement. Swap
-  `maven:3.9-eclipse-temurin-21` for a tiny `curlimages/curl` (~10MB) container that POSTs the
-  schema files and then attaches the rules. Cost: you hand-roll the v1→v2 ordering and
-  content-type that the plugin does for you.
+- **Alternative — one-command UX with a ~10MB image.** If you want `docker compose up` to register
+  again without the 700MB Maven image, add a tiny `curlimages/curl` (~10MB) container that POSTs the
+  schema files and then attaches the rules. Cost: you hand-roll the v1→v2 ordering and content-type
+  that the Maven plugin does for you.
 
 ### 10.3 CI — shrink or remove the Apicurio service (decision ladder)
 

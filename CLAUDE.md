@@ -50,9 +50,12 @@ The build uses the **committed Maven Wrapper** (`./mvnw`) — always prefer it o
 ./mvnw -pl producer-service spring-boot:run
 ./mvnw -pl consumer-service spring-boot:run
 
-# Infrastructure (Postgres, Apicurio + UI, RabbitMQ-management, schema-registrar, Prometheus, Grafana)
-docker compose up                       # cold start must reach all-healthy; schema-registrar registers
-                                        # both artifacts before the services start
+# Infrastructure (Postgres, Apicurio + UI, RabbitMQ-management)
+docker compose up                       # cold start must reach all-healthy
+# Then register schemas from the host (the contracts modules carry the apicurio-registry plugin):
+./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
+# ...and attach the BACKWARD compatibility rules via REST (register does not — see README §2):
+#   POST /apis/registry/v3/groups/{group}/artifacts/{id}/rules {"ruleType":"COMPATIBILITY","config":"BACKWARD"}
 ```
 
 Run a single test class/method with the standard Surefire/Failsafe selectors, e.g.
@@ -144,12 +147,11 @@ the merge. Producers can pin a schema version via `schema.{orders,customers}.pin
 `application.yml`; with `auto-register=OFF` an unregistered pinned schema must **fail fast on
 startup**.
 
-### Observability
+### Health checks
 
-`schema-messaging-core` registers Micrometer meters via `SchemaMessagingMetrics`. The
-`docker-compose.yml` includes Prometheus (scrapes `/actuator/prometheus` on both services) and
-Grafana (`grafana/provisioning/` has the pre-wired datasource). `QueueDepthHealthIndicator`
-(consumer) and `RegistryHealthIndicator` (core) expose Spring Boot health checks.
+`QueueDepthHealthIndicator` (consumer) and `RegistryHealthIndicator` (core) expose Spring Boot
+Actuator health checks at `/actuator/health` on both services. (The metrics/tracing stack —
+Micrometer, Prometheus, Grafana, OpenTelemetry/Jaeger — was removed from the POC.)
 
 ### DLQ demo
 

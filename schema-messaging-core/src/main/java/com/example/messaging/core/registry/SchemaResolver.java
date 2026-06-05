@@ -4,12 +4,10 @@ import com.example.messaging.core.exception.RegistryUnavailableException;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
-import com.example.messaging.core.observability.SchemaMessagingMetrics;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
-import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,7 +35,6 @@ public class SchemaResolver {
     private static final Logger log = LoggerFactory.getLogger(SchemaResolver.class);
 
     private final ApicurioClient apicurioClient;
-    private final SchemaMessagingMetrics metrics;
 
     /**
      * Primary coordinate cache: supports auto-refresh-after-write (TC-1.3, TC-1.4).
@@ -54,10 +51,8 @@ public class SchemaResolver {
     private final ConcurrentHashMap<Long, ResolvedSchema> lastKnownGoodById = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<SchemaCoordinates, ResolvedSchema> lastKnownGoodByCoords = new ConcurrentHashMap<>();
 
-    public SchemaResolver(ApicurioClient apicurioClient, ApicurioCacheProperties props,
-                          SchemaMessagingMetrics metrics) {
+    public SchemaResolver(ApicurioClient apicurioClient, ApicurioCacheProperties props) {
         this.apicurioClient = apicurioClient;
-        this.metrics = metrics;
         this.byCoordinates = buildCoordinatesCache(props);
         this.byGlobalId = Caffeine.newBuilder()
                 .maximumSize(props.maxSize())
@@ -75,20 +70,16 @@ public class SchemaResolver {
     public ResolvedSchema resolveByGlobalId(long globalId, SchemaType schemaType) {
         ResolvedSchema cached = byGlobalId.getIfPresent(globalId);
         if (cached != null) {
-            metrics.recordCacheHit();
             return cached;
         }
-        metrics.recordCacheMiss();
         return loadById(globalId, schemaType);
     }
 
     public ResolvedSchema resolveByCoordinates(SchemaCoordinates coords) {
         ResolvedSchema cached = byCoordinates.getIfPresent(coords);
         if (cached != null) {
-            metrics.recordCacheHit();
             return cached;
         }
-        metrics.recordCacheMiss();
         return byCoordinates.get(coords);
     }
 
@@ -136,14 +127,11 @@ public class SchemaResolver {
     // ---- load helpers -----------------------------------------------------
 
     private ResolvedSchema loadByCoords(SchemaCoordinates coords) {
-        Timer.Sample sample = metrics.startFetchSample();
         try {
             ResolvedSchema schema = apicurioClient.fetchByCoordinates(coords);
-            metrics.stopFetchSample(sample);
             storeInAllCaches(schema, coords);
             return schema;
         } catch (RegistryUnavailableException e) {
-            metrics.recordFetchFailure();
             ResolvedSchema stale = lastKnownGoodByCoords.get(coords);
             if (stale != null) {
                 log.warn("Registry unavailable for {}, serving last-known-good (stale)", coords, e);
@@ -155,14 +143,11 @@ public class SchemaResolver {
 
     private ResolvedSchema loadById(long globalId, SchemaType schemaType) {
         String ctx = "globalId=" + globalId;
-        Timer.Sample sample = metrics.startFetchSample();
         try {
             ResolvedSchema schema = apicurioClient.fetchByGlobalId(globalId, schemaType);
-            metrics.stopFetchSample(sample);
             storeInAllCaches(schema, null);
             return schema;
         } catch (RegistryUnavailableException e) {
-            metrics.recordFetchFailure();
             ResolvedSchema stale = lastKnownGoodById.get(globalId);
             if (stale != null) {
                 log.warn("Registry unavailable for {}, serving last-known-good (stale)", ctx, e);

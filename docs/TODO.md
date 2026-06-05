@@ -168,7 +168,7 @@ Package root: `com.example.messaging.core`. Module is `<packaging>jar</packaging
   - `EventPublisher` wrapping `RabbitTemplate` + converter.
   - `EventConsumerSupport`: failure-routing decision per exception taxonomy.
   - Done-check (**TC-1.14 U, table-driven**): each taxonomy exception → correct routing decision.
-- [x] **T-1.12 — Observability hooks**  *(✅ SchemaMessagingMetrics MeterBinder; no-op safe; wired in autoconfiguration)*
+- [x] **T-1.12 — Observability hooks**  *(✅ SchemaMessagingMetrics MeterBinder; no-op safe; wired in autoconfiguration)*  *(⚠️ removed post-POC — Micrometer metrics/tracing taken out; health checks retained)*
   - Register Micrometer meters per spec §15 against an injected `MeterRegistry`; no-op safe when
     none present. Done-check: meters created lazily without NPE in unit context.
 
@@ -322,7 +322,9 @@ correct DLQ with all headers (TC-5.7) · ✅ AC-5.3 idempotency working (TC-5.8)
   `apicurio-registry-maven-plugin:register` against the running registry then exits; services
   `depends_on` its success (default). Document dev auto-register path as the alternative.
   Done-check (**TC-6.2 M**): cold `compose up` registers schemas before services, all-healthy.
-  *(✅ `schema-registrar` service added to docker-compose.yml; dev alternative documented in README)*
+  *(✅ originally a `schema-registrar` one-shot compose service; later retired in favour of the
+  host-Maven cold-start step — `./mvnw … apicurio-registry:register` + BACKWARD rule curls,
+  documented in README §2 — since the contracts modules already carry the plugin)*
 - [x] **T-6.3** Sequence diagrams: produce, consume, evolution-rejected, validation-failed.
   *(✅ four Mermaid `sequenceDiagram` blocks in README.md)*
 - [x] **T-6.4** "What this POC proves" — map each deliverable to spec §1 goals.

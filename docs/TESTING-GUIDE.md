@@ -3,7 +3,7 @@
 ## Context
 Phases 0–6 are fully implemented. This guide walks through every testing layer in dependency order:
 build verification → unit tests → integration tests → manual end-to-end → failure topology →
-schema governance → observability. Seed data (curl payloads) is included for every manual scenario.
+schema governance → health checks. Seed data (curl payloads) is included for every manual scenario.
 
 ---
 
@@ -58,12 +58,13 @@ In practice:
 - **Allowed** — add an optional field (old messages simply don't have it; the consumer treats it as absent)
 - **Rejected** — remove a field, rename a field, or add a *required* field (old messages would fail the new contract)
 
-### Why is there a `schema-registrar` container?
+### How are schemas registered on a cold start?
 
-On a cold start Apicurio has no schemas and no rules. The `schema-registrar` Docker service is
-a one-shot Maven job that:
-1. Registers v1 and v2 of both schemas
-2. Attaches the `BACKWARD` rule to each artifact as a **standing policy**
+On a cold start Apicurio has no schemas and no rules. Registration is a **host-Maven step** (the
+contracts modules carry the `apicurio-registry-maven-plugin`), run once Apicurio is healthy:
+1. `./mvnw … apicurio-registry:register` registers v1 and v2 of both schemas
+2. A `curl` POST attaches the `BACKWARD` rule to each artifact as a **standing policy** (the
+   `register` goal does not do this) — see Step 1 below
 
 Once attached, Apicurio checks every future registration against that policy automatically —
 whether it comes from your laptop, from CI, or from a deployment pipeline.
@@ -79,7 +80,7 @@ docker compose up -d
 Wait for all services to become healthy (~60 s on first run, image pulls may add time):
 
 ```bash
-docker compose ps   # all STATUS columns should show "healthy" or "exited 0" (schema-registrar is a one-shot)
+docker compose ps   # all STATUS columns should show "healthy"
 ```
 
 **Services and their UIs:**
@@ -90,13 +91,22 @@ docker compose ps   # all STATUS columns should show "healthy" or "exited 0" (sc
 | Apicurio Registry UI | 8888 | http://localhost:8888 |
 | RabbitMQ | 5672 | — |
 | RabbitMQ Management | 15672 | http://localhost:15672 (guest/guest) |
-| Jaeger UI | 16686 | http://localhost:16686 |
 | Postgres | 5432 | — (backing store for Apicurio) |
 
-The **schema-registrar** container is a one-shot Maven job that registers both schemas and attaches
-BACKWARD compatibility rules. It exits 0 after success. If it exited non-zero, re-run with:
+Once the registry is healthy, register both schemas and attach their BACKWARD rules from the host
+(the contracts modules carry the `apicurio-registry-maven-plugin` — no separate container needed):
 ```bash
-docker compose run --rm schema-registrar
+# 1. Register both schemas (v1 + v2)
+./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+       -Dapicurio.registry.url=http://localhost:8080
+
+# 2. Attach the BACKWARD compatibility rule (register does not do this)
+for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
+  curl -s -o /dev/null -X POST \
+    "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
+    -H 'Content-Type: application/json' \
+    -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+done
 ```
 
 Verify schemas are registered via API:
@@ -169,7 +179,7 @@ Run a single targeted test to verify a specific scenario:
 This starts real RabbitMQ containers (via Testcontainers) per test class. The Apicurio client is
 mocked so no running registry is needed. Expect ~3–5 min.
 
-**6 integration test classes in consumer-service:**
+**5 integration test classes in consumer-service:**
 
 | Class | What it proves |
 |---|---|
@@ -178,7 +188,6 @@ mocked so no running registry is needed. Expect ~3–5 min.
 | `DlxRoutingIT` | All 5 failure modes → correct DLQ/retry routing, X-Failure-* headers |
 | `SchemaVersionPinningIT` | Pinned schema version appears in X-Schema-Version header |
 | `StartupSchemaValidatorIT` | auto-register=OFF + dead registry → fail-fast on startup |
-| `PrometheusMetricsIT` | /actuator/prometheus exposes all schema.* meters |
 
 Run a single integration test class:
 ```bash
@@ -394,8 +403,8 @@ This is a hands-on exercise that ties together everything you've learned. It tak
 **Step 1** — Add a new optional field to the Protobuf schema:
 ```proto
 // order-contracts/src/main/resources/schemas/order-created.proto
-// Add this line after field 8:
-optional string notes = 9;
+// Fields 8 (promo_code) and 9 (notes) already exist — add the next free field number:
+optional string gift_message = 10;
 ```
 
 **Step 2** — Check compatibility *before* registering (dryRun, safe to run):
@@ -412,7 +421,7 @@ Apicurio creates **Version 3** and assigns it a new Global ID.
 
 **Step 4** — Verify in the UI:
 Open http://localhost:8888 → `events.orders` → `OrderCreated` → you now see **3 versions**.
-Version 3 shows your new `notes` field. The Global ID for version 3 is different from versions 1 and 2.
+Version 3 shows your new `gift_message` field. The Global ID for version 3 is different from versions 1 and 2.
 
 **Step 5** — Restart the producer (picks up the new "latest" schema):
 ```bash
@@ -424,7 +433,7 @@ After restart, new messages will carry `X-Schema-GlobalId: <version-3-id>` and
 
 **Step 6** — Confirm backward compatibility is preserved:
 The consumer still processes v1 and v2 messages correctly — old messages simply don't have
-the `notes` field and it defaults to absent/empty.
+the `gift_message` field and it defaults to absent/empty.
 
 > **Key insight:** You never had to touch the consumer to add this field. That's the point of
 > BACKWARD compatibility — producers can evolve independently as long as they follow the rules.
@@ -449,26 +458,7 @@ Restart the producer and publish an order. Observe in consumer logs that `X-Sche
 
 ---
 
-## Step 11 — Observability
-
-### 11a. Metrics (Prometheus / Actuator)
-
-```bash
-curl -s http://localhost:8081/actuator/prometheus | grep "^schema_"
-curl -s http://localhost:8082/actuator/prometheus | grep "^schema_"
-```
-
-**Expected metrics (both services):**
-```
-schema_cache_hits_total
-schema_cache_misses_total
-schema_fetch_failures_total
-schema_validation_failures_total
-schema_publish_count_total
-schema_consume_count_total
-```
-
-### 11b. Health
+## Step 11 — Health checks
 
 ```bash
 curl -s http://localhost:8081/actuator/health | jq .
@@ -483,18 +473,12 @@ component will report `DOWN` — that is correct, intentional behaviour: the ind
 whenever a DLQ is non-empty. To reset before re-checking health, purge the DLQ via the RabbitMQ
 Management UI (http://localhost:15672) → Queues → `orders.created.dlq` → Purge Messages.
 
-### 11c. Distributed Tracing (Jaeger)
-
-Open http://localhost:16686 → select service `producer-service` or `consumer-service` →
-Find Traces. After publishing events (Step 6), produce→consume spans should appear with matching
-`X-Correlation-Id` / traceId linking them.
-
 ---
 
 ## Step 12 — Schema Evolution: Register v2 and Test Backward Compatibility
 
-Both schemas already have a v2 registered by the `schema-registrar` container (Protobuf v2 adds
-optional `promo_code`; JSON v2 adds optional `promoCode`). To observe backward compatibility:
+Both schemas have a v2 registered by the host-Maven step in Step 1 (Protobuf v2 adds optional
+`promo_code`; JSON v2 adds optional `promoCode`). To observe backward compatibility:
 
 ```bash
 # Publish a v1 order (no promo_code) — consumer reads it fine, promo_code is empty/absent
@@ -526,93 +510,103 @@ docker compose down -v
 
 ## Step 14 — GitHub Actions Schema Governance
 
-This step documents the CI/CD automation that replaces manual schema registration for a
-multi-domain project. The workflows live in `.github/workflows/` and complement the local
-dev workflow — they don't replace it.
+This step documents the CI/CD automation that replaces manual schema registration. The
+workflows live in `.github/workflows/` and complement the local dev workflow — they don't
+replace it.
+
+> **Deep dives:** [`docs/self-hosted-runner-setup.md`](./self-hosted-runner-setup.md) is the
+> runner/registry install runbook (do that first); [`docs/github_ci_steps.md`](./github_ci_steps.md)
+> walks through wiring up and testing the workflows on GitHub. This step is the testing-guide
+> summary.
+
+### The runner model (self-hosted, standing local registry)
+
+These workflows run on a **self-hosted runner** that shares a machine with the standing
+local Apicurio registry, reachable at `http://localhost:8080`:
+
+```
+Your machine (always-on)
+├─ docker compose ──► apicurio :8080 ── postgres (pgdata volume, persistent)
+│                         └─ host `./mvnw register` + rule curls seed both artifacts after `up`
+└─ self-hosted GitHub runner (label: apicurio-local) ──reaches──► http://localhost:8080
+```
+
+**Why self-hosted, not GitHub-hosted?** The registry runs as containers on your machine,
+which is behind NAT and unreachable from GitHub's cloud runners. A self-hosted runner on the
+same machine reaches the registry over `localhost`. All three workflows target
+`runs-on: [self-hosted, apicurio-local]` — there is **no `DEV_REGISTRY_URL` secret**; the URL
+is hardcoded to `http://localhost:8080` in each workflow's `env`.
 
 ### The three workflows at a glance
 
-| Workflow file | Trigger | What it does |
-|---|---|---|
-| `schema-compat-check.yml` | Every PR that touches `order-contracts/**` or `customer-contracts/**` | Runs `verify -Pcompat-check` against the shared dev registry. Blocks merge if INCOMPATIBLE. Read-only. |
-| `schema-register.yml` | Push to `main` for the same paths | Runs `apicurio-registry:register` against the shared dev registry. Creates a new version only if the schema bytes changed. |
-| `schema-governance-bootstrap.yml` | Manual (`workflow_dispatch`) | One-time setup — attaches the `BACKWARD` rule to each domain's artifact. Run once per new registry. |
+| Workflow file | Trigger | Access | What it does |
+|---|---|---|---|
+| `schema-compat-check.yml` | PR touching `order-contracts/**` or `customer-contracts/**` | **read-only** (dry-run) | Runs `verify -Pcompat-check` for **both** modules against the registry's real history. Blocks merge if INCOMPATIBLE. Writes nothing. |
+| `schema-register.yml` | Push to `main` for the same paths | **write** | Runs `apicurio-registry:register` for both modules. Idempotent (`FIND_OR_CREATE_VERSION`) — a new version is created only if the schema bytes changed. |
+| `schema-governance-bootstrap.yml` | Manual (`workflow_dispatch`) | **write** | Attaches the `BACKWARD` rule to each artifact via the REST API. Run once per new registry. |
 
-### Why matrix jobs? (Domain isolation)
+> **Key property:** PRs only *read* (dry-run); only merges (and the manual bootstrap) *write*.
+> Opening or updating a PR can never mutate the standing registry.
 
-Both `schema-compat-check.yml` and `schema-register.yml` use a **matrix strategy** with
-one entry per domain:
-
-```
-matrix:
-  - domain: orders,   module: order-contracts,   path: order-contracts/**
-  - domain: customers, module: customer-contracts, path: customer-contracts/**
-```
-
-Combined with a **path-filter step**, this means:
-- If you only touch `order-contracts/`, only the `orders` matrix job runs
-- The `customers` job detects no changes and skips
-- The Orders domain CI never registers anything for the Customers domain, and vice versa
-
-This is **domain isolation**: each domain owns its registration. As the project grows,
-adding a new domain (`payment-contracts`) means adding one more matrix entry.
-
-### Setting up the `DEV_REGISTRY_URL` secret
-
-1. Go to your GitHub repo → **Settings → Secrets and variables → Actions**
-2. Click **New repository secret**
-3. Name: `DEV_REGISTRY_URL`
-4. Value: the URL of your shared dev Apicurio instance, e.g. `http://your-dev-host:8080`
-
-For local testing, you can temporarily set it to your local registry, but the intended
-setup is a shared dev registry that all developers and CI point to.
+> **Note — both modules run every time.** Unlike a multi-domain matrix with path filters, these
+> workflows simply run `-pl order-contracts,customer-contracts` together. `compat-check` is a safe
+> no-op for an unchanged module, and `register` is idempotent, so running both is correct and keeps
+> the workflows simple. Adding a `payment-contracts` domain means appending it to the `-pl` list in
+> both workflows and re-running the bootstrap (extended to the new artifact).
 
 ### One-time bootstrap (attach BACKWARD rules)
 
-Before the compat-check workflow can do anything useful, the `BACKWARD` rule must exist
-in the registry for each domain's artifact. Run the bootstrap workflow **once** per new
-registry:
+The host-Maven cold-start step (Step 1) attaches the rules via `curl`. The bootstrap workflow is
+the manual/explicit equivalent for a fresh registry that wasn't seeded that way:
 
 1. GitHub repo → **Actions** → **Schema Governance Bootstrap** → **Run workflow**
-2. Leave the URL blank to use the `DEV_REGISTRY_URL` secret, or enter a specific URL
+2. Leave the URL input blank to use the standing local registry (`http://localhost:8080`),
+   or enter a specific URL
 3. The workflow attaches the rule and then verifies it by GETting the rules endpoint
 
 The bootstrap is **idempotent** — HTTP 409 (rule already exists) is treated as success.
-Unlike the `docker-compose schema-registrar`'s `|| true`, this workflow fails loudly on
-any other error.
+Unlike the cold-start `curl` step, this workflow fails loudly on any other HTTP error.
 
 ### Local dev vs CI — the full flow
 
 ```
 Developer laptop (docker-compose)
-  1. docker compose up  ← schema-registrar bootstraps local registry
+  1. docker compose up -d  ← then `./mvnw register` + rule curls bootstrap the standing local registry
   2. Edit .proto / .json
   3. ./mvnw -pl <module> verify -Pcompat-check \
        -Dapicurio.registry.url=http://localhost:8080  ← optional early check
 
-GitHub Actions (shared dev registry)
+GitHub Actions (self-hosted runner, same registry at localhost:8080)
   4. Push branch + open PR
-  5. schema-compat-check.yml runs  ← automated, blocks merge if incompatible
+  5. schema-compat-check.yml runs  ← automated dry-run, blocks merge if incompatible
   6. PR approved + merged to main
-  7. schema-register.yml runs      ← automated, new version registered in shared registry
+  7. schema-register.yml runs      ← automated, registers the new version
 ```
 
-**Developers never manually register against the shared registry.** This prevents
-"someone accidentally registered an incompatible schema from their laptop" incidents.
+**Availability = your machine.** PR checks and registration run only when the machine, Docker
+Desktop, and the runner service are all up. If the machine is off, jobs **queue** until it's
+back — they don't fail.
 
-### Extending to new domains
+> **Security:** keep the repo **private** while a self-hosted runner is registered — a
+> self-hosted runner on a public repo lets a fork PR run arbitrary code on your machine. See
+> `self-hosted-runner-setup.md` §3.
 
-To add a `payment-contracts` domain:
-1. Create the `payment-contracts` Maven module
-2. Add a matrix entry to `schema-compat-check.yml` and `schema-register.yml`:
-   ```yaml
-   - domain: payments
-     module: payment-contracts
-     changed-path: payment-contracts/**
-   ```
-3. Re-run the bootstrap workflow to attach the BACKWARD rule to the new domain's artifact
+### Verify the CI loop end to end
 
-No changes to any other domain's workflows or configuration.
+```bash
+# Confirm the runner is registered and idle, and inspect recent runs:
+gh run list -L 5
+
+# Re-run the compat-check for an open PR (read-only, safe):
+gh run rerun <run-id>
+
+# Watch a run to completion:
+gh run view <run-id>
+```
+
+A **compatible** PR (e.g. adding `optional string notes = 9;` to the proto) passes the
+compat-check; an **incompatible** one (e.g. `string order_id` → `int64 order_id`) fails it with
+a `RuleViolationException: INCOMPATIBLE` and — under branch protection — blocks the merge.
 
 ---
 
@@ -621,15 +615,13 @@ No changes to any other domain's workflows or configuration.
 | Scenario | Pass Criterion |
 |---|---|
 | `./mvnw test` | Zero failures, all 48+ unit tests green |
-| `./mvnw verify` | All 6 IT classes green (OrderCreatedIT, CustomerRegisteredIT, DlxRoutingIT, etc.) |
+| `./mvnw verify` | All 5 IT classes green (OrderCreatedIT, CustomerRegisteredIT, DlxRoutingIT, etc.) |
 | POST /api/orders (valid) | HTTP 201, consumer logs receipt, queue depth returns to 0 |
 | POST /api/orders (invalid) | HTTP 400, no message emitted |
 | POST /api/orders/poison | HTTP 202, message lands in `orders.created.dlq` immediately (X-Failure-Retry-Count: 0) |
 | `verify -Pcompat-check` (compatible) | Maven goal succeeds |
 | `verify -Pincompatible-demo` | Maven goal FAILS with INCOMPATIBLE error |
-| `/actuator/prometheus` | All `schema_*` meters present |
 | `/actuator/health` | status UP with registry component |
-| Jaeger UI | Produce→consume spans visible, linked by traceId |
 | `schema-compat-check.yml` (PR with compatible change) | GHA job passes, merge allowed |
 | `schema-compat-check.yml` (PR with incompatible change) | GHA job fails, merge blocked |
 | `schema-register.yml` (merge to main) | New version appears in Apicurio UI; version count +1 |

@@ -22,9 +22,8 @@
 9. [Schema resolution and caching](#9-schema-resolution-and-caching)
 10. [Schema governance: stopping bad changes before they merge](#10-schema-governance-stopping-bad-changes-before-they-merge)
 11. [When things go wrong: the failure topology](#11-when-things-go-wrong-the-failure-topology)
-12. [Observability: how we watch the system](#12-observability-how-we-watch-the-system)
-13. [How to run it yourself](#13-how-to-run-it-yourself)
-14. [Glossary recap](#14-glossary-recap)
+12. [How to run it yourself](#12-how-to-run-it-yourself)
+13. [Glossary recap](#13-glossary-recap)
 
 ---
 
@@ -115,8 +114,7 @@ door.
 | **RabbitMQ 3.13** | Message broker (transport). | 5672 (AMQP), 15672 (UI) | Moves bytes; knows nothing about schemas. |
 | **Producer service** | REST API that publishes events. | 8081 | Spring Boot app. |
 | **Consumer service** | Listens for events and processes them. | 8082 | Spring Boot app. |
-| **schema-registrar** | One-shot container that registers both schemas on startup. | — | Exits after registering. |
-| **Prometheus / Grafana / Jaeger** | Metrics + dashboards + distributed tracing. | 9090 / 3000 / 16686 | Observability. |
+| **Schema registration** | Host-Maven step (`apicurio-registry:register` + rule curls), not a compose service. | — | Run after the registry is healthy. |
 
 A subtle but important point: **RabbitMQ does not understand schemas.** It just moves bytes.
 All the schema intelligence lives in the application code (the `schema-messaging-core` library)
@@ -152,7 +150,7 @@ graph TD
 
 | Module | What it is | Depends on |
 |--------|-----------|-----------|
-| `schema-messaging-core` | The reusable plumbing: schema resolution, caching, serialization strategies, the message converter, failure routing, metrics. **Knows nothing about orders or customers.** | Spring AMQP, Apicurio SDK, Caffeine, Micrometer |
+| `schema-messaging-core` | The reusable plumbing: schema resolution, caching, serialization strategies, the message converter, failure routing. **Knows nothing about orders or customers.** | Spring AMQP, Apicurio SDK, Caffeine |
 | `order-contracts` | The `OrderCreated` **Protobuf** schema and its generated Java classes. | `protobuf-java` only |
 | `customer-contracts` | The `CustomerRegistered` **JSON Schema** and its generated POJOs. | Jackson only |
 | `producer-service` | A Spring Boot app exposing REST endpoints that publish events. | core + both contracts |
@@ -309,7 +307,7 @@ graph TB
 | `X-Schema-GroupId` / `X-Schema-ArtifactId` / `X-Schema-Version` | The schema's "coordinates" — its address in the registry. |
 | `X-Schema-Type` | `PROTOBUF` or `JSON` — tells the consumer which deserializer to use. |
 | `X-Message-Id` | Unique per message; used for deduplication. |
-| `X-Correlation-Id` | Links related messages/traces together (the OpenTelemetry trace ID, if present). |
+| `X-Correlation-Id` | Links related messages together (a random UUID assigned at publish time when not already set). |
 | `content-type` | `application/x-protobuf` or `application/json`. |
 
 > **Why keep identity in headers instead of the body?** It keeps the body a clean, standard
@@ -475,10 +473,11 @@ The maven plugin uses `FIND_OR_CREATE_VERSION` as its conflict strategy. This me
 re-register the exact same schema bytes, Apicurio returns the existing version rather than
 creating a duplicate. Only genuinely different bytes produce a new version number.
 
-### How the schema-registrar wires up compatibility rules
+### How the cold-start step wires up compatibility rules
 
-The `schema-registrar` Docker service is a one-shot Maven container that runs at cold start
-and does three things before exiting:
+Schema registration is a host-Maven step (the contracts modules carry the
+`apicurio-registry-maven-plugin` — no separate container needed). Run once the registry is
+healthy, it does three things:
 
 1. Registers v1 and v2 of both schemas (`apicurio-registry:register` on both contracts modules)
 2. POSTs a `BACKWARD` compatibility rule to `events.orders/OrderCreated`
@@ -491,14 +490,13 @@ be re-applied on restart because they are persisted in Postgres alongside the sc
 
 ```mermaid
 sequenceDiagram
-    participant SR as schema-registrar (one-shot)
+    participant DEV as Host (./mvnw + curl)
     participant AP as Apicurio Registry
 
-    SR->>AP: register OrderCreated v1 + v2
-    SR->>AP: register CustomerRegistered v1 + v2
-    SR->>AP: POST /groups/events.orders/artifacts/OrderCreated/rules {BACKWARD}
-    SR->>AP: POST /groups/events.customers/artifacts/CustomerRegistered/rules {BACKWARD}
-    SR-->>SR: exit 0
+    DEV->>AP: register OrderCreated v1 + v2
+    DEV->>AP: register CustomerRegistered v1 + v2
+    DEV->>AP: POST /groups/events.orders/artifacts/OrderCreated/rules {BACKWARD}
+    DEV->>AP: POST /groups/events.customers/artifacts/CustomerRegistered/rules {BACKWARD}
     Note over AP: BACKWARD rule now enforced on every future registration
 ```
 
@@ -580,32 +578,7 @@ Every message landing on a DLQ carries a full set of `X-Failure-*` headers so yo
 
 ---
 
-## 12. Observability: how we watch the system
-
-A system you can't observe is a system you can't operate. Three tools provide visibility:
-
-```mermaid
-graph LR
-    PS["Producer :8081"] -- "/actuator/prometheus" --> Prom["Prometheus :9090"]
-    CS["Consumer :8082"] -- "/actuator/prometheus" --> Prom
-    Prom --> Graf["Grafana :3000<br/>(dashboards)"]
-    PS -- "OTLP traces" --> Jae["Jaeger :16686"]
-    CS -- "OTLP traces" --> Jae
-```
-
-- **Metrics (Prometheus + Grafana):** `SchemaMessagingMetrics` records counters and timers —
-  messages published/consumed, validation failures, cache hits/misses, registry fetch latency.
-  Prometheus scrapes these from each service's `/actuator/prometheus` endpoint; Grafana
-  visualizes them (the Prometheus datasource is auto-provisioned, so no manual setup).
-- **Tracing (Jaeger):** services emit OpenTelemetry traces. The `X-Correlation-Id` header
-  carries the trace ID across the message boundary, so you can follow one logical operation from
-  producer to consumer in the Jaeger UI.
-- **Health checks (Spring Boot Actuator):** `RegistryHealthIndicator` reports whether Apicurio
-  is reachable; `QueueDepthHealthIndicator` reports queue backlog on the consumer.
-
----
-
-## 13. How to run it yourself
+## 12. How to run it yourself
 
 > Requires Docker, and a JDK-25 toolchain entry in `~/.m2/toolchains.xml` for compiling.
 > Always use the committed Maven wrapper `./mvnw`, not a system `mvn`.
@@ -614,9 +587,17 @@ graph LR
 ```bash
 docker compose up
 ```
-This brings up Postgres, Apicurio (+ UI), RabbitMQ, Prometheus, Grafana, and Jaeger. The
-one-shot `schema-registrar` container registers both schemas and applies the BACKWARD rule,
-then exits.
+This brings up Postgres, Apicurio (+ UI), and RabbitMQ. Once the
+registry is healthy, register both schemas and apply the BACKWARD rule from the host:
+```bash
+./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+       -Dapicurio.registry.url=http://localhost:8080
+for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
+  curl -s -o /dev/null -X POST \
+    "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
+    -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+done
+```
 
 **Step 1.5 — browse the Apicurio UI to see the registered schemas:**
 
@@ -664,8 +645,7 @@ curl -X POST http://localhost:8081/api/orders/poison
 |-----|----------------|
 | http://localhost:8888 | Apicurio Registry UI — browse groups, artifacts, versions, compatibility rules, and raw schema content |
 | http://localhost:15672 | RabbitMQ management (guest/guest) — queue depths, bindings, DLQ message inspection |
-| http://localhost:3000 | Grafana (admin/admin) — pre-wired Prometheus datasource; `schema_*` metrics dashboards |
-| http://localhost:16686 | Jaeger tracing UI — produce→consume spans linked by `X-Correlation-Id` |
+| http://localhost:8081/actuator/health, :8082/actuator/health | Spring Boot health checks (registry connectivity, queue/DLQ depth) |
 
 > **Testing note:** the test split is load-bearing. `*Test.java` files run under Surefire on
 > `mvn test` and must stay fast and mock-based. `*IT.java` files run under Failsafe on
@@ -674,7 +654,7 @@ curl -X POST http://localhost:8081/api/orders/poison
 
 ---
 
-## 14. Glossary recap
+## 13. Glossary recap
 
 - **Schema** — the strict shape of a message.
 - **Schema Registry (Apicurio)** — the central store and authority for schemas.
@@ -698,5 +678,4 @@ curl -X POST http://localhost:8081/api/orders/poison
 > This project proves that you can put a **schema contract** between two services, enforce it at
 > **publish time** (bad data never ships), keep it fast and resilient with a **cache**, block
 > breaking changes at **merge time** with a compatibility gate, and handle the messages that
-> still fail with a disciplined **retry/DLQ** topology — all while watching the whole thing
-> through metrics and traces.
+> still fail with a disciplined **retry/DLQ** topology.

@@ -70,91 +70,13 @@ services:
       timeout: 5s
       retries: 20
 
-  # T-7.2: Prod-faithful schema registration — runs apicurio-registry:register for both
-  # contracts then exits. Starts after Apicurio is healthy; no retry (restart: "no").
-  # Dev alternative: ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register
-  #                  -Dapicurio.registry.url=http://localhost:8080
-  schema-registrar:
-    image: maven:3.9-eclipse-temurin-21
-    depends_on:
-      apicurio:
-        condition: service_healthy
-    volumes:
-      - .:/workspace:ro
-      - ${HOME}/.m2:/root/.m2
-    working_dir: /workspace
-    command:
-      - sh
-      - -c
-      - |
-        mvn -f /workspace/pom.xml \
-          -pl order-contracts,customer-contracts \
-          apicurio-registry:register \
-          -Dapicurio.registry.url=http://apicurio:8080 \
-          --no-transfer-progress && \
-        curl -s -o /dev/null -X POST \
-          http://apicurio:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules \
-          -H 'Content-Type: application/json' \
-          -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}' || true && \
-        curl -s -o /dev/null -X POST \
-          http://apicurio:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules \
-          -H 'Content-Type: application/json' \
-          -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}' || true
-    restart: "no"
-
-  # T-6.3: Jaeger all-in-one — receives OTLP traces (HTTP :4318, gRPC :4317); UI on :16686.
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "16686:16686" # Jaeger UI
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:14269/ || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  # T-6.2: Prometheus — scrapes /actuator/prometheus from both services running on the host.
-  # extra_hosts maps host.docker.internal → host gateway on Linux (no-op on Mac/Windows Docker Desktop).
-  # Start services first: ./mvnw -pl producer-service spring-boot:run  (port 8081)
-  #                        ./mvnw -pl consumer-service spring-boot:run  (port 8082)
-  prometheus:
-    image: prom/prometheus:v3.0.0
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  # T-6.2: Grafana — visualization layer for Prometheus metrics; Prometheus datasource
-  # auto-provisioned from grafana/provisioning/datasources/prometheus.yaml (no manual setup).
-  # UI: http://localhost:3000  (admin / admin)
-  grafana:
-    image: grafana/grafana:11.4.0
-    depends_on:
-      prometheus:
-        condition: service_healthy
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+  # Schema registration is a host-Maven step (not a compose service): once Apicurio is healthy,
+  # register both contracts and attach their BACKWARD rules from the host —
+  #   ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+  #          -Dapicurio.registry.url=http://localhost:8080
+  # then POST the COMPATIBILITY/BACKWARD rules (see README §2) or run the
+  # "Schema Governance Bootstrap" GitHub workflow. The contracts modules already carry the
+  # apicurio-registry-maven-plugin, so no separate Maven container is needed.
 
 # Named volume backing the standing Apicurio registry's Postgres data. Survives
 # `docker compose restart`/recreate; removed only on `docker compose down -v`.
