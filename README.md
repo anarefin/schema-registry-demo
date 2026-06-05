@@ -18,7 +18,6 @@ DLX/DLQ/retry failure topology.
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
 | Registry down → cached processing, new messages fail gracefully | `SchemaResolver` last-known-good |
 | `auto-register=OFF` + unregistered schema → fail to start | `StartupSchemaValidator` |
-| `/actuator/prometheus` exposes all §15 metrics | Both service endpoints |
 | README walkthrough on fresh clone in under 15 min | This file |
 
 ---
@@ -60,24 +59,27 @@ Starts (in dependency order, all with health checks):
 | `apicurio` | 8080 | Registry API |
 | `apicurio-ui` | 8888 | Registry UI |
 | `rabbitmq` | 5672 / 15672 | AMQP + management UI |
-| `jaeger` | 4317/4318/16686 | OTLP receiver + tracing UI |
-| `prometheus` | 9090 | Scrapes `/actuator/prometheus` from both services |
-| `schema-registrar` | — | One-shot: registers both schemas then exits |
 
-`schema-registrar` is the **prod-faithful registration path** (T-7.2): it runs
-`apicurio-registry:register` against the live registry and exits with code 0 on success.
-Wait until it exits before starting the services:
+Schema registration is **not** a compose service — it's a host-Maven step. The contracts modules
+already carry the `apicurio-registry-maven-plugin`, so once Apicurio is healthy you register both
+schemas and attach their `BACKWARD` rules directly from the host:
 
 ```bash
-docker compose logs -f schema-registrar   # watch until "BUILD SUCCESS"
-```
-
-**Dev alternative** (skip the Docker registrar, register directly from host):
-
-```bash
+# 1. Register both schemas (v1 + v2)
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
+
+# 2. Attach the BACKWARD compatibility rule (register does not do this)
+for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
+  curl -s -o /dev/null -X POST \
+    "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
+    -H 'Content-Type: application/json' \
+    -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+done
 ```
+
+Step 2 can also be run via the **Schema Governance Bootstrap** GitHub workflow
+(`.github/workflows/schema-governance-bootstrap.yml`).
 
 ### 3. Start the services
 
@@ -166,10 +168,6 @@ Same CI gate for customers:
 |---|---|---|
 | Apicurio Registry UI | http://localhost:8888 | none |
 | RabbitMQ management | http://localhost:15672 | guest / guest |
-| Jaeger tracing | http://localhost:16686 | none |
-| Prometheus | http://localhost:9090 | none |
-| Producer metrics | http://localhost:8081/actuator/prometheus | none |
-| Consumer metrics | http://localhost:8082/actuator/prometheus | none |
 | Producer health | http://localhost:8081/actuator/health | none |
 | Consumer health | http://localhost:8082/actuator/health | none |
 
@@ -280,7 +278,7 @@ They are not appropriate for production use as-is.
 | Single-instance Apicurio Registry (no HA) | Simplifies compose topology | Multi-node Apicurio behind a load balancer, connection pooling |
 | Cache TTL vs evolution latency | 300 s `refresh-after-write` means producers see new schemas within 5 min | Tune or use event-driven cache invalidation (registry webhooks) |
 | OIDC disabled by default | No Keycloak setup needed for the demo | Enable via `RegistryClientOptions.oauth2(...)` in `SchemaMessagingAutoConfiguration` — see Javadoc for Keycloak token-url pattern |
-| `schema-registrar` Docker service mounts `~/.m2` from the host | Avoids cold Maven download in the container | CI: run `apicurio-registry:register` as a dedicated Maven step with a populated cache layer |
+| Schema registration is a manual host-Maven step after `docker compose up` | Keeps the build single-source (no second Maven toolchain in a container) | CI: run `apicurio-registry:register` + rule attachment as a dedicated post-deploy Maven step with a populated cache layer |
 | `apicurio.auto-register=ON` (default) | Services start without pre-registered schemas | Set `OFF` in production; `StartupSchemaValidator` then fails fast if a pinned schema is missing |
 
 ---

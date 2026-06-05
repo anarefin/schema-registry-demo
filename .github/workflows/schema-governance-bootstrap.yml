@@ -5,8 +5,8 @@ name: Schema Governance Bootstrap
 # workflow treats as success.
 #
 # Runs on the SELF-HOSTED runner so it can reach the standing local registry at
-# http://localhost:8080 (the default below). The schema-registrar compose service already
-# attaches these rules on `docker compose up`; this workflow is the manual/explicit equivalent.
+# http://localhost:8080 (the default below). The host cold-start step (README §2) already
+# attaches these rules after `docker compose up`; this workflow is the manual/explicit equivalent.
 #
 # Usage: Actions → Schema Governance Bootstrap → Run workflow
 #        Optionally override the registry URL via the input.

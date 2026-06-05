@@ -7,8 +7,8 @@ name: Schema Compatibility Check
 # PR schema against the registry's real registered history without writing anything.
 #
 # Prereqs (see docs/self-hosted-runner-setup.md):
-#   - `docker compose up -d` is running on the runner host (registry healthy; the schema-registrar
-#     service has seeded both artifacts + their BACKWARD rules).
+#   - `docker compose up -d` is running on the runner host (registry healthy; the host cold-start
+#     step in README §2 has seeded both artifacts + their BACKWARD rules).
 #   - the runner is labelled `apicurio-local` and has JDK 25 + ~/.m2/toolchains.xml.
 
 on:

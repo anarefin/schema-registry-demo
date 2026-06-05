@@ -27,27 +27,16 @@ schema:
 server:
   port: 8082
 
-# T-6.2: Actuator — expose health + prometheus endpoints
+# T-6.5: Actuator — expose health endpoints
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus
+        include: health,info
   endpoint:
     health:
       show-details: always
       show-components: always
-  prometheus:
-    metrics:
-      export:
-        enabled: true
-  # T-6.3: OTel OTLP tracing
-  tracing:
-    sampling:
-      probability: 1.0
-  otlp:
-    tracing:
-      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
 
 ---
 # T-6.4: Structured JSON logging for prod profile (Spring Boot 4.0 native)

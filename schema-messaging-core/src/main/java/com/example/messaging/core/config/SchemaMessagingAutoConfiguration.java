@@ -6,7 +6,6 @@ import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.health.RegistryHealthIndicator;
 import com.example.messaging.core.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
-import com.example.messaging.core.observability.SchemaMessagingMetrics;
 import com.example.messaging.core.publisher.EventPublisher;
 import com.example.messaging.core.registry.ApicurioClient;
 import com.example.messaging.core.registry.ApicurioCacheProperties;
@@ -69,9 +68,8 @@ public class SchemaMessagingAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public SchemaResolver schemaResolver(ApicurioClient apicurioClient, ApicurioCacheProperties props,
-                                         SchemaMessagingMetrics metrics) {
-        return new SchemaResolver(apicurioClient, props, metrics);
+    public SchemaResolver schemaResolver(ApicurioClient apicurioClient, ApicurioCacheProperties props) {
+        return new SchemaResolver(apicurioClient, props);
     }
 
     @Bean
@@ -110,9 +108,8 @@ public class SchemaMessagingAutoConfiguration {
     public SchemaAwareMessageConverter schemaAwareMessageConverter(
             TypeMappingRegistry typeMappingRegistry,
             SchemaResolver schemaResolver,
-            List<SerializationStrategy> strategies,
-            SchemaMessagingMetrics metrics) {
-        return new SchemaAwareMessageConverter(typeMappingRegistry, schemaResolver, strategies, metrics);
+            List<SerializationStrategy> strategies) {
+        return new SchemaAwareMessageConverter(typeMappingRegistry, schemaResolver, strategies);
     }
 
     @Bean
@@ -140,12 +137,6 @@ public class SchemaMessagingAutoConfiguration {
     @ConditionalOnMissingBean
     public CachePreWarmer cachePreWarmer(SchemaResolver schemaResolver, TypeMappingRegistry typeMappingRegistry) {
         return new CachePreWarmer(schemaResolver, typeMappingRegistry);
-    }
-
-    @Bean
-    @ConditionalOnMissingBean
-    public SchemaMessagingMetrics schemaMessagingMetrics() {
-        return new SchemaMessagingMetrics();
     }
 
     // T-6.5: Registry health indicator — only registered when spring-boot-actuator is on classpath.

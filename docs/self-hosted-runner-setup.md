@@ -15,7 +15,7 @@
 ```
 Your machine (always-on)
 ├─ docker compose ──► apicurio :8080 ── postgres (pgdata volume, persistent)   ← the ONE registry
-│                         └─ schema-registrar seeds both artifacts + BACKWARD rules on `up`
+│                         └─ host `./mvnw register` + rule curls seed both artifacts after `up`
 ├─ self-hosted GitHub runner  (label: apicurio-local)  ──reaches──► http://localhost:8080
 └─ local dev ── ./mvnw ... -Dapicurio.registry.url=http://localhost:8080
 ```
@@ -43,8 +43,19 @@ The three workflows now run on `[self-hosted, apicurio-local]`:
    docker compose up -d
    ```
 
-   Wait for the `schema-registrar` service to finish (it registers both artifacts and attaches
-   the BACKWARD rules, then exits). Verify:
+   Once `apicurio` is healthy, register both artifacts and attach the BACKWARD rules from the host:
+
+   ```bash
+   ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+          -Dapicurio.registry.url=http://localhost:8080
+   for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
+     curl -s -o /dev/null -X POST \
+       "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
+       -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+   done
+   ```
+
+   Verify:
 
    ```bash
    # both should return a JSON array containing a COMPATIBILITY / BACKWARD rule

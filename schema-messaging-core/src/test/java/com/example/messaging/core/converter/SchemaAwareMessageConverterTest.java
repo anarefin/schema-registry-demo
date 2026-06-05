@@ -4,7 +4,6 @@ import com.example.messaging.core.exception.IncompatibleSchemaTypeException;
 import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
-import com.example.messaging.core.observability.SchemaMessagingMetrics;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
@@ -23,7 +22,6 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -55,7 +53,7 @@ class SchemaAwareMessageConverterTest {
         TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.PROTOBUF, "orders.created");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
 
-        converter = new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy), new SchemaMessagingMetrics());
+        converter = new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy));
     }
 
     /** TC-1.9: object → message → object round-trip produces equal payload. */
@@ -153,7 +151,7 @@ class SchemaAwareMessageConverterTest {
 
         // Only PROTOBUF strategy provided — JSON mapping has no matching strategy
         assertThatThrownBy(() ->
-                new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy), new SchemaMessagingMetrics()))
+                new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("SchemaType.JSON");
     }

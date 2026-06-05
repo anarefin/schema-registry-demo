@@ -360,6 +360,11 @@ poc-parent/                         (parent pom.xml)
 
 ## Phase 6 — Observability & Hardening
 
+> **Post-POC update:** the metrics/tracing stack (Micrometer, Prometheus, Grafana,
+> OpenTelemetry/Jaeger — tasks T-6.1/T-6.2/T-6.3/T-6.8 and TC-6.1/TC-6.2/TC-6.3/AC-6.1/AC-6.2)
+> was **removed** from the project. Spring Boot Actuator **health checks** (T-6.5) and the
+> structured-logging / fail-fast / OIDC items remain. This section is kept as historical record.
+
 **Objective:** metrics, tracing, structured logging; document security enablement.
 
 ### Tasks

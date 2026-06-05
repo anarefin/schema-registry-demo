@@ -4,7 +4,6 @@ import com.example.messaging.core.exception.RegistryUnavailableException;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
-import com.example.messaging.core.observability.SchemaMessagingMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,7 +15,6 @@ import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -41,7 +39,7 @@ class SchemaResolverTest {
     void setUp() {
         // Short TTL for expiry test; generous refresh window so no auto-refresh during hit/miss tests
         cacheProps = new ApicurioCacheProperties(100, Duration.ofSeconds(30), Duration.ofSeconds(20));
-        schemaResolver = new SchemaResolver(apicurioClient, cacheProps, new SchemaMessagingMetrics());
+        schemaResolver = new SchemaResolver(apicurioClient, cacheProps);
     }
 
     /** TC-1.1: second call for same coordinates must NOT invoke ApicurioClient again. */
@@ -87,7 +85,7 @@ class SchemaResolverTest {
     void cacheExpiry_afterTtl_refetches() throws InterruptedException {
         ApicurioCacheProperties shortTtl =
                 new ApicurioCacheProperties(100, Duration.ofMillis(50), Duration.ofMillis(40));
-        SchemaResolver resolver = new SchemaResolver(apicurioClient, shortTtl, new SchemaMessagingMetrics());
+        SchemaResolver resolver = new SchemaResolver(apicurioClient, shortTtl);
         when(apicurioClient.fetchByCoordinates(any())).thenReturn(SCHEMA);
 
         resolver.resolveByCoordinates(COORDS);
@@ -107,7 +105,7 @@ class SchemaResolverTest {
     void refreshAfterWrite_backgroundRefreshDoesNotBlockCaller() throws InterruptedException {
         ApicurioCacheProperties shortRefresh =
                 new ApicurioCacheProperties(100, Duration.ofSeconds(30), Duration.ofMillis(30));
-        SchemaResolver resolver = new SchemaResolver(apicurioClient, shortRefresh, new SchemaMessagingMetrics());
+        SchemaResolver resolver = new SchemaResolver(apicurioClient, shortRefresh);
         ResolvedSchema v2 = new ResolvedSchema(42L, SchemaType.PROTOBUF, "v2".getBytes());
 
         when(apicurioClient.fetchByCoordinates(any()))
@@ -159,7 +157,7 @@ class SchemaResolverTest {
     void registryDown_withCachedSchema_returnsStale() throws InterruptedException {
         ApicurioCacheProperties shortTtl =
                 new ApicurioCacheProperties(100, Duration.ofMillis(50), Duration.ofMillis(40));
-        SchemaResolver resolver = new SchemaResolver(apicurioClient, shortTtl, new SchemaMessagingMetrics());
+        SchemaResolver resolver = new SchemaResolver(apicurioClient, shortTtl);
 
         when(apicurioClient.fetchByCoordinates(any()))
                 .thenReturn(SCHEMA)                                   // initial fetch OK

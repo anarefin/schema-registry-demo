@@ -10,7 +10,6 @@ import com.example.messaging.core.mapping.TypeMappingRegistry;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
-import com.example.messaging.core.observability.SchemaMessagingMetrics;
 import com.example.messaging.core.registry.SchemaResolver;
 import com.example.messaging.core.serde.SerializationStrategy;
 import org.slf4j.Logger;
@@ -25,9 +24,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
-// MDC is used to propagate the current trace ID as X-Correlation-Id when none is set.
-// Falls back to a random UUID in non-tracing contexts.
 
 /**
  * Spring AMQP {@link MessageConverter} that enforces schema governance (spec §10.1).
@@ -47,18 +43,15 @@ public class SchemaAwareMessageConverter implements MessageConverter {
     private final TypeMappingRegistry typeMappingRegistry;
     private final SchemaResolver schemaResolver;
     private final Map<SchemaType, SerializationStrategy> strategies;
-    private final SchemaMessagingMetrics metrics;
 
     public SchemaAwareMessageConverter(
             TypeMappingRegistry typeMappingRegistry,
             SchemaResolver schemaResolver,
-            List<SerializationStrategy> strategies,
-            SchemaMessagingMetrics metrics) {
+            List<SerializationStrategy> strategies) {
         this.typeMappingRegistry = typeMappingRegistry;
         this.schemaResolver = schemaResolver;
         this.strategies = strategies.stream()
                 .collect(Collectors.toUnmodifiableMap(SerializationStrategy::schemaType, Function.identity()));
-        this.metrics = metrics;
         // Fail fast: every registered TypeMapping must have a matching strategy available.
         typeMappingRegistry.all().forEach(mapping -> {
             if (!this.strategies.containsKey(mapping.schemaType())) {
@@ -85,22 +78,15 @@ public class SchemaAwareMessageConverter implements MessageConverter {
         byte[] bytes;
         try {
             bytes = strategy.serialize(object, schema);
-        } catch (SchemaValidationException e) {
-            metrics.recordValidationFailure();
-            metrics.recordPublishFailure(mapping.schemaType());
-            throw e;
         } catch (SchemaMessagingException e) {
-            metrics.recordPublishFailure(mapping.schemaType());
             throw e;
         } catch (Exception e) {
-            metrics.recordPublishFailure(mapping.schemaType());
             throw new MessageConversionException("Serialization failed for " + type.getName(), e);
         }
 
         ensureMessageId(messageProperties);
         SchemaMessageHeaders.setSchemaHeaders(messageProperties, schema.globalId(), mapping.coordinates(),
                 mapping.schemaType(), strategy.contentType());
-        metrics.recordPublish(mapping.schemaType());
 
         log.info("Serialized {} to {} bytes [globalId={}, routingKey={}]",
                 type.getSimpleName(), bytes.length, schema.globalId(), mapping.routingKey());
@@ -136,15 +122,12 @@ public class SchemaAwareMessageConverter implements MessageConverter {
         byte[] body = message.getBody();
         try {
             Object result = strategy.deserialize(body, mapping.javaType(), schema);
-            metrics.recordConsume(effectiveType);
             log.debug("Deserialized {} bytes → {} [globalId={}]",
                     body.length, mapping.javaType().getSimpleName(), schema.globalId());
             return result;
         } catch (SchemaMessagingException e) {
-            metrics.recordConsumeFailure(effectiveType);
             throw e;
         } catch (Exception e) {
-            metrics.recordConsumeFailure(effectiveType);
             throw new DeserializationException(mapping.javaType().getSimpleName(), e);
         }
     }
@@ -177,11 +160,7 @@ public class SchemaAwareMessageConverter implements MessageConverter {
             props.setHeader(SchemaMessageHeaders.MESSAGE_ID, UUID.randomUUID().toString());
         }
         if (props.getHeader(SchemaMessageHeaders.CORRELATION_ID) == null) {
-            // Propagate OTel trace ID as correlation ID so produce→consume spans are linkable.
-            // Falls back to a random UUID when no active trace context exists.
-            String traceId = org.slf4j.MDC.get("traceId");
-            props.setHeader(SchemaMessageHeaders.CORRELATION_ID,
-                    traceId != null ? traceId : UUID.randomUUID().toString());
+            props.setHeader(SchemaMessageHeaders.CORRELATION_ID, UUID.randomUUID().toString());
         }
     }
 }
