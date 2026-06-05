@@ -17,4 +17,5 @@ message OrderCreated {
   // v2: optional promo code applied to the order (BACKWARD-compatible addition — field 8).
   // 'optional' enables field presence (hasPromoCode()) per proto3 field tracking.
   optional string promo_code  = 8;
+  optional string notes = 9;
 }
