@@ -30,6 +30,10 @@
     "promoCode": {
       "type": "string",
       "description": "Optional promotional code applied at registration (v2 addition)"
+    },
+    "input1": {
+      "type": "string",
+      "description": "Optional promotional code applied at registration (v3 addition)"
     }
   },
   "required": ["customerId", "email", "firstName", "lastName"]
