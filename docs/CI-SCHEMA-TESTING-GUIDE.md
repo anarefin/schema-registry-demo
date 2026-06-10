@@ -2,8 +2,13 @@
 
 A **reusable, dynamic playbook** for testing how a schema change flows through GitHub Actions
 schema governance — for both **Protobuf** (`order-contracts`) and **JSON Schema**
-(`customer-contracts`). It covers the **success** path (a backward-compatible change is
-accepted) and the **failure** path (an incompatible change is rejected at the gate).
+(`customer-contracts`). It covers the **success** path (a compatible change is accepted) and the
+**failure** path (an incompatible change is rejected at the gate).
+
+> **Note on rules:** the two artifacts use different compatibility levels — `OrderCreated`
+> (Protobuf) is **BACKWARD**, `CustomerRegistered` (JSON Schema) is **FORWARD**. Apicurio's JSON
+> Schema checker classifies adding any property (even optional) as a "narrowing" that BACKWARD
+> rejects, so JSON field additions are only valid under FORWARD.
 
 > **Companion doc:** For the full local end-to-end (infra → unit/IT tests → manual happy path →
 > DLQ → observability) see [`TESTING-GUIDE.md`](./TESTING-GUIDE.md). This guide is **CI +
@@ -46,7 +51,8 @@ matches.
    docker compose up -d
    ```
    Wait for all services healthy, then register both artifacts (v1 + v2) from the host and attach
-   their `BACKWARD` rules — see step 4 below (the contracts modules carry the
+   their compatibility rules (BACKWARD for orders, FORWARD for customers) — see step 4 below
+   (the contracts modules carry the
    `apicurio-registry-maven-plugin`, so no separate container is needed). Registry API:
    `http://localhost:8080`, UI: `http://localhost:8888`.
 
@@ -58,15 +64,16 @@ matches.
    workflows hardcode `REGISTRY_URL=http://localhost:8080` (the runner's localhost) — there is
    **no** GitHub-hosted fallback.
 
-4. **(One-time per fresh registry) Schemas registered + BACKWARD rules attached.** After the
-   registry is healthy, register both artifacts from the host and attach their rules:
+4. **(One-time per fresh registry) Schemas registered + compatibility rules attached.** After the
+   registry is healthy, register both artifacts from the host and attach their rules (`OrderCreated`
+   → BACKWARD, `CustomerRegistered` → FORWARD):
    ```bash
    ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
           -Dapicurio.registry.url=http://localhost:8080
    curl -X POST http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules \
      -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
    curl -X POST http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules \
-     -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+     -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
    ```
    The rule attachment can also be run via the **Schema Governance Bootstrap** workflow
    (Actions → *Schema Governance Bootstrap* → *Run workflow*). HTTP `409` means the rule already
@@ -83,10 +90,10 @@ Three workflows under `.github/workflows/`, all on `runs-on: [self-hosted, apicu
 |---|---|---|---|---|
 | **Compatibility Check** | `schema-compat-check.yml` | **PR** touching `order-contracts/**` or `customer-contracts/**` | `./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check -Dapicurio.registry.url=$REGISTRY_URL` | **Read-only dry-run** (`dryRun=true`). Validates the PR schema against the registry's real history. Fails the check (blocks merge) on `INCOMPATIBLE`. |
 | **Schema Registration** | `schema-register.yml` | **push to `main`** touching the same paths | `./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=$REGISTRY_URL` | **Write path.** Idempotent (`FIND_OR_CREATE_VERSION`) — adds a new version only if the schema bytes changed. |
-| **Governance Bootstrap** | `schema-governance-bootstrap.yml` | **`workflow_dispatch`** (manual) | POSTs `{"ruleType":"COMPATIBILITY","config":"BACKWARD"}` to both artifacts; accepts HTTP 200/204/409; then GETs the rules to verify | One-time rule attach per fresh registry. |
+| **Governance Bootstrap** | `schema-governance-bootstrap.yml` | **`workflow_dispatch`** (manual) | POSTs `BACKWARD` to `OrderCreated` and `FORWARD` to `CustomerRegistered`; accepts HTTP 200/204/409; then GETs the rules to verify | One-time rule attach per fresh registry. |
 
 **The mental model:** PR = *ask permission* (dry-run gate). Merge = *make it real* (register a
-new version). The `BACKWARD` rule is what makes the gate say no to breaking changes.
+new version). The artifact's compatibility rule is what makes the gate say no to breaking changes.
 
 ```
         ┌─────────────┐   PR    ┌────────────────────────┐  block ❌
@@ -119,17 +126,20 @@ post-merge / on `apicurio-registry:register`.
 | Reuse an existing field number for a new field | ❌ No | **FAIL** (rule violation) | (blocked) | Field numbers are the contract; never repurpose them. |
 | Remove / renumber an existing field | ❌ No | **FAIL** (rule violation) | (blocked) | Reserve the number/name instead if you must drop it. |
 
-### JSON Schema — `events.customers / CustomerRegistered` (`JSON`)
+### JSON Schema — `events.customers / CustomerRegistered` (`JSON`, **FORWARD** rule)
 
-| Change | Backward-compatible? | Compat gate (PR) | Register (merge) | Notes |
+| Change | Forward-compatible? | Compat gate (PR) | Register (merge) | Notes |
 |---|---|---|---|---|
-| Add a property **not** in `required` | ✅ Yes | **PASS** | New version | Old producers omit it; Jackson deserializes to `null`. |
-| Add a property **to** `required` | ❌ No | **FAIL** (rule violation) | (blocked) | Old data lacks the field → fails validation against the new schema. |
-| Change the type of an existing required field | ❌ No | **FAIL** (rule violation) | (blocked) | Old data fails the new type check. |
-| Remove a required property | ❌ No | **FAIL** (rule violation) | (blocked) | Consumers expecting it break. |
+| Add a property **not** in `required` | ✅ Yes | **PASS** | New version | Apicurio treats adding a property as a "narrowing" — valid under FORWARD (an old reader ignores the new field), rejected under BACKWARD. This is why the artifact uses FORWARD. |
+| Add a property **to** `required` | ❌ No | **FAIL** (rule violation) | (blocked) | A consumer on the old schema can't satisfy a newly-required field → FORWARD-incompatible. |
+| Change the type of an existing field | ❌ No | **FAIL** (rule violation) | (blocked) | Old/new readers disagree on the type. |
+| Remove a property | ❌ No | **FAIL** (rule violation) | (blocked) | Consumers expecting it break. |
 
-> Both artifacts carry a **`BACKWARD`** compatibility rule — "a new schema must be able to read
-> data written by older schemas." That rule is what the gate enforces.
+> The artifacts carry **different** rules: `OrderCreated` (Protobuf) is **`BACKWARD`** ("a
+> consumer on the new schema can read data written by older schemas"); `CustomerRegistered`
+> (JSON Schema) is **`FORWARD`** ("a consumer on the old schema can read data written by newer
+> schemas"). Adding a JSON property only passes under FORWARD — see the note above. Each rule is
+> what the gate enforces for its artifact.
 
 ---
 
@@ -152,7 +162,7 @@ Fill in the placeholders, then run. This is the part an agent should drive.
    - Protobuf: add a line like `optional string <field_name> = <next_unused_number>;` inside
      `message OrderCreated { … }`. Field numbers in use today: **1–9** → next free is **10**.
    - JSON Schema: add a `"<field_name>": { "type": "…" }` entry under `properties`. To keep it
-     backward-compatible, **do not** add it to the `required` array.
+     FORWARD-compatible (this artifact's rule), **do not** add it to the `required` array.
 
 3. **Compile / regenerate** to catch syntax errors early:
    ```bash
@@ -181,7 +191,7 @@ Fill in the placeholders, then run. This is the part an agent should drive.
 5. **Interpret the result:**
    - **PASS** → `BUILD SUCCESS`, no rule-violation error in the log; PR check is green.
    - **FAIL** → `BUILD FAILURE` with `Registry rule validation failure: RuleViolationException`
-     (the `BACKWARD` rule rejecting the change); PR check is red and merge is blocked.
+     (the artifact's compatibility rule rejecting the change); PR check is red and merge is blocked.
    - If this contradicts your step-1 expectation, the schema edit isn't what you thought —
      re-read the matrix.
 
@@ -370,8 +380,10 @@ git restore customer-contracts/src/main/resources/schemas/customer-registered.js
 
 **What FAIL looks like**
 - Maven: `BUILD FAILURE`; `Registry rule validation failure: RuleViolationException` — the
-  `BACKWARD` compatibility rule rejecting the change (surfaced as a `RuleViolationException` /
-  `RuleViolationProblemDetails` from the registry).
+  artifact's compatibility rule rejecting the change (surfaced as a `RuleViolationException` /
+  `RuleViolationProblemDetails` from the registry). For JSON this is typically
+  `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED` (added a property under a too-strict rule) or a
+  newly-required field under FORWARD.
 - PR: the check is red; merge is blocked.
 
 **Confirm a new version actually landed (success path):**
@@ -387,7 +399,7 @@ git restore customer-contracts/src/main/resources/schemas/customer-registered.js
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Connection refused` to `localhost:8080` | Registry not running | `docker compose up -d`; wait for healthy |
-| Gate passes but should fail | `BACKWARD` rule not attached to the artifact | Run the [bootstrap](#2-prerequisites) (step 4); verify with `GET …/rules` |
+| Gate passes but should fail | compatibility rule not attached to the artifact (BACKWARD for orders, FORWARD for customers) | Run the [bootstrap](#2-prerequisites) (step 4); verify with `GET …/rules` |
 | PR check never starts | Self-hosted runner offline, or change didn't touch `order-contracts/**` / `customer-contracts/**` | Bring the runner online; confirm the PR edits a watched path |
 | Compile fails before the gate | proto/JSON syntax error, or reused proto field number | Fix the schema; `./mvnw -pl <MODULE> compile` |
 | Wrong Java / toolchain error | Missing JDK-25 entry in `~/.m2/toolchains.xml` | Add the toolchain (see `CLAUDE.md`) |
@@ -405,7 +417,7 @@ curl -X DELETE http://localhost:8080/apis/registry/v3/groups/<GROUP>/artifacts/<
 
 ```bash
 # --- Infra ---
-docker compose up -d                                   # registry + seed (v1+v2 + BACKWARD rules)
+docker compose up -d                                   # registry + seed (v1+v2 + compat rules: orders=BACKWARD, customers=FORWARD)
 
 # --- Compat gate (what a PR runs; read-only dry-run) ---
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
@@ -421,11 +433,11 @@ docker compose up -d                                   # registry + seed (v1+v2 
 ./mvnw -pl order-contracts    verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
 ./mvnw -pl customer-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
 
-# --- Attach BACKWARD rules (one-time per fresh registry; 409 = already exists) ---
+# --- Attach compatibility rules: orders=BACKWARD, customers=FORWARD (one-time; 409 = already exists) ---
 curl -X POST http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules \
   -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
 curl -X POST http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules \
-  -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+  -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 
 # --- Inspect registered versions ---
 curl -s http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/versions | cat

@@ -397,17 +397,23 @@ Key behaviors of `SchemaResolver`:
 
 ## 10. Schema governance: stopping bad changes before they merge
 
-This is the heart of "schema *governance*." Both schemas are registered in Apicurio under a
-**BACKWARD** compatibility rule:
+This is the heart of "schema *governance*." Each schema is registered in Apicurio under a
+compatibility rule — but the two artifacts use **different** rules:
 
-- `OrderCreated` → group `events.orders`
-- `CustomerRegistered` → group `events.customers`
+- `OrderCreated` → group `events.orders` → **BACKWARD**
+- `CustomerRegistered` → group `events.customers` → **FORWARD**
 
-**BACKWARD compatibility** means: *a consumer using the new schema can still read messages that
-were produced with the old schema.* In practice this allows safe changes (like **adding an
-optional field** — notice `promo_code` was added as field 8 in Protobuf, and `promoCode` was
-added as a non-required property in JSON Schema) but forbids breaking changes (like removing a
-field or renaming one).
+**BACKWARD compatibility** (Protobuf) means: *a consumer using the new schema can still read
+messages produced with the old schema.* **FORWARD compatibility** (JSON Schema) means: *a
+consumer using the old schema can still read messages produced with the new schema.* The JSON
+artifact needs FORWARD because Apicurio's JSON Schema checker classifies adding **any** property
+(even an optional one) as a "narrowing" (`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`) that BACKWARD
+rejects — only FORWARD accepts it.
+
+In practice both rules allow safe changes (like **adding an optional field** — `promo_code` as
+field 8 in Protobuf; `promoCode` and `input1` as non-required properties in JSON Schema) but
+forbid breaking changes (adding a *required* field; for BACKWARD, also removing or renaming a
+field).
 
 ### The CI merge gate
 
@@ -481,7 +487,9 @@ healthy, it does three things:
 
 1. Registers v1 and v2 of both schemas (`apicurio-registry:register` on both contracts modules)
 2. POSTs a `BACKWARD` compatibility rule to `events.orders/OrderCreated`
-3. POSTs a `BACKWARD` compatibility rule to `events.customers/CustomerRegistered`
+3. POSTs a `FORWARD` compatibility rule to `events.customers/CustomerRegistered` (the JSON Schema
+   artifact — Apicurio rejects property additions under BACKWARD as `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`;
+   only FORWARD accepts them)
 
 Once those rules are attached they become **standing policy** stored inside Apicurio itself.
 Every future registration attempt — from a developer's local machine, from CI, or from a
@@ -496,8 +504,8 @@ sequenceDiagram
     DEV->>AP: register OrderCreated v1 + v2
     DEV->>AP: register CustomerRegistered v1 + v2
     DEV->>AP: POST /groups/events.orders/artifacts/OrderCreated/rules {BACKWARD}
-    DEV->>AP: POST /groups/events.customers/artifacts/CustomerRegistered/rules {BACKWARD}
-    Note over AP: BACKWARD rule now enforced on every future registration
+    DEV->>AP: POST /groups/events.customers/artifacts/CustomerRegistered/rules {FORWARD}
+    Note over AP: Per-artifact rule (BACKWARD/FORWARD) now enforced on every future registration
 ```
 
 ---
@@ -588,15 +596,19 @@ Every message landing on a DLQ carries a full set of `X-Failure-*` headers so yo
 docker compose up
 ```
 This brings up Postgres, Apicurio (+ UI), and RabbitMQ. Once the
-registry is healthy, register both schemas and apply the BACKWARD rule from the host:
+registry is healthy, register both schemas and apply their compatibility rules from the host
+(BACKWARD for the Protobuf artifact, FORWARD for the JSON artifact):
 ```bash
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
-for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
-  curl -s -o /dev/null -X POST \
-    "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
-    -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
-done
+# OrderCreated (Protobuf) → BACKWARD; CustomerRegistered (JSON Schema) → FORWARD
+# (adding a JSON property is only FORWARD-compatible in Apicurio, never BACKWARD).
+curl -s -o /dev/null -X POST \
+  "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
+  -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+curl -s -o /dev/null -X POST \
+  "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
+  -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 ```
 
 **Step 1.5 — browse the Apicurio UI to see the registered schemas:**
@@ -611,7 +623,9 @@ Open http://localhost:8888 and follow these clicks:
 6. Note the **Global ID** value next to each version — this is the number the producer stamps
    in the `X-Schema-GlobalId` header on every message
 
-Repeat for **`events.customers`** → **`CustomerRegistered`** to see the JSON Schema versions.
+Repeat for **`events.customers`** → **`CustomerRegistered`** to see the JSON Schema versions
+(v1, v2 with optional `promoCode`, v3 with optional `input1`). Its **"Rules"** tab shows a
+`FORWARD` rule, not BACKWARD — JSON property additions only validate under FORWARD.
 
 **Step 2 — run the services (in two terminals):**
 ```bash

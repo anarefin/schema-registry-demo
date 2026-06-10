@@ -60,10 +60,13 @@
         </executions>
       </plugin>
 
-      <!-- T-2.4 / T-4.1: Register CustomerRegistered and attach BACKWARD rule.
+      <!-- T-2.4 / T-4.1: Register CustomerRegistered. The COMPATIBILITY rule for this
+           JSON Schema artifact is FORWARD (not BACKWARD): Apicurio's JSON Schema checker
+           classifies adding any property as OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED, which
+           BACKWARD rejects but FORWARD accepts. The rule is attached via REST/bootstrap.
            Run: ./mvnw -pl customer-contracts apicurio-registry:register
            Override URL: -Dapicurio.registry.url=http://host:8080
-           v2 (promoCode optional property) is BACKWARD-compatible: old consumers ignore it. -->
+           v3 (input1 optional property) is a FORWARD-compatible addition. -->
       <plugin>
         <groupId>io.apicurio</groupId>
         <artifactId>apicurio-registry-maven-plugin</artifactId>
@@ -79,7 +82,8 @@
               <artifactType>JSON</artifactType>
               <ifExists>FIND_OR_CREATE_VERSION</ifExists>
             </artifact>
-            <!-- v2: adds optional promoCode property — BACKWARD-compatible addition. -->
+            <!-- latest: src/main schema carries optional promoCode (v2) + input1 (v3),
+                 each a FORWARD-compatible property addition. -->
             <artifact>
               <groupId>events.customers</groupId>
               <artifactId>CustomerRegistered</artifactId>
@@ -94,8 +98,9 @@
   </build>
 
   <profiles>
-    <!-- T-4.5 CI merge gate: checks the current schema is BACKWARD-compatible with what is
-         registered. Requires a running registry. Run during CI after docker compose up:
+    <!-- T-4.5 CI merge gate: checks the current schema is compatible (FORWARD for this
+         JSON artifact) with what is registered. Requires a running registry. Run during CI
+         after docker compose up:
          ./mvnw -pl customer-contracts verify -Pcompat-check
          Or explicitly: ./mvnw -pl customer-contracts apicurio-registry:test -Pcompat-check -->
     <profile>
@@ -130,10 +135,11 @@
     </profile>
 
     <!-- T-4.4 / T-4.6 incompatible demo: runs apicurio-registry:test with a schema that
-         removes the required 'email' field — BACKWARD incompatible.
+         adds a NEW REQUIRED field 'accountType' — incompatible under the FORWARD rule
+         (an old reader cannot satisfy a newly-required field).
          This MUST fail with a clear compatibility rejection message.
          Demo: ./mvnw -pl customer-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
-         (requires v1 or v2 already registered with BACKWARD rule) -->
+         (requires a prior version already registered with the FORWARD rule) -->
     <profile>
       <id>incompatible-demo</id>
       <build>

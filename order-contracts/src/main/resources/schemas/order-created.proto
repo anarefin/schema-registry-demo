@@ -19,4 +19,5 @@ message OrderCreated {
   optional string promo_code  = 8;
   optional string notes = 9;
   optional string input1 = 10;
+  optional string userName = 11;
 }

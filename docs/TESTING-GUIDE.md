@@ -47,24 +47,33 @@ Group  (events.orders)
 | **Artifact** | `OrderCreated` / `CustomerRegistered` | The schema itself |
 | **Version** | `1`, `2`, … | An immutable snapshot; once stored it never changes |
 | **Global ID** | e.g. `1`, `7`, `12` | A registry-wide unique number assigned to each version |
-| **Compatibility rule** | `BACKWARD` | Policy stored in Apicurio; checked on every new registration |
+| **Compatibility rule** | `BACKWARD` (OrderCreated) / `FORWARD` (CustomerRegistered) | Policy stored in Apicurio; checked on every new registration |
 
-### What "BACKWARD" means (one rule, one sentence)
+### What the compatibility rules mean (one sentence each)
 
-> A **consumer** using the new schema can still read messages that were **produced** with the
-> old schema.
+The two artifacts use **different** rules, by necessity:
 
-In practice:
-- **Allowed** — add an optional field (old messages simply don't have it; the consumer treats it as absent)
-- **Rejected** — remove a field, rename a field, or add a *required* field (old messages would fail the new contract)
+- **`OrderCreated` (Protobuf) → BACKWARD** — a **consumer** using the new schema can still read
+  messages **produced** with the old schema.
+- **`CustomerRegistered` (JSON Schema) → FORWARD** — a **consumer** using the old schema can still
+  read messages **produced** with the new schema. JSON Schema needs FORWARD because Apicurio's
+  checker classifies adding *any* property (even an optional one) as a "narrowing" that BACKWARD
+  rejects; the field addition is only valid under FORWARD.
+
+In practice, for both:
+- **Allowed** — add an optional field (under BACKWARD the new consumer ignores its absence; under
+  FORWARD the old consumer ignores its presence)
+- **Rejected** — add a *required* field (and, for BACKWARD, remove/rename a field) — old messages
+  or old readers would fail the contract
 
 ### How are schemas registered on a cold start?
 
 On a cold start Apicurio has no schemas and no rules. Registration is a **host-Maven step** (the
 contracts modules carry the `apicurio-registry-maven-plugin`), run once Apicurio is healthy:
 1. `./mvnw … apicurio-registry:register` registers v1 and v2 of both schemas
-2. A `curl` POST attaches the `BACKWARD` rule to each artifact as a **standing policy** (the
-   `register` goal does not do this) — see Step 1 below
+2. A `curl` POST attaches the compatibility rule to each artifact as a **standing policy** (the
+   `register` goal does not do this) — `BACKWARD` for `OrderCreated`, `FORWARD` for
+   `CustomerRegistered` — see Step 1 below
 
 Once attached, Apicurio checks every future registration against that policy automatically —
 whether it comes from your laptop, from CI, or from a deployment pipeline.
@@ -93,20 +102,21 @@ docker compose ps   # all STATUS columns should show "healthy"
 | RabbitMQ Management | 15672 | http://localhost:15672 (guest/guest) |
 | Postgres | 5432 | — (backing store for Apicurio) |
 
-Once the registry is healthy, register both schemas and attach their BACKWARD rules from the host
-(the contracts modules carry the `apicurio-registry-maven-plugin` — no separate container needed):
+Once the registry is healthy, register both schemas and attach their compatibility rules from the
+host (the contracts modules carry the `apicurio-registry-maven-plugin` — no separate container
+needed). `OrderCreated` (Protobuf) uses BACKWARD; `CustomerRegistered` (JSON Schema) uses FORWARD:
 ```bash
 # 1. Register both schemas (v1 + v2)
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
 
-# 2. Attach the BACKWARD compatibility rule (register does not do this)
-for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
-  curl -s -o /dev/null -X POST \
-    "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
-    -H 'Content-Type: application/json' \
-    -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
-done
+# 2. Attach the compatibility rules (register does not do this)
+curl -s -o /dev/null -X POST \
+  "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
+  -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+curl -s -o /dev/null -X POST \
+  "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
+  -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 ```
 
 Verify schemas are registered via API:
@@ -132,7 +142,10 @@ This is the easiest way to understand what the registry has stored. Follow these
    header to fetch the schema in a single call — no coordinate lookup needed.
 5. Repeat for **`events.customers`** → **`CustomerRegistered`** to see the JSON Schema versions
    - Version 1: original schema (no `promoCode` property)
-   - Version 2: adds optional `promoCode` (not in `required` array — BACKWARD-compatible)
+   - Version 2: adds optional `promoCode` (not in `required` array)
+   - Version 3: adds optional `input1` — a FORWARD-compatible addition
+   - Click the **"Rules"** tab: shows the `FORWARD` rule (JSON property additions only validate
+     under FORWARD, not BACKWARD — see the compatibility table above)
 
 ---
 
@@ -184,7 +197,7 @@ mocked so no running registry is needed. Expect ~3–5 min.
 | Class | What it proves |
 |---|---|
 | `OrderCreatedIT` | Protobuf round-trip E2E, all X-Schema-* headers correct, globalId fast path |
-| `CustomerRegisteredIT` | JSON Schema round-trip E2E, backward-compat field tolerance |
+| `CustomerRegisteredIT` | JSON Schema round-trip E2E, forward-compat field tolerance |
 | `DlxRoutingIT` | All 5 failure modes → correct DLQ/retry routing, X-Failure-* headers |
 | `SchemaVersionPinningIT` | Pinned schema version appears in X-Schema-Version header |
 | `StartupSchemaValidatorIT` | auto-register=OFF + dead registry → fail-fast on startup |
@@ -344,21 +357,22 @@ docker compose start apicurio-registry
 > **What is Apicurio actually checking?**
 >
 > When you register (or test) a new schema version, Apicurio compares it against the
-> previously stored versions using the artifact's `BACKWARD` compatibility rule. The question
-> it answers is:
+> previously stored versions using the artifact's compatibility rule — `BACKWARD` for
+> `OrderCreated`, `FORWARD` for `CustomerRegistered`.
 >
-> *"Can a consumer that was built against the new schema still correctly read a message that
-> was produced with the old schema?"*
+> For **Protobuf (`OrderCreated`, BACKWARD)** — *"Can a consumer built against the new schema
+> still read a message produced with the old schema?"* Safe to add optional fields at the end
+> (field numbers preserved, old messages simply have the new field absent). Unsafe: change a
+> field's type or number, remove a field.
 >
-> For **Protobuf**: safe to add optional fields at the end (field numbers are preserved, old
-> messages simply have the new field absent). Unsafe: change a field's type or number, remove
-> a field.
->
-> For **JSON Schema**: safe to add new properties that are not listed in `required` (old
-> messages without that property still validate). Unsafe: add a new required field, remove an
-> existing required field, or change a type.
+> For **JSON Schema (`CustomerRegistered`, FORWARD)** — *"Can a consumer built against the old
+> schema still read a message produced with the new schema?"* Apicurio's JSON Schema checker
+> treats adding **any** property (even an optional one) as a "narrowing" — that is rejected
+> under BACKWARD but is exactly what FORWARD permits, so this artifact uses FORWARD. Safe: add a
+> new property that is **not** in `required`. Unsafe: add a new required field, remove an
+> existing field, or change a type.
 
-### 9a. Test that the registered schemas are BACKWARD-compatible
+### 9a. Test that the registered schemas are compatible
 
 ```bash
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
@@ -388,7 +402,7 @@ action — an incompatible schema change would block the PR.
 This error comes directly from Apicurio's compatibility API — Maven is just surfacing it. The
 incompatible schema is **never stored**; the UI version count remains unchanged.
 
-Same for JSON Schema (adds new required field `accountType` — old messages don't have it, so old data fails the new schema):
+Same for JSON Schema (adds new **required** field `accountType` — FORWARD-incompatible: a consumer on the old schema can't satisfy a field the new producer now requires):
 ```bash
 ./mvnw -pl customer-contracts verify \
   -Pincompatible-demo \
@@ -475,10 +489,12 @@ Management UI (http://localhost:15672) → Queues → `orders.created.dlq` → P
 
 ---
 
-## Step 12 — Schema Evolution: Register v2 and Test Backward Compatibility
+## Step 12 — Schema Evolution: Register v2 and Test Compatibility
 
 Both schemas have a v2 registered by the host-Maven step in Step 1 (Protobuf v2 adds optional
-`promo_code`; JSON v2 adds optional `promoCode`). To observe backward compatibility:
+`promo_code`; JSON v2 adds optional `promoCode`, and JSON v3 adds optional `input1`). Note the
+governance rules differ: `OrderCreated` is BACKWARD, `CustomerRegistered` is FORWARD (JSON
+property additions only validate under FORWARD). To observe compatibility:
 
 ```bash
 # Publish a v1 order (no promo_code) — consumer reads it fine, promo_code is empty/absent
@@ -543,7 +559,7 @@ is hardcoded to `http://localhost:8080` in each workflow's `env`.
 |---|---|---|---|
 | `schema-compat-check.yml` | PR touching `order-contracts/**` or `customer-contracts/**` | **read-only** (dry-run) | Runs `verify -Pcompat-check` for **both** modules against the registry's real history. Blocks merge if INCOMPATIBLE. Writes nothing. |
 | `schema-register.yml` | Push to `main` for the same paths | **write** | Runs `apicurio-registry:register` for both modules. Idempotent (`FIND_OR_CREATE_VERSION`) — a new version is created only if the schema bytes changed. |
-| `schema-governance-bootstrap.yml` | Manual (`workflow_dispatch`) | **write** | Attaches the `BACKWARD` rule to each artifact via the REST API. Run once per new registry. |
+| `schema-governance-bootstrap.yml` | Manual (`workflow_dispatch`) | **write** | Attaches the compatibility rule to each artifact via the REST API — `BACKWARD` for `OrderCreated`, `FORWARD` for `CustomerRegistered`. Run once per new registry. |
 
 > **Key property:** PRs only *read* (dry-run); only merges (and the manual bootstrap) *write*.
 > Opening or updating a PR can never mutate the standing registry.
@@ -554,7 +570,7 @@ is hardcoded to `http://localhost:8080` in each workflow's `env`.
 > the workflows simple. Adding a `payment-contracts` domain means appending it to the `-pl` list in
 > both workflows and re-running the bootstrap (extended to the new artifact).
 
-### One-time bootstrap (attach BACKWARD rules)
+### One-time bootstrap (attach compatibility rules)
 
 The host-Maven cold-start step (Step 1) attaches the rules via `curl`. The bootstrap workflow is
 the manual/explicit equivalent for a fresh registry that wasn't seeded that way:
@@ -625,7 +641,7 @@ a `RuleViolationException: INCOMPATIBLE` and — under branch protection — blo
 | `schema-compat-check.yml` (PR with compatible change) | GHA job passes, merge allowed |
 | `schema-compat-check.yml` (PR with incompatible change) | GHA job fails, merge blocked |
 | `schema-register.yml` (merge to main) | New version appears in Apicurio UI; version count +1 |
-| Bootstrap workflow | Rules endpoint returns `BACKWARD` for both domain artifacts |
+| Bootstrap workflow | Rules endpoint returns `BACKWARD` for `OrderCreated`, `FORWARD` for `CustomerRegistered` |
 
 ---
 

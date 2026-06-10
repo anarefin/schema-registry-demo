@@ -43,22 +43,25 @@ The three workflows now run on `[self-hosted, apicurio-local]`:
    docker compose up -d
    ```
 
-   Once `apicurio` is healthy, register both artifacts and attach the BACKWARD rules from the host:
+   Once `apicurio` is healthy, register both artifacts and attach their compatibility rules from
+   the host. The rules differ: `OrderCreated` (Protobuf) → BACKWARD, `CustomerRegistered` (JSON
+   Schema) → FORWARD (Apicurio rejects JSON property additions under BACKWARD as a "narrowing"):
 
    ```bash
    ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
           -Dapicurio.registry.url=http://localhost:8080
-   for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
-     curl -s -o /dev/null -X POST \
-       "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
-       -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
-   done
+   curl -s -o /dev/null -X POST \
+     "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
+     -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+   curl -s -o /dev/null -X POST \
+     "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
+     -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
    ```
 
    Verify:
 
    ```bash
-   # both should return a JSON array containing a COMPATIBILITY / BACKWARD rule
+   # OrderCreated returns BACKWARD; CustomerRegistered returns FORWARD
    curl -sf http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules
    curl -sf http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules
    ```

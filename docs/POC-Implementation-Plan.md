@@ -216,7 +216,8 @@ poc-parent/                         (parent pom.xml)
 - [ ] **T-2.3** Expose one `TypeMapping` bean via a small `@Configuration` (chosen pattern;
   apply consistently — spec §10.3/§10.4 "pick one").
 - [ ] **T-2.4** Register `CustomerRegistered` to `events.customers` via
-  `apicurio-registry-maven-plugin:register` (JSON type, BACKWARD rule).
+  `apicurio-registry-maven-plugin:register` (JSON type, **FORWARD** rule — Apicurio rejects JSON
+  property additions under BACKWARD as a "narrowing"; only FORWARD accepts them).
 - [ ] **T-2.5** Producer maps a demo JSON body → `CustomerRegistered`, publishes via `EventPublisher`.
 - [ ] **T-2.6** Consumer `@RabbitListener` on `customers.registered.queue` typed as `CustomerRegistered`.
 - [ ] **T-2.7** Maven: `customer-contracts` is a `jar`, depends only on Jackson.
@@ -275,18 +276,22 @@ poc-parent/                         (parent pom.xml)
 
 ## Phase 4 — Schema Evolution & Compatibility
 
-**Objective:** prove BACKWARD governance; demonstrate accept + reject paths in CI.
+**Objective:** prove compatibility governance (BACKWARD for the Protobuf artifact, FORWARD for the
+JSON artifact); demonstrate accept + reject paths in CI.
 
 ### Tasks
 
-- [ ] **T-4.1** Confirm BACKWARD rule attached to both artifacts (set during registration).
+- [ ] **T-4.1** Confirm the compatibility rule attached to each artifact: BACKWARD on
+  `OrderCreated`, FORWARD on `CustomerRegistered` (Apicurio rejects JSON property additions under
+  BACKWARD as a "narrowing"; only FORWARD accepts them).
 - [ ] **T-4.2** Scenario 1 (compatible): add optional `promo_code` to `OrderCreated`, bump v2,
   register; producer stays pinned v1; v1 consumers still read. Switch producer to v2; v1
   consumers still read (BACKWARD).
 - [ ] **T-4.3** Scenario 2 (incompatible): remove a required field / reuse a field number /
   change a type in `OrderCreated`; attempt registration → must be rejected.
 - [ ] **T-4.4** Scenario 3 (JSON parallel): add optional property to `CustomerRegistered`,
-  register v2 (accepted); attempt an incompatible change (rejected).
+  register a new version (accepted under FORWARD); attempt an incompatible change — a newly
+  **required** field — (rejected).
 - [ ] **T-4.5** Wire `apicurio-registry-maven-plugin:test` (compatibility dry-run goal) as the
   **CI merge gate**: an incompatible change makes the goal fail and **fails the merge**.
 - [ ] **T-4.6** Create a demo branch carrying an incompatible change; capture the failing-CI
@@ -306,7 +311,8 @@ poc-parent/                         (parent pom.xml)
 
 ### Acceptance Criteria (exit gate)
 
-- [ ] **AC-4.1** Both artifacts show ≥2 versions with BACKWARD rules in the UI. `[SPEC-AC-3]`
+- [ ] **AC-4.1** Both artifacts show ≥2 versions with their compatibility rule in the UI
+  (BACKWARD on `OrderCreated`, FORWARD on `CustomerRegistered`). `[SPEC-AC-3]`
 - [ ] **AC-4.2** Incompatible v3 registration via the Maven plugin **fails with a clear error** (TC-4.3). `[SPEC-AC-4]`
 - [ ] **AC-4.3** Failing-CI evidence captured for the README (TC-4.5). `[SPEC §17 Phase 4]`
 
@@ -448,7 +454,7 @@ Every spec §18 criterion must be demonstrably true. Mapping:
 |--------------------|-------------|-----------|
 | 1. `docker compose up` healthy cold start | Phase 0 / 7 | AC-0.2, TC-7.2 |
 | 2. `POST /demo/orders` + `/demo/customers` received & deserialized | Phase 2 + 3 | TC-2.3, TC-3.3 |
-| 3. Two artifacts, ≥2 versions each, BACKWARD visible | Phase 4 | AC-4.1, TC-4.1 |
+| 3. Two artifacts, ≥2 versions each, compat rule visible (BACKWARD orders / FORWARD customers) | Phase 4 | AC-4.1, TC-4.1 |
 | 4. Incompatible v3 registration fails clearly | Phase 4 | AC-4.2, TC-4.3 |
 | 5. Malformed payload → correct DLQ, all headers | Phase 5 | AC-5.2, TC-5.7 |
 | 6. Apicurio stopped mid-run → cached process, new fail gracefully | Phase 6 | AC-6.4 |

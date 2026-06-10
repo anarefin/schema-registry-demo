@@ -54,8 +54,11 @@ The build uses the **committed Maven Wrapper** (`./mvnw`) — always prefer it o
 docker compose up                       # cold start must reach all-healthy
 # Then register schemas from the host (the contracts modules carry the apicurio-registry plugin):
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
-# ...and attach the BACKWARD compatibility rules via REST (register does not — see README §2):
-#   POST /apis/registry/v3/groups/{group}/artifacts/{id}/rules {"ruleType":"COMPATIBILITY","config":"BACKWARD"}
+# ...and attach the compatibility rules via REST (register does not — see README §2):
+#   OrderCreated (Protobuf)        → BACKWARD
+#   CustomerRegistered (JSON Schema) → FORWARD  (adding a JSON property is only FORWARD-compatible
+#                                                in Apicurio: BACKWARD rejects it as NARROWED)
+#   POST /apis/registry/v3/groups/{group}/artifacts/{id}/rules {"ruleType":"COMPATIBILITY","config":"<LEVEL>"}
 ```
 
 Run a single test class/method with the standard Surefire/Failsafe selectors, e.g.
@@ -140,10 +143,13 @@ table-drive — keep them aligned.
 
 ### Schema governance
 
-Both artifacts are registered under groups `events.orders` / `events.customers` with a
-**BACKWARD** compatibility rule. The `compat-check` Maven profile in both contracts POMs wires
-`apicurio-registry:test` as the CI merge gate: an incompatible change fails the goal and fails
-the merge. Producers can pin a schema version via `schema.{orders,customers}.pinned-version` in
+Both artifacts are registered under groups `events.orders` / `events.customers`. `OrderCreated`
+(Protobuf) carries a **BACKWARD** rule; `CustomerRegistered` (JSON Schema) carries a **FORWARD**
+rule — Apicurio's JSON Schema checker classifies adding any property as
+`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`, which BACKWARD rejects but FORWARD accepts (so optional
+JSON field additions only validate under FORWARD). The `compat-check` Maven profile in both
+contracts POMs wires `apicurio-registry:register -DdryRun` as the CI merge gate: an incompatible
+change fails the goal and fails the merge. Producers can pin a schema version via `schema.{orders,customers}.pinned-version` in
 `application.yml`; with `auto-register=OFF` an unregistered pinned schema must **fail fast on
 startup**.
 

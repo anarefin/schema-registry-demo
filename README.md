@@ -2,8 +2,8 @@
 
 End-to-end schema-governed messaging: **Apicurio Registry 3.2.0** as schema source of truth,
 **RabbitMQ** as transport, two **Spring Boot 4.0** services on **Java 25**. Demonstrates Protobuf
-and JSON Schema message flows, BACKWARD-compatibility governance as a CI merge gate, and a full
-DLX/DLQ/retry failure topology.
+and JSON Schema message flows, schema-compatibility governance as a CI merge gate (BACKWARD for
+Protobuf, FORWARD for JSON Schema), and a full DLX/DLQ/retry failure topology.
 
 ---
 
@@ -13,7 +13,7 @@ DLX/DLQ/retry failure topology.
 |---|---|
 | Cold `compose up` → all services healthy | `docker compose up`, healthchecks |
 | Orders (Protobuf) + customers (JSON Schema) received & deserialized | Demo curls → consumer logs |
-| Two artifacts with ≥2 versions, BACKWARD rule | `apicurio-registry:register` (v1 + v2) |
+| Two artifacts with ≥2 versions, compat rule (BACKWARD orders / FORWARD customers) | `apicurio-registry:register` (v1 + v2) |
 | Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
 | Registry down → cached processing, new messages fail gracefully | `SchemaResolver` last-known-good |
@@ -62,20 +62,29 @@ Starts (in dependency order, all with health checks):
 
 Schema registration is **not** a compose service — it's a host-Maven step. The contracts modules
 already carry the `apicurio-registry-maven-plugin`, so once Apicurio is healthy you register both
-schemas and attach their `BACKWARD` rules directly from the host:
+schemas and attach their compatibility rules directly from the host.
+
+The two artifacts use **different** compatibility levels, by necessity:
+
+- `OrderCreated` (Protobuf) → **BACKWARD** — adding an optional field is a backward-compatible change.
+- `CustomerRegistered` (JSON Schema) → **FORWARD** — in Apicurio's JSON Schema checker, adding a
+  property (even an optional/permissive one) is classified as `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`
+  and is rejected under BACKWARD; it is only valid under FORWARD.
 
 ```bash
 # 1. Register both schemas (v1 + v2)
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
 
-# 2. Attach the BACKWARD compatibility rule (register does not do this)
-for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
-  curl -s -o /dev/null -X POST \
-    "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
-    -H 'Content-Type: application/json' \
-    -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
-done
+# 2. Attach the compatibility rules (register does not do this)
+curl -s -o /dev/null -X POST \
+  "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
+  -H 'Content-Type: application/json' \
+  -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+curl -s -o /dev/null -X POST \
+  "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
+  -H 'Content-Type: application/json' \
+  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 ```
 
 Step 2 can also be run via the **Schema Governance Bootstrap** GitHub workflow
@@ -135,7 +144,10 @@ routing key, failed-at, retry-count).
 
 ### 7. Demo: schema evolution — accept and reject
 
-**Accepted (BACKWARD-compatible):** add an optional field (`promo_code` / `promoCode` already in v2).
+**Accepted:** add an optional field. For `OrderCreated` (Protobuf) this is BACKWARD-compatible
+(`promo_code`, field 8); for `CustomerRegistered` (JSON Schema) the same kind of change is
+FORWARD-compatible (`promoCode`, `input1`) — Apicurio rejects JSON property additions under
+BACKWARD, so that artifact uses a FORWARD rule.
 
 ```bash
 # Register v2 (optional promo_code already present in order-created.proto)
@@ -227,8 +239,8 @@ sequenceDiagram
     participant A as ApicurioRegistry
 
     Dev->>CI: push incompatible schema change
-    CI->>A: apicurio-registry:test (BACKWARD check)
-    A-->>CI: 409 Conflict — BACKWARD rule violated
+    CI->>A: apicurio-registry:register -DdryRun (compatibility check)
+    A-->>CI: 409 Conflict — compatibility rule violated (BACKWARD/FORWARD)
     CI-->>Dev: BUILD FAILURE (clear rejection message)
     Note over Dev,A: Merge blocked — incompatible change never lands
 ```

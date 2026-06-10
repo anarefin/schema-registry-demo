@@ -1,6 +1,6 @@
 {
   "title": "CustomerRegistered",
-  "description": "INCOMPATIBLE demo — DO NOT REGISTER. Adds a new required field 'accountType' that old messages don't have — BACKWARD incompatible: old data fails the new schema.",
+  "description": "INCOMPATIBLE demo — DO NOT REGISTER. Adds a new REQUIRED field 'accountType'. This artifact uses a FORWARD rule (adding optional JSON properties is only FORWARD-compatible in Apicurio); a newly-required field is FORWARD-incompatible because an old reader cannot satisfy it.",
   "type": "object",
   "properties": {
     "customerId": {

@@ -6,10 +6,15 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * TC-4.4: Proves JSON Schema BACKWARD compatibility at the deserialization level.
+ * TC-4.4: Proves JSON Schema FORWARD compatibility at the deserialization level.
  *
- * <p>v2 adds the optional 'promoCode' property; v1 consumers using Jackson ignore unknown
- * properties by default, so they deserialize v2 payloads without error.
+ * <p>The CustomerRegistered artifact is governed by a FORWARD rule: in Apicurio's JSON Schema
+ * checker, adding an optional property is classified as a "narrowing" and is only
+ * FORWARD-compatible (an old reader still parses the newer payload), never BACKWARD.
+ *
+ * <p>v2 adds the optional 'promoCode' property (and v3 adds 'input1'); v1 consumers using
+ * Jackson ignore unknown properties by default, so they deserialize newer payloads without
+ * error — exactly the old-reader-reads-new-data guarantee that FORWARD encodes.
  */
 class CustomerRegisteredEvolutionTest {
 
@@ -86,8 +91,9 @@ class CustomerRegisteredEvolutionTest {
 
         CustomerRegistered parsed = mapper.readValue(incompatiblePayload, CustomerRegistered.class);
 
-        // At the Java/Jackson level, missing field means null — the schema registry BACKWARD
-        // rule prevents this payload from ever being produced by a well-governed producer.
+        // At the Java/Jackson level, missing field means null — the schema registry
+        // compatibility rule prevents this payload from ever being produced by a well-governed
+        // producer.
         assertThat(parsed.getEmail()).isNull();
     }
 }

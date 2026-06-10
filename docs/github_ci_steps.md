@@ -38,7 +38,7 @@ against the standing registry at `http://localhost:8080`:
 |----------|---------|--------|--------------|
 | `schema-compat-check.yml` | PR touching `order-contracts/**` or `customer-contracts/**` | **read-only** | Runs `verify -Pcompat-check` (a `register` **dry-run**) — validates the PR schema against the registry's real registered history. **Blocks merge if INCOMPATIBLE.** Writes nothing. |
 | `schema-register.yml` | Push to `main` for the same paths | **write** | Registers the new version(s) of both contracts to the registry (idempotent). |
-| `schema-governance-bootstrap.yml` | Manual (`workflow_dispatch`) | **write** | Attaches the `BACKWARD` rule to each domain artifact (idempotent). Defaults to `localhost:8080`. |
+| `schema-governance-bootstrap.yml` | Manual (`workflow_dispatch`) | **write** | Attaches the compatibility rule to each domain artifact — `BACKWARD` (OrderCreated), `FORWARD` (CustomerRegistered) — idempotent. Defaults to `localhost:8080`. |
 
 **Key property:** PRs only *read*; only merges (and the manual bootstrap) *write*. Opening or
 updating a PR can never mutate the standing registry. No `DEV_REGISTRY_URL` secret and no
@@ -109,7 +109,8 @@ git push origin main
    curl -sf http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules
    curl -sf http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules
    ```
-   Each should return a JSON array containing a `COMPATIBILITY` / `BACKWARD` rule.
+   Each should return a JSON array containing a `COMPATIBILITY` rule — `BACKWARD` for
+   `OrderCreated`, `FORWARD` for `CustomerRegistered`.
 
 ---
 
@@ -251,8 +252,10 @@ turns green.
 
 ## 7. Run the bootstrap workflow
 
-Attaches the `BACKWARD` rule to both artifacts. The host cold-start step (README §2) already
-does this after `docker compose up`; run this workflow if you need to (re)apply the rules explicitly.
+Attaches the compatibility rule to each artifact — `BACKWARD` to `OrderCreated` (Protobuf),
+`FORWARD` to `CustomerRegistered` (JSON Schema, where Apicurio rejects property additions under
+BACKWARD). The host cold-start step (README §2) already does this after `docker compose up`; run
+this workflow if you need to (re)apply the rules explicitly.
 
 1. **Actions → Schema Governance Bootstrap → Run workflow**
 2. Leave **registry URL** blank to use the standing local registry (`http://localhost:8080`), or
@@ -260,7 +263,7 @@ does this after `docker compose up`; run this workflow if you need to (re)apply 
 3. **Run workflow.** Each step prints its HTTP status:
    ```
    orders.events/OrderCreated: BACKWARD rule attached (HTTP 200)
-   events.customers/CustomerRegistered: BACKWARD rule attached (HTTP 200)
+   events.customers/CustomerRegistered: FORWARD rule attached (HTTP 200)
    ```
    HTTP 409 means the rule already existed — also success.
 
@@ -314,7 +317,8 @@ runners register with it from the start.)
 ### `INCOMPATIBLE` on the very first run, or "artifact not found"
 **Cause:** the registry has no baseline because the host cold-start step (README §2) didn't seed
 it. **Fix:** re-run `./mvnw … apicurio-registry:register` against the registry and confirm the two
-`.../rules` curls return the BACKWARD rule.
+`.../rules` curls return the expected rule (`BACKWARD` for `OrderCreated`, `FORWARD` for
+`CustomerRegistered`).
 
 ### Compile fails with a Java/toolchain error on the runner
 **Cause:** the runner machine lacks JDK 25 or `~/.m2/toolchains.xml`. **Fix:** ensure a JDK-25

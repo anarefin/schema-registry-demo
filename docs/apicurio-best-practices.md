@@ -138,8 +138,10 @@ The goal in dev is fast iteration without teaching bad habits that don't survive
   ```
 
 - **Use a "prod-faithful" local bootstrap.** After `docker compose up`, register from the host
-  with the same `register` command CI runs, then attach the BACKWARD rules over REST (the
-  contracts modules carry the `apicurio-registry-maven-plugin`, so no Maven container is needed).
+  with the same `register` command CI runs, then attach the compatibility rules over REST —
+  `BACKWARD` for `OrderCreated` (Protobuf), `FORWARD` for `CustomerRegistered` (JSON Schema, where
+  Apicurio rejects property additions under BACKWARD as a "narrowing"). The contracts modules carry
+  the `apicurio-registry-maven-plugin`, so no Maven container is needed.
   That mirrors the CI/prod pipeline locally far better than letting the apps auto-register, and
   it's the recommended local pattern.
 - **Keep the test split honest.** Fast, mock-based checks gate every change; registry-backed
@@ -167,8 +169,9 @@ review, audit, rollback, and a single uniform registration path across every tea
 
 ### 5.3 Enforce compatibility server-side, not in client config
 
-Attach the compatibility rule (`BACKWARD` here) to the artifact (or as a global registry rule)
-**in the registry itself**, set once at bootstrap via REST. Server-side rules cannot be bypassed
+Attach the compatibility rule (`BACKWARD` for Protobuf `OrderCreated`, `FORWARD` for JSON
+`CustomerRegistered`) to the artifact (or as a global registry rule) **in the registry itself**,
+set once at bootstrap via REST. Server-side rules cannot be bypassed
 by a misconfigured client. Client-side `use.latest.version` / version pinning is about *which*
 schema a producer serializes with — it is not a substitute for a server-enforced rule.
 
@@ -226,12 +229,12 @@ correctness check and an onboarding map.
 | Practice | Where it lives in this repo |
 |----------|------------------------------|
 | **Schema source of truth = committed files** (git-first; see §9) | `*-contracts/src/main/resources/schemas/*.proto` / `*.json` — codegen reads these; the registry is fed from the same files. The registry is never the codegen source. |
-| Maven plugin registers schema **content** | `order-contracts/pom.xml`, `customer-contracts/pom.xml` — `apicurio-registry-maven-plugin` `register` goal (v1 baseline + v2 backward-compatible `promo_code` addition, `ifExists=FIND_OR_CREATE_VERSION`). |
+| Maven plugin registers schema **content** | `order-contracts/pom.xml`, `customer-contracts/pom.xml` — `apicurio-registry-maven-plugin` `register` goal (v1 baseline + optional-field additions: proto `promo_code`/`notes`, JSON `promoCode`/`input1`, `ifExists=FIND_OR_CREATE_VERSION`). |
 | Maven plugin as the **compat merge gate** | `compat-check` profile in both contracts POMs — `register` with `<dryRun>true</dryRun>` bound to `verify`. `incompatible-demo` profile proves rejection. |
-| REST API configures **rules** (not content) | The host cold-start step (README §2) and `.github/workflows/schema-compat-check.yml` — `curl POST .../artifacts/{id}/rules` attaches the `BACKWARD` rule. |
+| REST API configures **rules** (not content) | The host cold-start step (README §2) and `.github/workflows/schema-compat-check.yml` — `curl POST .../artifacts/{id}/rules` attaches the compatibility rule (`BACKWARD` for `OrderCreated`, `FORWARD` for `CustomerRegistered`). |
 | **Schemas-as-code** CI gate on PRs | `.github/workflows/schema-compat-check.yml` — self-contained Apicurio+Postgres, registers a baseline, attaches rules, runs the per-domain dry-run check. Blocks merge on INCOMPATIBLE. |
 | Registration **on merge**, not by the app | `.github/workflows/schema-register.yml` (push to `main`) → registers to the shared dev registry. |
-| One-time governance **bootstrap over REST** | `.github/workflows/schema-governance-bootstrap.yml` (`workflow_dispatch`) — attaches `BACKWARD` to each artifact in a persistent registry; HTTP 409 on re-run = already-applied = success. |
+| One-time governance **bootstrap over REST** | `.github/workflows/schema-governance-bootstrap.yml` (`workflow_dispatch`) — attaches the per-artifact rule (`BACKWARD` to `OrderCreated`, `FORWARD` to `CustomerRegistered`) in a persistent registry; HTTP 409 on re-run = already-applied = success. |
 | **Prod-faithful local** bootstrap | Host-Maven step after `docker compose up` runs the real `register` + REST rule calls, instead of app auto-register. |
 | Apps are **fetch-only** at runtime | `ApicurioClient` exposes only `fetchByGlobalId` / `fetchByCoordinates` / `latestVersion`; producer/consumer run with `auto-register=OFF`. |
 | **Version pinning** + fail-fast | `schema.{orders,customers}.pinned-version` in `application.yml`; an unregistered pinned schema fails on startup. |
@@ -441,7 +444,7 @@ the host and no Maven image is pulled.
   ```bash
   ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
     -Dapicurio.registry.url=http://localhost:8080
-  # then attach the BACKWARD rules (the two curl POST .../rules calls — see README §2)
+  # then attach the rules (orders=BACKWARD, customers=FORWARD — the two curl POST .../rules calls — see README §2)
   ```
 
   Wrap those lines in `scripts/register-schemas.sh` for ergonomics. Zero extra image. The only
@@ -505,16 +508,17 @@ Ordered from "least change, keeps the self-contained design" to "lightest, needs
   ```
 
   For JSON Schema, a json-schema-diff tool plays the same role. Treat this as a **fast pre-gate**,
-  not a replacement: Buf's compatibility rules are not identical to Apicurio's `BACKWARD` rule, so
-  keep the Apicurio check (C1–C3) or the registration-time server rule as the **authoritative**
-  gate.
+  not a replacement: Buf's compatibility rules are not identical to Apicurio's rules (and Apicurio's
+  JSON Schema checker has its own quirks — e.g. adding a property is a "narrowing" that only passes
+  under FORWARD), so keep the Apicurio check (C1–C3) or the registration-time server rule as the
+  **authoritative** gate.
 
 - Keep the existing `actions/cache@v4` on `~/.m2` — it already prevents re-downloading the plugin
   and dependencies on every run.
 
 ### 10.4 Comparison & recommendation
 
-| Approach | Containers in CI | Boot cost | Hermetic / offline | Matches Apicurio `BACKWARD` exactly | Needs standing infra |
+| Approach | Containers in CI | Boot cost | Hermetic / offline | Matches Apicurio rules exactly | Needs standing infra |
 |----------|------------------|-----------|--------------------|--------------------------------------|----------------------|
 | Current (matrix ×2, SQL) | Apicurio + Postgres, **×2** | High (×2 boots) | Yes | Yes | No |
 | **C1** collapse matrix | Apicurio + Postgres, ×1 | Medium | Yes | Yes | No |

@@ -1,0 +1,19 @@
+graph TD
+    EX["events.exchange"] --> Q1["orders.created.queue"]
+    EX --> Q2["customers.registered.queue"]
+    Q1 --> L["Listener processes message<br/>EventConsumerSupport.classify()"]
+
+    L -->|success| Done["&#9989; done<br/>(dedupe on X-Message-Id)"]
+    L -->|"PERMANENT failure<br/>validation · deserialization ·<br/>serialization · type-mismatch"| DLX["events.dlx"]
+    L -->|"TRANSIENT failure<br/>registry-unavailable ·<br/>schema-not-found · other"| RetryEX["events.retry.exchange"]
+
+    RetryEX --> R0["*.retry.5s.queue (TTL 5s)"]
+    RetryEX --> R1["*.retry.30s.queue (TTL 30s)"]
+    RetryEX --> R2["*.retry.5m.queue (TTL 5m)"]
+    R0 -->|TTL expires| EX
+    R1 -->|TTL expires| EX
+    R2 -->|TTL expires| EX
+
+    L -->|"retries exhausted (max 3)"| DLX
+    DLX --> DLQ1["orders.created.dlq<br/>X-Failure-* headers"]
+    DLX --> DLQ2["customers.registered.dlq<br/>X-Failure-* headers"]
