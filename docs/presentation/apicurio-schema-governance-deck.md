@@ -98,7 +98,9 @@ SPEAKER: walk the three bands.
 - Build-time: 5 Maven modules. Single source of versions in the parent POM (Spring Boot 4.0 BOM).
   `schema-messaging-core` is domain-agnostic; the `core ↛ contracts` rule is machine-enforced via
   maven-enforcer bannedDependencies — core can never depend on a contracts module.
-- Runtime: producer :8081, consumer :8082 (Spring Boot 4 / Java 25, bytecode 69).
+- Runtime: producer :8081, consumer :8082 (Spring Boot 4 / Java 25, bytecode 69). Each contracts
+  module is a Spring Boot starter that auto-configures its own AMQP topology, so the services carry
+  no topology wiring of their own — depending on the module is enough.
 - Infra: Apicurio :8080 (UI :8888) backed by Postgres; RabbitMQ :5672 (mgmt :15672). All via docker compose.
 
 MERMAID SOURCE: diagrams/d1-architecture.mmd
@@ -118,13 +120,19 @@ Format-specific behavior lives behind a **`SerializationStrategy` SPI**:
 | Depends only on | `protobuf-java` | Jackson |
 | Content-type | `application/x-protobuf` | `application/json` |
 
-Each contracts module contributes **one `TypeMapping` bean**: *Java type ↔ registry coordinates ↔
-schema type ↔ routing key*. Core stays domain-agnostic; adding a third format = adding a strategy
-+ a mapping, no converter changes.
+Each contracts module is a **self-contained Spring Boot starter**: it contributes its
+**`TypeMapping` bean** (*Java type ↔ registry coordinates ↔ schema type ↔ routing key*) **and owns
+its AMQP topology** — queues, DLQ, retry ladder, and bindings — via a `@AutoConfiguration`. Put
+the module on a service's classpath and it wires both, with no hand-written config in the service.
+Core stays domain-agnostic; adding a third format = a strategy + a mapping + a topology auto-config,
+all in the new contracts module — **no converter and no service wiring changes**.
 
 <!--
 Architect takeaway: the format is a plug-in. The converter, resolver, cache, and failure routing
 are all format-neutral. This is what makes "Protobuf AND JSON" a non-event in the code.
+The routing-config-separation refactor pushed topology ownership INTO the contracts modules
+(OrderEventTopologyAutoConfiguration / CustomerEventTopologyAutoConfiguration), replacing the old
+hand-written AmqpConfiguration in the services — so a contracts module is now a true starter.
 -->
 
 ---
@@ -424,8 +432,12 @@ All three workflows run on a **self-hosted runner** (`[self-hosted, apicurio-loc
 ![w:760](diagrams/d4-failure-topology.svg)
 
 <!--
-The consumer declares the topology idempotently on startup. EventConsumerSupport.classify() walks
-the cause chain to decide transient vs permanent.
+Topology ownership (post routing-config-separation): the contracts-module auto-configurations
+(OrderEventTopologyAutoConfiguration / CustomerEventTopologyAutoConfiguration) DECLARE the exchanges,
+queues, DLQ, and retry ladder as beans; core's SchemaMessagingConsumerAutoConfiguration contributes
+the RabbitAdmin that APPLIES all of them idempotently on startup, plus the DlxMessageRecoverer and
+DlxRoutingAdvice. There is no service-local AmqpConfiguration anymore.
+EventConsumerSupport.classify() walks the cause chain to decide transient vs permanent.
 - PERMANENT (validation/deserialization/serialization/type-mismatch) → straight to DLQ, no retry.
 - TRANSIENT (registry-unavailable/schema-not-found/other) → retry exchange.
 Retry uses a TTL-ladder trick: a message sits in a retry queue with a TTL; on expiry RabbitMQ
