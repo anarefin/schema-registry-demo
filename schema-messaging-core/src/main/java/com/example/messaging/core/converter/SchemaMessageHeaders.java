@@ -93,6 +93,15 @@ public final class SchemaMessageHeaders {
         try { return SchemaType.valueOf(v); } catch (IllegalArgumentException e) { return null; }
     }
 
+    /**
+     * Raw {@code X-Schema-Type} header value, without mapping onto the {@link SchemaType}
+     * enum. Lets the converter detect type mismatches even for types this library does not
+     * support (e.g. a stale producer still sending {@code PROTOBUF}).
+     */
+    public static String getSchemaTypeName(MessageProperties props) {
+        return headerString(props, TYPE);
+    }
+
     public static int getRetryCount(MessageProperties props) {
         Object v = props.getHeader(RETRY_COUNT);
         if (v == null) return 0;

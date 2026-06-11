@@ -30,7 +30,6 @@
 
     <!-- Pinned spec §3 versions -->
     <apicurio.version>3.2.0</apicurio.version>
-    <protobuf.version>3.25.5</protobuf.version>
     <networknt-json-schema-validator.version>1.5.6</networknt-json-schema-validator.version>
     <caffeine.version>3.1.8</caffeine.version>
     <testcontainers.version>1.20.4</testcontainers.version>
@@ -41,10 +40,8 @@
     <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
     <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
     <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
-    <protobuf-maven-plugin.version>0.6.1</protobuf-maven-plugin.version>
     <jsonschema2pojo-maven-plugin.version>1.2.2</jsonschema2pojo-maven-plugin.version>
     <apicurio-registry-maven-plugin.version>3.2.0</apicurio-registry-maven-plugin.version>
-    <os-maven-plugin.version>1.7.1</os-maven-plugin.version>
   </properties>
 
   <dependencyManagement>
@@ -58,11 +55,6 @@
         <scope>import</scope>
       </dependency>
 
-      <dependency>
-        <groupId>com.google.protobuf</groupId>
-        <artifactId>protobuf-java</artifactId>
-        <version>${protobuf.version}</version>
-      </dependency>
       <dependency>
         <groupId>com.networknt</groupId>
         <artifactId>json-schema-validator</artifactId>

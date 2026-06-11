@@ -4,7 +4,6 @@ import com.example.messaging.core.exception.DeserializationException;
 import com.example.messaging.core.exception.IncompatibleSchemaTypeException;
 import com.example.messaging.core.exception.SchemaMessagingException;
 import com.example.messaging.core.exception.SchemaNotFoundException;
-import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import com.example.messaging.core.model.ResolvedSchema;
@@ -101,21 +100,23 @@ public class SchemaAwareMessageConverter implements MessageConverter {
 
         String groupId = SchemaMessageHeaders.getGroupId(props);
         String artifactId = SchemaMessageHeaders.getArtifactId(props);
-        SchemaType headerType = SchemaMessageHeaders.getSchemaType(props);
+        String headerTypeName = SchemaMessageHeaders.getSchemaTypeName(props);
 
-        // Validate type against registered TypeMapping (TC-1.11)
+        // Validate type against registered TypeMapping (TC-1.11). Compare the raw header
+        // string so unsupported types (e.g. a stale producer sending PROTOBUF) surface as a
+        // crisp IncompatibleSchemaTypeException rather than a downstream validation error.
         TypeMapping mapping = typeMappingRegistry
                 .findByGroupAndArtifact(groupId, artifactId)
                 .orElseThrow(() -> new MessageConversionException(
                         "No TypeMapping for artifact " + groupId + ":" + artifactId));
 
-        if (headerType != null && headerType != mapping.schemaType()) {
+        if (headerTypeName != null && !headerTypeName.equalsIgnoreCase(mapping.schemaType().name())) {
             throw new IncompatibleSchemaTypeException(
-                    mapping.schemaType().name(), headerType.name(),
+                    mapping.schemaType().name(), headerTypeName,
                     groupId + ":" + artifactId);
         }
 
-        SchemaType effectiveType = headerType != null ? headerType : mapping.schemaType();
+        SchemaType effectiveType = mapping.schemaType();
         ResolvedSchema schema = resolveSchema(props, effectiveType);
         SerializationStrategy strategy = strategyFor(effectiveType);
 

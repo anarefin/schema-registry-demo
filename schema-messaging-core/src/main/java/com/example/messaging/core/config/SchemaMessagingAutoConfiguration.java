@@ -12,7 +12,6 @@ import com.example.messaging.core.registry.ApicurioCacheProperties;
 import com.example.messaging.core.registry.CachePreWarmer;
 import com.example.messaging.core.registry.SchemaResolver;
 import com.example.messaging.core.serde.JsonSchemaStrategy;
-import com.example.messaging.core.serde.ProtobufStrategy;
 import com.example.messaging.core.serde.SerializationStrategy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -76,12 +75,6 @@ public class SchemaMessagingAutoConfiguration {
     @ConditionalOnMissingBean
     public TypeMappingRegistry typeMappingRegistry(List<TypeMapping> mappings) {
         return new TypeMappingRegistry(mappings);
-    }
-
-    @Bean
-    @ConditionalOnMissingBean
-    public ProtobufStrategy protobufStrategy() {
-        return new ProtobufStrategy();
     }
 
     /**

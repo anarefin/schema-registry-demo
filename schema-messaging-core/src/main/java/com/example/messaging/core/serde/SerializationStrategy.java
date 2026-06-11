@@ -9,8 +9,8 @@ import com.example.messaging.core.model.SchemaType;
 /**
  * SPI for format-specific serialization, validation, and deserialization (spec §10.1 / T-1.6).
  *
- * <p>Implementations: {@link ProtobufStrategy} (binary, no magic byte/length prefix — spec §6),
- * {@link JsonSchemaStrategy} (networknt validation + Jackson).
+ * <p>Implementation: {@link JsonSchemaStrategy} (networknt validation + Jackson) — the sole
+ * built-in strategy; the wire format is the raw JSON document only (spec §6).
  *
  * <p>To add a new format (e.g. Avro), implement this interface and register the bean with Spring.
  * Override {@link #contentType()} if the MIME type differs from the {@link SchemaType} default.

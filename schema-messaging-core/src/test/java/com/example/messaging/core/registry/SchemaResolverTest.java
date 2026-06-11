@@ -33,7 +33,7 @@ class SchemaResolverTest {
     private static final SchemaCoordinates COORDS =
             new SchemaCoordinates("events.orders", "OrderCreated", "1");
     private static final ResolvedSchema SCHEMA =
-            new ResolvedSchema(42L, SchemaType.PROTOBUF, "syntax=\"proto3\";".getBytes());
+            new ResolvedSchema(42L, SchemaType.JSON, "{}".getBytes());
 
     @BeforeEach
     void setUp() {
@@ -56,12 +56,12 @@ class SchemaResolverTest {
     /** TC-1.1: cache hit by globalId. */
     @Test
     void cacheHit_byGlobalId_secondCallSkipsClient() {
-        when(apicurioClient.fetchByGlobalId(42L, SchemaType.PROTOBUF)).thenReturn(SCHEMA);
+        when(apicurioClient.fetchByGlobalId(42L, SchemaType.JSON)).thenReturn(SCHEMA);
 
-        schemaResolver.resolveByGlobalId(42L, SchemaType.PROTOBUF);
-        schemaResolver.resolveByGlobalId(42L, SchemaType.PROTOBUF);
+        schemaResolver.resolveByGlobalId(42L, SchemaType.JSON);
+        schemaResolver.resolveByGlobalId(42L, SchemaType.JSON);
 
-        verify(apicurioClient, times(1)).fetchByGlobalId(42L, SchemaType.PROTOBUF);
+        verify(apicurioClient, times(1)).fetchByGlobalId(42L, SchemaType.JSON);
     }
 
     /** TC-1.2: distinct coordinates each trigger a separate fetch. */
@@ -106,7 +106,7 @@ class SchemaResolverTest {
         ApicurioCacheProperties shortRefresh =
                 new ApicurioCacheProperties(100, Duration.ofSeconds(30), Duration.ofMillis(30));
         SchemaResolver resolver = new SchemaResolver(apicurioClient, shortRefresh);
-        ResolvedSchema v2 = new ResolvedSchema(42L, SchemaType.PROTOBUF, "v2".getBytes());
+        ResolvedSchema v2 = new ResolvedSchema(42L, SchemaType.JSON, "v2".getBytes());
 
         when(apicurioClient.fetchByCoordinates(any()))
                 .thenReturn(SCHEMA)   // first load
@@ -182,7 +182,7 @@ class SchemaResolverTest {
         schemaResolver.resolveByCoordinates(COORDS); // cross-populates byGlobalId cache
 
         // Now registry is down — resolveByGlobalId should serve from byGlobalId cache
-        ResolvedSchema result = schemaResolver.resolveByGlobalId(42L, SchemaType.PROTOBUF);
+        ResolvedSchema result = schemaResolver.resolveByGlobalId(42L, SchemaType.JSON);
         assertThat(result).isNotNull();
         assertThat(result.rawContent()).isEqualTo(SCHEMA.rawContent());
         // Not marked stale since it came from cache, not lastKnownGood path
@@ -201,10 +201,10 @@ class SchemaResolverTest {
     /** TC-1.8 variant: registry down, never resolved by globalId → throws. */
     @Test
     void registryDown_globalIdNotCached_throwsRegistryUnavailable() {
-        when(apicurioClient.fetchByGlobalId(99L, SchemaType.PROTOBUF))
+        when(apicurioClient.fetchByGlobalId(99L, SchemaType.JSON))
                 .thenThrow(new RegistryUnavailableException("down"));
 
-        assertThatThrownBy(() -> schemaResolver.resolveByGlobalId(99L, SchemaType.PROTOBUF))
+        assertThatThrownBy(() -> schemaResolver.resolveByGlobalId(99L, SchemaType.JSON))
                 .isInstanceOf(RegistryUnavailableException.class);
     }
 }
