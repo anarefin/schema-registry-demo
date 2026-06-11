@@ -1,7 +1,7 @@
 ---
 marp: true
 title: Schema-Governed Messaging — Apicurio + CI/CD
-description: How Apicurio Registry governs Protobuf & JSON Schema messaging, enforced through GitHub Actions
+description: How Apicurio Registry governs JSON Schema messaging, enforced through GitHub Actions
 author: Platform / Architecture
 theme: default
 paginate: true
@@ -34,7 +34,7 @@ SPEAKER GUIDANCE (whole deck)
 
 # Schema-Governed Messaging
 
-### Apicurio Registry as the schema source-of-truth for **Protobuf** *and* **JSON Schema** — enforced as a **CI merge gate** with GitHub Actions
+### Apicurio Registry as the schema source-of-truth for **JSON Schema** contracts — enforced as a **CI merge gate** with GitHub Actions
 
 <br/>
 
@@ -74,16 +74,15 @@ each message type, addressed as `group / artifact-id`, with a **compatibility ru
 | **Compatibility rule** | Policy attached to an artifact: *which changes are allowed?* |
 | **Group** | A namespace for organizing artifacts (like a folder) |
 
-This POC governs **two artifacts of two different schema types** — deliberately, to prove the
-registry handles both:
+This POC governs **two JSON Schema artifacts** in separate groups:
 
 | Group | Artifact | Schema type | Rule |
 |-------|----------|-------------|------|
-| `events.orders` | `OrderCreated` | **Protobuf** | **BACKWARD** |
+| `events.orders` | `OrderCreated` | **JSON Schema** | **FORWARD** |
 | `events.customers` | `CustomerRegistered` | **JSON Schema** | **FORWARD** |
 
 <!--
-The two-rule choice (BACKWARD vs FORWARD) is not arbitrary — it falls out of how each format's
+FORWARD (not BACKWARD) is not arbitrary — it falls out of how Apicurio's JSON Schema
 compatibility checker works. We get there in slides 10–12. Flag it now so it's not a surprise.
 -->
 
@@ -108,17 +107,18 @@ MERMAID SOURCE: diagrams/d1-architecture.mmd
 
 ---
 
-## Two schema types, two strategies
+## One format, a format-agnostic core
 
 The center of the design is `SchemaAwareMessageConverter` (a Spring AMQP `MessageConverter`).
-Format-specific behavior lives behind a **`SerializationStrategy` SPI**:
+Format-specific behavior lives behind a **`SerializationStrategy` SPI** — today with a single
+built-in implementation:
 
-| | Protobuf | JSON Schema |
-|---|---|---|
-| Strategy | `ProtobufStrategy` | `JsonSchemaStrategy` |
-| Contracts module | `order-contracts` | `customer-contracts` |
-| Depends only on | `protobuf-java` | Jackson |
-| Content-type | `application/x-protobuf` | `application/json` |
+| | JSON Schema |
+|---|---|
+| Strategy | `JsonSchemaStrategy` (networknt validation + Jackson) |
+| Contracts modules | `order-contracts` · `customer-contracts` |
+| Depends only on | Jackson |
+| Content-type | `application/json` |
 
 Each contracts module is a **self-contained Spring Boot starter**: it contributes its
 **`TypeMapping` bean** (*Java type ↔ registry coordinates ↔ schema type ↔ routing key*) **and owns
@@ -129,7 +129,7 @@ all in the new contracts module — **no converter and no service wiring changes
 
 <!--
 Architect takeaway: the format is a plug-in. The converter, resolver, cache, and failure routing
-are all format-neutral. This is what makes "Protobuf AND JSON" a non-event in the code.
+are all format-neutral. Adding Avro (or re-adding Protobuf) would be a strategy + mapping, no core changes.
 The routing-config-separation refactor pushed topology ownership INTO the contracts modules
 (OrderEventTopologyAutoConfiguration / CustomerEventTopologyAutoConfiguration), replacing the old
 hand-written AmqpConfiguration in the services — so a contracts module is now a true starter.
@@ -139,8 +139,8 @@ hand-written AmqpConfiguration in the services — so a contracts module is now 
 
 ## The wire format (strict)
 
-The message body is the **raw serialized bytes only** — pure Protobuf (no magic byte, no length
-prefix) or plain JSON. **Schema identity travels entirely in headers.**
+The message body is the **raw serialized bytes only** — the plain JSON document, no envelope.
+**Schema identity travels entirely in headers.**
 
 ```text
 ┌─ AMQP message ────────────────────────────────────────────┐
@@ -150,7 +150,7 @@ prefix) or plain JSON. **Schema identity travels entirely in headers.**
 │   X-Schema-Artifact   = OrderCreated                       │
 │   X-Schema-Version    = 2                                  │
 │   X-Message-Id / X-Correlation-Id                          │
-│ content-type: application/x-protobuf | application/json    │
+│ content-type: application/json                              │
 │ body: <raw serialized bytes — nothing else>               │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -160,7 +160,7 @@ prefix) or plain JSON. **Schema identity travels entirely in headers.**
 
 <!--
 Contrast with the Confluent wire format (magic byte + 4-byte schema id prefixed to the payload).
-We deliberately keep identity in headers so the body stays a clean, portable Protobuf/JSON blob.
+We deliberately keep identity in headers so the body stays a clean, portable JSON document.
 -->
 
 ---
@@ -207,44 +207,41 @@ make it a single point of failure for message flow. Resolution is cached and out
 # Compatibility governance
 ## The core of "schema-governed"
 
-### Same registry, two formats, two rules — and *why*
+### Why JSON Schema artifacts need FORWARD — not BACKWARD
 
 ---
 
-## BACKWARD — the Protobuf story
+## Evolving OrderCreated — what passes, what fails
 
-**Rule:** `BACKWARD` = *new code must read old data* (**new code, old data → works**).
+`OrderCreated` evolves by **adding optional properties** — v2 adds `promoCode`, `notes`,
+`input1`, `userName`; the `required` list never changes.
 
-**Why Protobuf fits BACKWARD:** Protobuf serializes by **field number**, not name. An unknown field
-number is silently skipped.
-
-```protobuf
-// v1 (fields 1–7)              // v2 — current (adds 8–10), BACKWARD-compatible
-message OrderCreated {          message OrderCreated {
-  string order_id    = 1;         string order_id    = 1;
-  ...                             ...  // 2–7 unchanged
-  string created_at  = 7;         optional string promo_code = 8;
-}                                 optional string notes      = 9;
-                                  optional string input1     = 10;
-                               }
+```json
+// v1 (required core fields)         // v2 — current: optional additions
+"properties": { "orderId": ...,      "properties": { ...,
+  "customerId": ..., "quantity":       "promoCode": { "type": "string" },
+  { "type": "integer" }, ... },        "notes":     { "type": "string" },
+"required": ["orderId","customerId",   "input1":    { "type": "string" },
+  "productId","quantity",              "userName":  { "type": "string" } }
+  "totalAmount","currency"]          // required: UNCHANGED
 ```
 
-<span class="green">✅ Add an optional field with a new number</span> — old consumers ignore 8–10.
-<span class="red">❌ Change a field's type / reuse a number</span>:
+<span class="green">✅ Add an optional property</span> — old consumers (Jackson) ignore unknown fields.
+<span class="red">❌ Change an existing property's type</span>:
 
-```protobuf
-int64 order_id = 1;   // WAS string — same number, different wire type → garbled decode → REJECTED
+```json
+"quantity": { "type": "string" }   // WAS integer — breaks every reader → REJECTED at any level
 ```
 
 <!--
-Rule of thumb (Protobuf + BACKWARD): you may add optional fields with new numbers; you may never
-change a type or reuse a number. The incompatible demo file flips field 1 string→int64 (wire type
-2 length-delimited → wire type 0 varint).
+Rule of thumb (JSON Schema): add optional properties OK; never change a property's type or grow
+the required list. The incompatible demo file flips quantity integer→string, which fails under
+every compatibility level (FORWARD, BACKWARD, FULL).
 -->
 
 ---
 
-## FORWARD — the JSON Schema story
+## FORWARD — why not BACKWARD?
 
 **Rule:** `FORWARD` = *old code must read new data* (**old code, new data → works**).
 
@@ -279,13 +276,13 @@ change a type.
 
 | Mode | Apicurio checks | Typical use |
 |------|-----------------|-------------|
-| `BACKWARD` | New schema reads **old** data | Protobuf / Avro — consumers upgraded first |
+| `BACKWARD` | New schema reads **old** data | Binary formats (Protobuf/Avro) — consumers upgraded first |
 | `FORWARD` | Old schema reads **new** data | JSON Schema — consumers may lag producers |
 | `FULL` | Both directions hold | High-confidence environments |
 | `NONE` | No checking | Dev / prototyping only |
 | `*_TRANSITIVE` | Same, but vs **every** prior version | Long-lived schemas, many lagging consumers |
 
-**This POC:** `OrderCreated` → **BACKWARD** · `CustomerRegistered` → **FORWARD**.
+**This POC:** `OrderCreated` → **FORWARD** · `CustomerRegistered` → **FORWARD**.
 
 > The rule is a **per-artifact policy** — you choose it to match how that format evolves and how
 > your producers/consumers are deployed relative to each other.
@@ -316,12 +313,11 @@ Attaches the compatibility rules via the Apicurio REST API. **Idempotent**: a 40
 exists) is treated as success.
 
 ```bash
-# Attach BACKWARD to the Protobuf artifact
+# Attach FORWARD to both JSON Schema artifacts
 curl -X POST ".../v3/groups/events.orders/artifacts/OrderCreated/rules" \
   -H 'Content-Type: application/json' \
-  -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 
-# Attach FORWARD to the JSON Schema artifact
 curl -X POST ".../v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
   -H 'Content-Type: application/json' \
   -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
@@ -384,12 +380,12 @@ steps:
 
 ## The gate in action — decision matrix
 
-| Format | Change | Rule | Outcome |
-|--------|--------|------|---------|
-| Protobuf | Add `optional` field, new number | BACKWARD | <span class="green">✅ PASS</span> |
-| Protobuf | Change a field's type / reuse a number | BACKWARD | <span class="red">❌ BLOCKED</span> |
-| JSON Schema | Add an **optional** property | FORWARD | <span class="green">✅ PASS</span> |
-| JSON Schema | Add a **required** property | FORWARD | <span class="red">❌ BLOCKED</span> |
+| Artifact | Change | Rule | Outcome |
+|----------|--------|------|---------|
+| `OrderCreated` | Add an **optional** property | FORWARD | <span class="green">✅ PASS</span> |
+| `OrderCreated` | Change `quantity` type integer→string | FORWARD | <span class="red">❌ BLOCKED</span> |
+| `CustomerRegistered` | Add an **optional** property | FORWARD | <span class="green">✅ PASS</span> |
+| `CustomerRegistered` | Add a **required** property | FORWARD | <span class="red">❌ BLOCKED</span> |
 
 **A blocked PR shows exactly this:**
 
@@ -402,8 +398,8 @@ steps:
 > The developer sees the failure **on the PR**, with the offending change named — not a 2 a.m. page.
 
 <!--
-These four rows map 1:1 to the four real schema files in the repo (order-created.proto +
-order-created-incompatible.proto; customer-registered.json + customer-registered-incompatible.json).
+These four rows map 1:1 to the four real schema files in the repo (order-created.json +
+order-created-incompatible.json; customer-registered.json + customer-registered-incompatible.json).
 You can demo any of them live with `verify -Pincompatible-demo`.
 -->
 
@@ -460,7 +456,7 @@ The exception taxonomy **drives** the routing decision:
 Every DLQ message carries `X-Failure-*` headers (reason, message, **stack trace truncated to 4 KB**,
 original routing key, timestamp, retry count). Consumer dedupes on `X-Message-Id`.
 
-**Live demo:** `POST /api/orders/poison` publishes garbage bytes → `DeserializationException`
+**Live demo:** `POST /api/orders/poison` publishes garbage JSON bytes → `SchemaValidationException`
 (permanent) → lands on `orders.created.dlq` fully annotated. Inspect at `http://localhost:15672`.
 
 > Health: `RegistryHealthIndicator` (core) + `QueueDepthHealthIndicator` (consumer) at
@@ -481,9 +477,9 @@ original routing key, timestamp, retry count). Consumer dedupes on `X-Message-Id
   (`*IT.java`, Testcontainers, on `verify`).
 
 <!--
-If asked "why not Confluent Schema Registry?": Apicurio is open-source/Apache-2, supports Protobuf
-+ JSON Schema + Avro, has a first-class Maven plugin and REST API, and a v3 API we already build on.
-The wire format here is registry-agnostic anyway (identity in headers).
+If asked "why not Confluent Schema Registry?": Apicurio is open-source/Apache-2, supports JSON
+Schema + Avro + Protobuf, has a first-class Maven plugin and REST API, and a v3 API we already
+build on. The wire format here is registry-agnostic anyway (identity in headers).
 -->
 
 ---
@@ -492,9 +488,10 @@ The wire format here is registry-agnostic anyway (identity in headers).
 
 **What this POC proves**
 
-1. One registry governs **multiple schema formats** (Protobuf *and* JSON Schema) uniformly.
+1. One registry governs **every message contract** (JSON Schema artifacts) uniformly.
 2. Breaking changes are caught **on the PR**, as a red check — not in production.
-3. The rule is **per-artifact** and must match the format (**Protobuf→BACKWARD, JSON→FORWARD**).
+3. The rule is **per-artifact** and must match the format (**JSON Schema→FORWARD**, since Apicurio
+   classifies JSON property additions as narrowing under BACKWARD).
 4. Registry contents are a **projection of `main`**; resolution is **cached & outage-tolerant**.
 5. Bad messages are **contained** (DLQ + retry ladder), not lost or silently dropped.
 
@@ -522,8 +519,7 @@ docker compose up                       # cold start → all-healthy
 # --- Register schemas + attach rules (host cold-start) ---
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
   -Dapicurio.registry.url=http://localhost:8080
-#   OrderCreated (Protobuf)         → BACKWARD
-#   CustomerRegistered (JSON Schema) → FORWARD
+#   OrderCreated / CustomerRegistered (both JSON Schema) → FORWARD
 
 # --- Compat gate (what a PR runs; read-only dry-run) ---
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check

@@ -8,8 +8,8 @@ name: Schema Compatibility Check
 #
 # Prereqs (see docs/self-hosted-runner-setup.md):
 #   - `docker compose up -d` is running on the runner host (registry healthy; the host cold-start
-#     step in README §2 has seeded both artifacts + their compatibility rules — BACKWARD for
-#     OrderCreated, FORWARD for CustomerRegistered).
+#     step in README §2 has seeded both artifacts + their compatibility rules — FORWARD for
+#     both OrderCreated and CustomerRegistered, the JSON Schema artifacts).
 #   - the runner is labelled `apicurio-local` and has JDK 25 + ~/.m2/toolchains.xml.
 
 on:

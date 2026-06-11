@@ -1,5 +1,12 @@
 # Contract Scaling Strategy: From 2 Contracts to 200+
 
+> **Refactor note (June 2026):** this POC has been refactored to be **JSON Schema-only**.
+> `OrderCreated` was converted from Protobuf to a JSON Schema artifact (generated POJO via
+> jsonschema2pojo) and now carries a **FORWARD** compatibility rule, same as
+> `CustomerRegistered`. Protobuf/BACKWARD passages below predate the refactor — treat them as
+> historical/educational context; the schema files are now `order-created*.json` and the wire
+> format is always `application/json`.
+
 **Status:** Forward-looking architecture strategy (not yet implemented)
 **Audience:** System architects, platform/governance owners, contract-owning teams
 **Scope:** Operating model for schema-governed messaging at scale. Runtime protocol, wire

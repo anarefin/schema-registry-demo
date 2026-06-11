@@ -1,5 +1,12 @@
 # Apicurio Schema Registry — Beginner Tutorial
 
+> **Refactor note (June 2026):** this POC has been refactored to be **JSON Schema-only**.
+> `OrderCreated` was converted from Protobuf to a JSON Schema artifact (generated POJO via
+> jsonschema2pojo) and now carries a **FORWARD** compatibility rule, same as
+> `CustomerRegistered`. Protobuf/BACKWARD passages below predate the refactor — treat them as
+> historical/educational context; the schema files are now `order-created*.json` and the wire
+> format is always `application/json`.
+
 This tutorial explains two things:
 
 1. **How Apicurio Schema Registry's compatibility modes work** — with real examples from this repo

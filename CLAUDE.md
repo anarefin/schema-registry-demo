@@ -20,8 +20,8 @@ Planning documents live in `docs/`:
 
 A Maven multi-module POC proving end-to-end **schema-governed messaging**: Apicurio Registry
 3.2.0 (schema source of truth) + RabbitMQ (transport) + Spring Boot 4.0 services on **Java 25**.
-It demonstrates both **Protobuf** and **JSON Schema** message types flowing producer → registry
-→ consumer, BACKWARD-compatibility governance as a CI merge gate, and a full DLX/DLQ/retry
+It demonstrates **JSON Schema** message types (orders + customers) flowing producer → registry
+→ consumer, schema-compatibility governance as a CI merge gate, and a full DLX/DLQ/retry
 failure topology.
 
 ## Commands (as the project is built per the plan)
@@ -39,7 +39,7 @@ The build uses the **committed Maven Wrapper** (`./mvnw`) — always prefer it o
 ./mvnw -pl customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
 ./mvnw -pl order-contracts     apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
 
-# CI merge gate — fails on BACKWARD-incompatible changes
+# CI merge gate — fails on incompatible schema changes
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check
 
 # Incompatible-change demo (triggers rejection from a running registry)
@@ -55,9 +55,9 @@ docker compose up                       # cold start must reach all-healthy
 # Then register schemas from the host (the contracts modules carry the apicurio-registry plugin):
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
 # ...and attach the compatibility rules via REST (register does not — see README §2):
-#   OrderCreated (Protobuf)        → BACKWARD
-#   CustomerRegistered (JSON Schema) → FORWARD  (adding a JSON property is only FORWARD-compatible
-#                                                in Apicurio: BACKWARD rejects it as NARROWED)
+#   OrderCreated / CustomerRegistered (both JSON Schema) → FORWARD
+#   (adding a JSON property is only FORWARD-compatible in Apicurio:
+#    BACKWARD rejects it as NARROWED)
 #   POST /apis/registry/v3/groups/{group}/artifacts/{id}/rules {"ruleType":"COMPATIBILITY","config":"<LEVEL>"}
 ```
 
@@ -88,8 +88,8 @@ Five Maven modules (parent root = this directory):
 
 - **`schema-messaging-core`** — domain-agnostic library (`jar`, no Spring Boot repackage).
   All the reusable plumbing lives here; the two services and contracts plug into it.
-- **`order-contracts`** — `OrderCreated` Protobuf schema + generated classes
-  (`com.example.contracts.orders.*`). Depends only on `protobuf-java`.
+- **`order-contracts`** — `OrderCreated` JSON Schema + generated POJOs
+  (`com.example.contracts.orders.*`). Depends only on Jackson.
 - **`customer-contracts`** — `CustomerRegistered` JSON Schema + generated POJOs
   (`com.example.contracts.customers.*`). Depends only on Jackson.
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
@@ -113,16 +113,17 @@ Supporting pieces in core:
 - **`SchemaResolver`** — Caffeine cache (`byGlobalId` + `byCoordinates`) with TTL +
   refresh-after-write; pre-warms on startup; on registry outage **serves stale from cache**
   and only throws `RegistryUnavailableException` when nothing is cached.
-- **`SerializationStrategy`** SPI with `ProtobufStrategy` and `JsonSchemaStrategy`. Each
-  contracts module contributes one `TypeMapping` bean (Java type ↔ coordinates ↔ type ↔ routing).
+- **`SerializationStrategy`** SPI with `JsonSchemaStrategy` as the sole built-in strategy
+  (the SPI remains for future formats, e.g. Avro). Each contracts module contributes one
+  `TypeMapping` bean (Java type ↔ coordinates ↔ type ↔ routing).
 - **`EventPublisher`** / **`EventConsumerSupport`** wrap `RabbitTemplate` / `@RabbitListener`
   and own the failure-routing decision.
 
 ### Wire format (strict — spec §6)
 
-Message body is the **raw serialized bytes only**: pure Protobuf (no magic byte, no length
-prefix) or JSON. Schema identity travels entirely in `X-Schema-*` headers, plus
-`X-Message-Id` / `X-Correlation-Id`. Content-type is `application/x-protobuf` or `application/json`.
+Message body is the **raw serialized bytes only**: the JSON document, no envelope.
+Schema identity travels entirely in `X-Schema-*` headers, plus
+`X-Message-Id` / `X-Correlation-Id`. Content-type is `application/json`.
 
 ### Failure model (spec §9/§11)
 
@@ -143,9 +144,8 @@ table-drive — keep them aligned.
 
 ### Schema governance
 
-Both artifacts are registered under groups `events.orders` / `events.customers`. `OrderCreated`
-(Protobuf) carries a **BACKWARD** rule; `CustomerRegistered` (JSON Schema) carries a **FORWARD**
-rule — Apicurio's JSON Schema checker classifies adding any property as
+Both artifacts are registered under groups `events.orders` / `events.customers` and carry a
+**FORWARD** rule — Apicurio's JSON Schema checker classifies adding any property as
 `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`, which BACKWARD rejects but FORWARD accepts (so optional
 JSON field additions only validate under FORWARD). The `compat-check` Maven profile in both
 contracts POMs wires `apicurio-registry:register -DdryRun` as the CI merge gate: an incompatible
@@ -161,6 +161,7 @@ Micrometer, Prometheus, Grafana, OpenTelemetry/Jaeger — was removed from the P
 
 ### DLQ demo
 
-`POST /api/orders/poison` on the producer service publishes garbage bytes directly via
-`RabbitTemplate` (bypasses the converter), triggering a `DeserializationException` on the
-consumer and landing the message on the DLQ with all `X-Failure-*` headers populated.
+`POST /api/orders/poison` on the producer service publishes garbage JSON bytes directly via
+`RabbitTemplate` (bypasses the converter), triggering a `SchemaValidationException` on the
+consumer (unparseable JSON fails validation before deserialization) and landing the message
+on the DLQ with all `X-Failure-*` headers populated.

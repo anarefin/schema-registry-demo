@@ -1,9 +1,9 @@
 name: Schema Governance Bootstrap
 
 # Run this ONCE per new registry environment to attach the compatibility rules.
-# OrderCreated (Protobuf) uses BACKWARD; CustomerRegistered (JSON Schema) uses FORWARD —
-# in Apicurio's JSON Schema checker, adding an optional property is classified as a
-# "narrowing" and is only FORWARD-compatible, never BACKWARD (see README §2 / pom note).
+# Both artifacts are JSON Schema and use FORWARD — in Apicurio's JSON Schema checker,
+# adding an optional property is classified as a "narrowing" and is only
+# FORWARD-compatible, never BACKWARD (see README §2 / pom note).
 # It is safe to re-run — Apicurio returns 409 if the rule already exists, which this
 # workflow treats as success.
 #
@@ -37,16 +37,18 @@ jobs:
           fi
           echo "registry_url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Attach rule — orders.events / OrderCreated
+      - name: Attach rule — events.orders / OrderCreated
+        # JSON Schema: adding an optional property is FORWARD-compatible in Apicurio
+        # (BACKWARD rejects it as OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED).
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
             -H 'Content-Type: application/json' \
-            -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}')
+            -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}')
           if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
-            echo "orders.events/OrderCreated: BACKWARD rule attached (HTTP $STATUS)"
+            echo "events.orders/OrderCreated: FORWARD rule attached (HTTP $STATUS)"
           else
-            echo "ERROR: unexpected HTTP $STATUS for orders.events/OrderCreated" >&2
+            echo "ERROR: unexpected HTTP $STATUS for events.orders/OrderCreated" >&2
             exit 1
           fi
 
@@ -67,7 +69,7 @@ jobs:
 
       - name: Verify rules are active
         run: |
-          echo "=== orders.events/OrderCreated rules ==="
+          echo "=== events.orders/OrderCreated rules ==="
           curl -sf "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" | cat
           echo ""
           echo "=== events.customers/CustomerRegistered rules ==="

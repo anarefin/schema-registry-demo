@@ -1,5 +1,12 @@
 # CI Schema-Governance Testing Guide
 
+> **Refactor note (June 2026):** this POC has been refactored to be **JSON Schema-only**.
+> `OrderCreated` was converted from Protobuf to a JSON Schema artifact (generated POJO via
+> jsonschema2pojo) and now carries a **FORWARD** compatibility rule, same as
+> `CustomerRegistered`. Protobuf/BACKWARD passages below predate the refactor — treat them as
+> historical/educational context; the schema files are now `order-created*.json` and the wire
+> format is always `application/json`.
+
 A **reusable, dynamic playbook** for testing how a schema change flows through GitHub Actions
 schema governance — for both **Protobuf** (`order-contracts`) and **JSON Schema**
 (`customer-contracts`). It covers the **success** path (a compatible change is accepted) and the

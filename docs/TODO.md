@@ -1,5 +1,10 @@
 # Detailed Execution Task List — Apicurio + RabbitMQ Schema Registry POC
 
+> **Refactor note (June 2026):** the POC was refactored after completion to be **JSON
+> Schema-only** — `OrderCreated` is now a JSON Schema artifact (FORWARD rule, generated POJO
+> via jsonschema2pojo); all Protobuf tooling was removed. Protobuf tasks/criteria below are
+> kept as the historical record of the original build.
+
 ## Context
 
 `schema-registry-demo/` is the Maven parent root for this POC. This file is the **expanded

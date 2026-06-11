@@ -1,5 +1,12 @@
 # Apicurio Registry — Best Practices: Dev vs. Production, Maven Plugin vs. REST API
 
+> **Refactor note (June 2026):** this POC has been refactored to be **JSON Schema-only**.
+> `OrderCreated` was converted from Protobuf to a JSON Schema artifact (generated POJO via
+> jsonschema2pojo) and now carries a **FORWARD** compatibility rule, same as
+> `CustomerRegistered`. Protobuf/BACKWARD passages below predate the refactor — treat them as
+> historical/educational context; the schema files are now `order-created*.json` and the wire
+> format is always `application/json`.
+
 > **Audience:** Engineers operating a schema registry (Apicurio specifically, but most of this
 > applies to Confluent Schema Registry / AWS Glue / Redpanda too). It covers how to use the
 > registry across the lifecycle — local dev, CI, and production — and when to reach for the
@@ -74,7 +81,7 @@ Language-agnostic, covers both runtime and admin operations. Examples this repo 
 # Attach a BACKWARD compatibility rule to an artifact (governance config)
 curl -X POST http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules \
   -H 'Content-Type: application/json' \
-  -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 ```
 
 **Best for:** everything the Maven plugin doesn't model — **rules and global config**,
@@ -139,7 +146,7 @@ The goal in dev is fast iteration without teaching bad habits that don't survive
 
 - **Use a "prod-faithful" local bootstrap.** After `docker compose up`, register from the host
   with the same `register` command CI runs, then attach the compatibility rules over REST —
-  `BACKWARD` for `OrderCreated` (Protobuf), `FORWARD` for `CustomerRegistered` (JSON Schema, where
+  `FORWARD` for both `OrderCreated` and `CustomerRegistered` (JSON Schema, where
   Apicurio rejects property additions under BACKWARD as a "narrowing"). The contracts modules carry
   the `apicurio-registry-maven-plugin`, so no Maven container is needed.
   That mirrors the CI/prod pipeline locally far better than letting the apps auto-register, and
@@ -169,8 +176,7 @@ review, audit, rollback, and a single uniform registration path across every tea
 
 ### 5.3 Enforce compatibility server-side, not in client config
 
-Attach the compatibility rule (`BACKWARD` for Protobuf `OrderCreated`, `FORWARD` for JSON
-`CustomerRegistered`) to the artifact (or as a global registry rule) **in the registry itself**,
+Attach the compatibility rule (`FORWARD` for both JSON Schema artifacts) to the artifact (or as a global registry rule) **in the registry itself**,
 set once at bootstrap via REST. Server-side rules cannot be bypassed
 by a misconfigured client. Client-side `use.latest.version` / version pinning is about *which*
 schema a producer serializes with — it is not a substitute for a server-enforced rule.
@@ -231,10 +237,10 @@ correctness check and an onboarding map.
 | **Schema source of truth = committed files** (git-first; see §9) | `*-contracts/src/main/resources/schemas/*.proto` / `*.json` — codegen reads these; the registry is fed from the same files. The registry is never the codegen source. |
 | Maven plugin registers schema **content** | `order-contracts/pom.xml`, `customer-contracts/pom.xml` — `apicurio-registry-maven-plugin` `register` goal (v1 baseline + optional-field additions: proto `promo_code`/`notes`, JSON `promoCode`/`input1`, `ifExists=FIND_OR_CREATE_VERSION`). |
 | Maven plugin as the **compat merge gate** | `compat-check` profile in both contracts POMs — `register` with `<dryRun>true</dryRun>` bound to `verify`. `incompatible-demo` profile proves rejection. |
-| REST API configures **rules** (not content) | The host cold-start step (README §2) and `.github/workflows/schema-compat-check.yml` — `curl POST .../artifacts/{id}/rules` attaches the compatibility rule (`BACKWARD` for `OrderCreated`, `FORWARD` for `CustomerRegistered`). |
+| REST API configures **rules** (not content) | The host cold-start step (README §2) and `.github/workflows/schema-compat-check.yml` — `curl POST .../artifacts/{id}/rules` attaches the compatibility rule (`FORWARD` for both artifacts). |
 | **Schemas-as-code** CI gate on PRs | `.github/workflows/schema-compat-check.yml` — self-contained Apicurio+Postgres, registers a baseline, attaches rules, runs the per-domain dry-run check. Blocks merge on INCOMPATIBLE. |
 | Registration **on merge**, not by the app | `.github/workflows/schema-register.yml` (push to `main`) → registers to the shared dev registry. |
-| One-time governance **bootstrap over REST** | `.github/workflows/schema-governance-bootstrap.yml` (`workflow_dispatch`) — attaches the per-artifact rule (`BACKWARD` to `OrderCreated`, `FORWARD` to `CustomerRegistered`) in a persistent registry; HTTP 409 on re-run = already-applied = success. |
+| One-time governance **bootstrap over REST** | `.github/workflows/schema-governance-bootstrap.yml` (`workflow_dispatch`) — attaches the per-artifact rule (`FORWARD` to both artifacts) in a persistent registry; HTTP 409 on re-run = already-applied = success. |
 | **Prod-faithful local** bootstrap | Host-Maven step after `docker compose up` runs the real `register` + REST rule calls, instead of app auto-register. |
 | Apps are **fetch-only** at runtime | `ApicurioClient` exposes only `fetchByGlobalId` / `fetchByCoordinates` / `latestVersion`; producer/consumer run with `auto-register=OFF`. |
 | **Version pinning** + fail-fast | `schema.{orders,customers}.pinned-version` in `application.yml`; an unregistered pinned schema fails on startup. |

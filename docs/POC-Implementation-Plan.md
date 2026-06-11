@@ -1,5 +1,10 @@
 # Apicurio + RabbitMQ Schema Registry POC — Implementation Plan (Maven)
 
+> **Refactor note (June 2026):** the POC was refactored after completion to be **JSON
+> Schema-only** — `OrderCreated` is now a JSON Schema artifact (FORWARD rule, generated POJO
+> via jsonschema2pojo); all Protobuf tooling was removed. Protobuf tasks/criteria below are
+> kept as the historical record of the original build.
+
 A phase-by-phase, task-level execution plan derived from the project specification.
 The POC is built with **Maven** (matching the spec), because Apicurio ships an official,
 maintained **Maven** plugin for schema registration and compatibility-gating and has no

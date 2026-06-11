@@ -1,5 +1,12 @@
 # Technical Report: Schema-Governed Messaging (Beginner's Guide)
 
+> **Refactor note (June 2026):** this POC has been refactored to be **JSON Schema-only**.
+> `OrderCreated` was converted from Protobuf to a JSON Schema artifact (generated POJO via
+> jsonschema2pojo) and now carries a **FORWARD** compatibility rule, same as
+> `CustomerRegistered`. Protobuf/BACKWARD passages below predate the refactor — treat them as
+> historical/educational context; the schema files are now `order-created*.json` and the wire
+> format is always `application/json`.
+
 > **Audience:** Developers new to message queues, schema registries, or this codebase.
 > **Goal:** Explain *what* this project does, *why* it exists, and *how* every piece fits
 > together — using plain language, analogies, diagrams, and concrete examples.

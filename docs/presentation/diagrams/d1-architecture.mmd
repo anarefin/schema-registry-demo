@@ -1,7 +1,7 @@
 graph TB
     subgraph dev["Build-time (Maven modules)"]
         core["schema-messaging-core<br/>(domain-agnostic library)"]
-        oc["order-contracts<br/>OrderCreated · Protobuf"]
+        oc["order-contracts<br/>OrderCreated · JSON Schema"]
         cc["customer-contracts<br/>CustomerRegistered · JSON Schema"]
         core -. "core must NOT depend<br/>on contracts (enforcer-banned)" .- oc
         core -. "core must NOT depend<br/>on contracts (enforcer-banned)" .- cc

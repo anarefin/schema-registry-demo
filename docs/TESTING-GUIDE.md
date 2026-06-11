@@ -1,5 +1,12 @@
 # Step-by-Step Testing Guide — Schema Registry Demo
 
+> **Refactor note (June 2026):** this POC has been refactored to be **JSON Schema-only**.
+> `OrderCreated` was converted from Protobuf to a JSON Schema artifact (generated POJO via
+> jsonschema2pojo) and now carries a **FORWARD** compatibility rule, same as
+> `CustomerRegistered`. Protobuf/BACKWARD passages below predate the refactor — treat them as
+> historical/educational context; the schema files are now `order-created*.json` and the wire
+> format is always `application/json`.
+
 ## Context
 Phases 0–6 are fully implemented. This guide walks through every testing layer in dependency order:
 build verification → unit tests → integration tests → manual end-to-end → failure topology →
@@ -47,18 +54,16 @@ Group  (events.orders)
 | **Artifact** | `OrderCreated` / `CustomerRegistered` | The schema itself |
 | **Version** | `1`, `2`, … | An immutable snapshot; once stored it never changes |
 | **Global ID** | e.g. `1`, `7`, `12` | A registry-wide unique number assigned to each version |
-| **Compatibility rule** | `BACKWARD` (OrderCreated) / `FORWARD` (CustomerRegistered) | Policy stored in Apicurio; checked on every new registration |
+| **Compatibility rule** | `FORWARD` (both artifacts) | Policy stored in Apicurio; checked on every new registration |
 
 ### What the compatibility rules mean (one sentence each)
 
-The two artifacts use **different** rules, by necessity:
+Both artifacts use the **FORWARD** rule:
 
-- **`OrderCreated` (Protobuf) → BACKWARD** — a **consumer** using the new schema can still read
-  messages **produced** with the old schema.
-- **`CustomerRegistered` (JSON Schema) → FORWARD** — a **consumer** using the old schema can still
-  read messages **produced** with the new schema. JSON Schema needs FORWARD because Apicurio's
-  checker classifies adding *any* property (even an optional one) as a "narrowing" that BACKWARD
-  rejects; the field addition is only valid under FORWARD.
+- **FORWARD** — a **consumer** using the old schema can still read messages **produced** with
+  the new schema. JSON Schema needs FORWARD because Apicurio's checker classifies adding *any*
+  property (even an optional one) as a "narrowing" that BACKWARD rejects; the field addition is
+  only valid under FORWARD.
 
 In practice, for both:
 - **Allowed** — add an optional field (under BACKWARD the new consumer ignores its absence; under
@@ -72,8 +77,7 @@ On a cold start Apicurio has no schemas and no rules. Registration is a **host-M
 contracts modules carry the `apicurio-registry-maven-plugin`), run once Apicurio is healthy:
 1. `./mvnw … apicurio-registry:register` registers v1 and v2 of both schemas
 2. A `curl` POST attaches the compatibility rule to each artifact as a **standing policy** (the
-   `register` goal does not do this) — `BACKWARD` for `OrderCreated`, `FORWARD` for
-   `CustomerRegistered` — see Step 1 below
+   `register` goal does not do this) — `FORWARD` for both artifacts — see Step 1 below
 
 Once attached, Apicurio checks every future registration against that policy automatically —
 whether it comes from your laptop, from CI, or from a deployment pipeline.

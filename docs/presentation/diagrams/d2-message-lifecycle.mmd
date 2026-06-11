@@ -15,7 +15,7 @@ sequenceDiagram
     Res->>Reg: fetch schema (cache miss)
     Reg-->>Res: schema + globalId
     Conv->>Conv: validate payload (strategy)
-    Conv->>Conv: serialize (Protobuf / JSON)
+    Conv->>Conv: serialize (raw JSON bytes)
     Conv->>MQ: raw bytes + X-Schema-* headers
     Note right of Conv: validation failure &#8594;<br/>SchemaValidationException,<br/>NO message emitted
 

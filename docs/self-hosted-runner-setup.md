@@ -1,5 +1,12 @@
 # Self-Hosted Runner + Standing Local Registry — Setup Runbook
 
+> **Refactor note (June 2026):** this POC has been refactored to be **JSON Schema-only**.
+> `OrderCreated` was converted from Protobuf to a JSON Schema artifact (generated POJO via
+> jsonschema2pojo) and now carries a **FORWARD** compatibility rule, same as
+> `CustomerRegistered`. Protobuf/BACKWARD passages below predate the refactor — treat them as
+> historical/educational context; the schema files are now `order-created*.json` and the wire
+> format is always `application/json`.
+
 > **Goal:** run **one always-on Apicurio + Postgres registry** as containers on your machine and
 > have GitHub Actions use it. Because your machine is behind NAT (no public inbound), a
 > GitHub-hosted runner can't reach it — so we run a **self-hosted runner on the same machine**.
@@ -26,7 +33,7 @@ The three workflows now run on `[self-hosted, apicurio-local]`:
 |----------|---------|--------|--------------|
 | `schema-compat-check.yml` | PR touching a contract | **read-only** (dry-run) | Validates the PR schema against the registry's real history. Writes nothing. |
 | `schema-register.yml` | push to `main` touching a contract | **write** | Registers the new version(s). |
-| `schema-governance-bootstrap.yml` | manual | **write** | Attaches BACKWARD rules (idempotent). |
+| `schema-governance-bootstrap.yml` | manual | **write** | Attaches FORWARD rules (idempotent). |
 
 > **Key property:** PRs only *read*; only merges (and the manual bootstrap) *write*. So opening or
 > updating a PR can never mutate the standing registry.
@@ -44,15 +51,15 @@ The three workflows now run on `[self-hosted, apicurio-local]`:
    ```
 
    Once `apicurio` is healthy, register both artifacts and attach their compatibility rules from
-   the host. The rules differ: `OrderCreated` (Protobuf) → BACKWARD, `CustomerRegistered` (JSON
-   Schema) → FORWARD (Apicurio rejects JSON property additions under BACKWARD as a "narrowing"):
+   the host. Both artifacts are JSON Schema and take FORWARD (Apicurio rejects JSON property
+   additions under BACKWARD as a "narrowing"):
 
    ```bash
    ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
           -Dapicurio.registry.url=http://localhost:8080
    curl -s -o /dev/null -X POST \
      "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
-     -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+     -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
    curl -s -o /dev/null -X POST \
      "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
      -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
@@ -61,7 +68,7 @@ The three workflows now run on `[self-hosted, apicurio-local]`:
    Verify:
 
    ```bash
-   # OrderCreated returns BACKWARD; CustomerRegistered returns FORWARD
+   # Both artifacts return FORWARD
    curl -sf http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules
    curl -sf http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules
    ```

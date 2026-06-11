@@ -1,9 +1,10 @@
 # Schema Registry POC — Apicurio + RabbitMQ + Spring Boot 4.0
 
 End-to-end schema-governed messaging: **Apicurio Registry 3.2.0** as schema source of truth,
-**RabbitMQ** as transport, two **Spring Boot 4.0** services on **Java 25**. Demonstrates Protobuf
-and JSON Schema message flows, schema-compatibility governance as a CI merge gate (BACKWARD for
-Protobuf, FORWARD for JSON Schema), and a full DLX/DLQ/retry failure topology.
+**RabbitMQ** as transport, two **Spring Boot 4.0** services on **Java 25**. Demonstrates JSON
+Schema message flows (orders + customers), schema-compatibility governance as a CI merge gate
+(FORWARD — see §2 for why JSON Schema artifacts use FORWARD), and a full DLX/DLQ/retry failure
+topology.
 
 ---
 
@@ -12,8 +13,8 @@ Protobuf, FORWARD for JSON Schema), and a full DLX/DLQ/retry failure topology.
 | Spec §18 criterion | Demonstrated by |
 |---|---|
 | Cold `compose up` → all services healthy | `docker compose up`, healthchecks |
-| Orders (Protobuf) + customers (JSON Schema) received & deserialized | Demo curls → consumer logs |
-| Two artifacts with ≥2 versions, compat rule (BACKWARD orders / FORWARD customers) | `apicurio-registry:register` (v1 + v2) |
+| Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs |
+| Two artifacts with ≥2 versions, FORWARD compat rule on both | `apicurio-registry:register` (v1 + v2) |
 | Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
 | Registry down → cached processing, new messages fail gracefully | `SchemaResolver` last-known-good |
@@ -42,7 +43,7 @@ No system Maven installation needed. The wrapper downloads Maven 3.9.11 automati
 ./mvnw clean install -DskipTests
 ```
 
-Compiles all five modules, runs code generation (Protobuf + jsonschema2pojo), and installs
+Compiles all five modules, runs code generation (jsonschema2pojo), and installs
 JARs into the local Maven repository. Skip tests for speed; run them later with `./mvnw verify`.
 
 ### 2. Start infrastructure
@@ -64,12 +65,10 @@ Schema registration is **not** a compose service — it's a host-Maven step. The
 already carry the `apicurio-registry-maven-plugin`, so once Apicurio is healthy you register both
 schemas and attach their compatibility rules directly from the host.
 
-The two artifacts use **different** compatibility levels, by necessity:
-
-- `OrderCreated` (Protobuf) → **BACKWARD** — adding an optional field is a backward-compatible change.
-- `CustomerRegistered` (JSON Schema) → **FORWARD** — in Apicurio's JSON Schema checker, adding a
-  property (even an optional/permissive one) is classified as `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`
-  and is rejected under BACKWARD; it is only valid under FORWARD.
+Both artifacts are JSON Schema and use the **FORWARD** compatibility level — in Apicurio's
+JSON Schema checker, adding a property (even an optional/permissive one) is classified as
+`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED` and is rejected under BACKWARD; it is only valid
+under FORWARD.
 
 ```bash
 # 1. Register both schemas (v1 + v2)
@@ -80,7 +79,7 @@ The two artifacts use **different** compatibility levels, by necessity:
 curl -s -o /dev/null -X POST \
   "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
   -H 'Content-Type: application/json' \
-  -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 curl -s -o /dev/null -X POST \
   "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
   -H 'Content-Type: application/json' \
@@ -105,7 +104,7 @@ Two separate terminals:
 ### 4. Demo: publish messages
 
 ```bash
-# Publish an order event (Protobuf → events.orders)
+# Publish an order event (JSON Schema → events.orders)
 curl -s -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
   -d '{"customerId":"cust-1","productId":"prod-42","quantity":2,"totalAmount":99.99,"currency":"USD"}'
@@ -133,31 +132,32 @@ curl -s -X POST http://localhost:8081/api/customers \
 ### 6. Demo: malformed payload → DLQ
 
 ```bash
-# Publishes garbage Protobuf bytes with valid X-Schema-* headers
+# Publishes garbage JSON bytes with valid X-Schema-* headers
 curl -s -X POST http://localhost:8081/api/orders/poison
 ```
 
-Consumer fails deserialization → `DeserializationException` → **no retry** → `orders.created.dlq`.
+Consumer fails schema validation (unparseable JSON) → `SchemaValidationException` → **no retry** → `orders.created.dlq`.
 In RabbitMQ management UI (http://localhost:15672, guest/guest) browse `orders.created.dlq` to
 inspect all `X-Failure-*` headers (reason, message, stack trace truncated to 4 KB, original
 routing key, failed-at, retry-count).
 
 ### 7. Demo: schema evolution — accept and reject
 
-**Accepted:** add an optional field. For `OrderCreated` (Protobuf) this is BACKWARD-compatible
-(`promo_code`, field 8); for `CustomerRegistered` (JSON Schema) the same kind of change is
-FORWARD-compatible (`promoCode`, `input1`) — Apicurio rejects JSON property additions under
-BACKWARD, so that artifact uses a FORWARD rule.
+**Accepted:** add an optional property — FORWARD-compatible for both artifacts
+(`promoCode` etc. on `OrderCreated`, `promoCode`/`input1` on `CustomerRegistered`).
+Apicurio rejects JSON property additions under BACKWARD, which is why both artifacts
+use a FORWARD rule.
 
 ```bash
-# Register v2 (optional promo_code already present in order-created.proto)
+# Register v2 (optional promoCode etc. already present in order-created.json)
 ./mvnw -pl order-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
 
 # ≥2 versions visible in Apicurio UI → events.orders / OrderCreated
 ```
 
-**Rejected (incompatible):** field-number reuse / type change triggers a BACKWARD violation.
+**Rejected (incompatible):** changing an existing property's type (`quantity` integer → string)
+violates every compatibility level.
 
 ```bash
 # Dry-run incompatible schema — BUILD FAILURE with Apicurio rejection message
@@ -198,12 +198,12 @@ sequenceDiagram
     participant MQ as RabbitMQ
 
     C->>P: POST /api/orders {payload}
-    P->>P: build OrderCreated (Protobuf)
+    P->>P: build OrderCreated (JSON)
     P->>R: resolve(SchemaCoordinates)
     R->>A: GET /apis/registry/v3/groups/events.orders/artifacts/OrderCreated
     A-->>R: schema bytes
     R-->>P: ResolvedSchema (cached)
-    P->>P: validate + serialize (pure Protobuf bytes)
+    P->>P: validate + serialize (raw JSON bytes)
     P->>MQ: publish to events.exchange<br/>X-Schema-GlobalId / X-Schema-Type / X-Message-Id
     P-->>C: 201 Created
 ```
@@ -217,7 +217,7 @@ sequenceDiagram
     participant R as SchemaResolver
     participant A as ApicurioRegistry
 
-    MQ->>CS: deliver message (Protobuf bytes + X-Schema-* headers)
+    MQ->>CS: deliver message (JSON bytes + X-Schema-* headers)
     CS->>R: fetchByGlobalId(X-Schema-GlobalId)
     alt cache hit
         R-->>CS: ResolvedSchema (from Caffeine cache)
@@ -240,7 +240,7 @@ sequenceDiagram
 
     Dev->>CI: push incompatible schema change
     CI->>A: apicurio-registry:register -DdryRun (compatibility check)
-    A-->>CI: 409 Conflict — compatibility rule violated (BACKWARD/FORWARD)
+    A-->>CI: 409 Conflict — compatibility rule violated (FORWARD)
     CI-->>Dev: BUILD FAILURE (clear rejection message)
     Note over Dev,A: Merge blocked — incompatible change never lands
 ```
