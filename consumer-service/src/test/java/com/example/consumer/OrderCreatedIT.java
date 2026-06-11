@@ -9,6 +9,7 @@ import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
 import com.example.messaging.core.publisher.EventPublisher;
 import com.example.messaging.core.registry.ApicurioClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,7 +36,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * TC-3.3 (I) — round-trip: OrderCreated flows producer → RabbitMQ → consumer listener.
- * TC-3.4 (I) — message carries content-type: application/x-protobuf + all X-Schema-* headers.
+ * TC-3.4 (I) — message carries content-type: application/json + all X-Schema-* headers.
  * TC-3.5 (I) — X-Schema-GlobalId present; consumer resolves via fetchByGlobalId (skip coordinate lookup).
  *
  * <p>ApicurioClient is mocked — no live registry needed.
@@ -61,15 +62,17 @@ class OrderCreatedIT {
     @Autowired
     SchemaAwareMessageConverter converter;
 
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
     private static final long MOCK_GLOBAL_ID = 99L;
 
     @BeforeEach
     void mockRegistry() throws Exception {
-        byte[] schemaBytes = loadProtoSchema();
-        ResolvedSchema schema = new ResolvedSchema(MOCK_GLOBAL_ID, SchemaType.PROTOBUF, schemaBytes);
+        byte[] schemaBytes = loadJsonSchema();
+        ResolvedSchema schema = new ResolvedSchema(MOCK_GLOBAL_ID, SchemaType.JSON, schemaBytes);
 
         when(apicurioClient.fetchByCoordinates(any(SchemaCoordinates.class))).thenReturn(schema);
-        when(apicurioClient.fetchByGlobalId(eq(MOCK_GLOBAL_ID), eq(SchemaType.PROTOBUF))).thenReturn(schema);
+        when(apicurioClient.fetchByGlobalId(eq(MOCK_GLOBAL_ID), eq(SchemaType.JSON))).thenReturn(schema);
         when(apicurioClient.latestVersion(any(), any())).thenReturn(schema);
     }
 
@@ -101,7 +104,7 @@ class OrderCreatedIT {
     // ---- TC-3.4: content-type + X-Schema-* headers -------------------------
 
     /**
-     * TC-3.4 (I): SchemaAwareMessageConverter produces content-type: application/x-protobuf
+     * TC-3.4 (I): SchemaAwareMessageConverter produces content-type: application/json
      * and all required X-Schema-* headers (globalId, groupId, artifactId, type, messageId).
      */
     @Test
@@ -111,7 +114,7 @@ class OrderCreatedIT {
         Message rawMsg = converter.toMessage(event, new MessageProperties());
 
         assertThat(rawMsg.getMessageProperties().getContentType())
-                .isEqualTo("application/x-protobuf");
+                .isEqualTo("application/json");
         assertThat(rawMsg.getMessageProperties().<Long>getHeader(SchemaMessageHeaders.GLOBAL_ID))
                 .isEqualTo(MOCK_GLOBAL_ID);
         assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.GROUP_ID))
@@ -119,7 +122,7 @@ class OrderCreatedIT {
         assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.ARTIFACT_ID))
                 .isEqualTo("OrderCreated");
         assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.TYPE))
-                .isEqualTo("PROTOBUF");
+                .isEqualTo("JSON");
         assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.VERSION))
                 .isNotBlank();
         assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.MESSAGE_ID))
@@ -140,16 +143,16 @@ class OrderCreatedIT {
         org.mockito.Mockito.clearInvocations(apicurioClient);
 
         OrderCreated original = buildEvent("ord-gid", "cust-3", "prod-C", 5, 149.95, "GBP");
-        byte[] protoBytes = original.toByteArray();
+        byte[] jsonBytes = objectMapper.writeValueAsBytes(original);
 
         MessageProperties props = new MessageProperties();
         props.setHeader(SchemaMessageHeaders.GLOBAL_ID, MOCK_GLOBAL_ID);
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
-        props.setHeader(SchemaMessageHeaders.TYPE, "PROTOBUF");
-        props.setContentType("application/x-protobuf");
+        props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
+        props.setContentType("application/json");
 
-        Message msg = new Message(protoBytes, props);
+        Message msg = new Message(jsonBytes, props);
         Object result = converter.fromMessage(msg);
 
         assertThat(result).isInstanceOf(OrderCreated.class);
@@ -168,22 +171,21 @@ class OrderCreatedIT {
 
     private static OrderCreated buildEvent(String orderId, String customerId, String productId,
                                             int quantity, double totalAmount, String currency) {
-        return OrderCreated.newBuilder()
-                .setOrderId(orderId)
-                .setCustomerId(customerId)
-                .setProductId(productId)
-                .setQuantity(quantity)
-                .setTotalAmount(totalAmount)
-                .setCurrency(currency)
-                .setCreatedAt("2026-05-31T00:00:00Z")
-                .build();
+        return new OrderCreated()
+                .withOrderId(orderId)
+                .withCustomerId(customerId)
+                .withProductId(productId)
+                .withQuantity(quantity)
+                .withTotalAmount(totalAmount)
+                .withCurrency(currency)
+                .withCreatedAt("2026-05-31T00:00:00Z");
     }
 
-    private static byte[] loadProtoSchema() throws Exception {
+    private static byte[] loadJsonSchema() throws Exception {
         try (var stream = Objects.requireNonNull(
                 OrderCreatedIT.class.getClassLoader()
-                        .getResourceAsStream("schemas/order-created.proto"),
-                "order-created.proto not on test classpath")) {
+                        .getResourceAsStream("schemas/order-created.json"),
+                "order-created.json not on test classpath")) {
             return stream.readAllBytes();
         }
     }

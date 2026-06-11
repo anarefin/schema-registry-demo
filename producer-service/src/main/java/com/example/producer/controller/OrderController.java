@@ -25,7 +25,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * T-3.5: Demo REST endpoint — maps a JSON body to OrderCreated (Protobuf) and publishes via EventPublisher.
+ * T-3.5: Demo REST endpoint — maps a JSON body to OrderCreated (JSON Schema) and publishes via EventPublisher.
  * Returns 201 on success, 400 on schema validation failure (spec §5).
  */
 @RestController
@@ -52,15 +52,14 @@ public class OrderController {
                     "events.orders:OrderCreated",
                     "Missing or invalid required fields (productId, currency, quantity>0, totalAmount)");
         }
-        OrderCreated event = OrderCreated.newBuilder()
-                .setOrderId(UUID.randomUUID().toString())
-                .setCustomerId(request.customerId())
-                .setProductId(request.productId())
-                .setQuantity(request.quantity())
-                .setTotalAmount(request.totalAmount())
-                .setCurrency(request.currency())
-                .setCreatedAt(Instant.now().toString())
-                .build();
+        OrderCreated event = new OrderCreated()
+                .withOrderId(UUID.randomUUID().toString())
+                .withCustomerId(request.customerId())
+                .withProductId(request.productId())
+                .withQuantity(request.quantity())
+                .withTotalAmount(request.totalAmount())
+                .withCurrency(request.currency())
+                .withCreatedAt(Instant.now().toString());
 
         eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
         log.info("Published OrderCreated orderId={}", event.getOrderId());
@@ -68,8 +67,8 @@ public class OrderController {
 
     /**
      * T-5.7: bypass-validation poison demo — publishes a malformed payload directly to
-     * events.exchange with valid X-Schema-* headers but garbage bytes. Consumer will fail
-     * deserialization → DLQ_DIRECT routing. FOR DEMO/TEST USE ONLY.
+     * events.exchange with valid X-Schema-* headers but garbage bytes. Consumer fails
+     * schema validation (unparseable JSON) → DLQ_DIRECT routing. FOR DEMO/TEST USE ONLY.
      *
      * <p>curl -X POST http://localhost:8081/api/orders/poison
      */
@@ -77,12 +76,12 @@ public class OrderController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public void publishPoison() {
         MessageProperties props = new MessageProperties();
-        props.setContentType("application/x-protobuf");
+        props.setContentType("application/json");
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
-        props.setHeader(SchemaMessageHeaders.TYPE, "PROTOBUF");
+        props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
         props.setHeader(SchemaMessageHeaders.MESSAGE_ID, UUID.randomUUID().toString());
-        byte[] garbage = "NOT_VALID_PROTOBUF_BYTES".getBytes(StandardCharsets.UTF_8);
+        byte[] garbage = "{NOT_VALID_JSON".getBytes(StandardCharsets.UTF_8);
         rabbitTemplate.send(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.ROUTING_KEY, new Message(garbage, props));
         log.warn("Published poison message to orders.created (bypass-validation demo)");
     }

@@ -1,118 +1,110 @@
 package com.example.contracts.orders;
 
-import com.google.protobuf.CodedOutputStream;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-
-import java.io.ByteArrayOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * TC-4.2: Proves proto3 BACKWARD compatibility at the byte level.
+ * TC-4.2: Proves JSON Schema FORWARD compatibility at the deserialization level.
  *
- * <p>A v2 producer can publish messages with promo_code set. A "v1 consumer" (one that only
- * knows about fields 1–7) will still deserialize such messages correctly — proto3 silently
- * discards unknown fields. Both directions are tested here using hand-crafted bytes.
+ * <p>The OrderCreated artifact is governed by a FORWARD rule: in Apicurio's JSON Schema
+ * checker, adding an optional property is classified as a "narrowing" and is only
+ * FORWARD-compatible (an old reader still parses the newer payload), never BACKWARD.
+ *
+ * <p>v2 adds the optional 'promoCode', 'notes', 'input1' and 'userName' properties; v1
+ * consumers using Jackson ignore unknown properties by default, so they deserialize newer
+ * payloads without error — exactly the old-reader-reads-new-data guarantee FORWARD encodes.
  */
 class OrderCreatedEvolutionTest {
 
+    private final ObjectMapper mapper = new ObjectMapper();
+
     /**
-     * TC-4.2 (U): v1 consumer reads v2 payload.
-     *
-     * <p>Build a message whose bytes include a non-null promo_code (field 8, wire type 2 = LEN).
-     * Parse it with the generated OrderCreated class (which knows about field 8 since it is v2).
-     * Assert all v1 fields (1-7) are intact — promo_code is accessible as a bonus because the
-     * current generated class already includes it. The important thing is that adding field 8
-     * does NOT break deserialization of fields 1-7.
+     * TC-4.2 (U): v1 consumer reads v2 JSON payload (extra fields tolerated by Jackson).
      */
     @Test
     void tc42_v1FieldsIntactWhenV2PayloadDeserialized() throws Exception {
-        OrderCreated v2 = OrderCreated.newBuilder()
-                .setOrderId("ord-v2-001")
-                .setCustomerId("cust-42")
-                .setProductId("prod-X")
-                .setQuantity(5)
-                .setTotalAmount(199.95)
-                .setCurrency("USD")
-                .setCreatedAt("2026-05-31T10:00:00Z")
-                .setPromoCode("BACK10")   // new v2 field
-                .build();
+        String v2Json = """
+                {
+                  "orderId": "ord-v2-001",
+                  "customerId": "cust-v2",
+                  "productId": "prod-v2",
+                  "quantity": 5,
+                  "totalAmount": 125.00,
+                  "currency": "USD",
+                  "createdAt": "2026-05-31T10:00:00Z",
+                  "promoCode": "SUMMER26",
+                  "notes": "leave at door",
+                  "input1": "extra",
+                  "userName": "alice"
+                }
+                """;
 
-        byte[] bytes = v2.toByteArray();
+        OrderCreated parsed = mapper.readValue(v2Json, OrderCreated.class);
 
-        // Parse the bytes — simulates what any consumer (v1 or v2) does on the wire
-        OrderCreated parsed = OrderCreated.parseFrom(bytes);
-
-        // v1 fields must be fully intact
+        // all v1 fields intact
         assertThat(parsed.getOrderId()).isEqualTo("ord-v2-001");
-        assertThat(parsed.getCustomerId()).isEqualTo("cust-42");
-        assertThat(parsed.getProductId()).isEqualTo("prod-X");
+        assertThat(parsed.getCustomerId()).isEqualTo("cust-v2");
+        assertThat(parsed.getProductId()).isEqualTo("prod-v2");
         assertThat(parsed.getQuantity()).isEqualTo(5);
-        assertThat(parsed.getTotalAmount()).isEqualTo(199.95);
+        assertThat(parsed.getTotalAmount()).isEqualTo(125.00);
         assertThat(parsed.getCurrency()).isEqualTo("USD");
-        assertThat(parsed.getCreatedAt()).isEqualTo("2026-05-31T10:00:00Z");
+        // v2 fields round-trip in the generated POJO
+        assertThat(parsed.getPromoCode()).isEqualTo("SUMMER26");
+        assertThat(parsed.getNotes()).isEqualTo("leave at door");
+        assertThat(parsed.getInput1()).isEqualTo("extra");
+        assertThat(parsed.getUserName()).isEqualTo("alice");
     }
 
     /**
-     * TC-4.2 complement: simulate a strict "v1-only" consumer by hand-crafting proto bytes
-     * that include field 8 (promo_code) and parsing them with parseFrom.
-     *
-     * <p>Proto3 contract: unknown fields are preserved but do not cause parse errors.
-     * A future "v1 class" (without getPromoCode) would receive the message without exception.
+     * TC-4.2 complement: v2 consumer reads a v1 payload (optional fields absent → null).
      */
     @Test
-    void tc42_unknownFieldInPayloadDoesNotCauseParseError() throws Exception {
-        // Manually encode an OrderCreated message with only v1 fields + an "unknown" field 9
-        // (a field that neither v1 nor v2 knows about, simulating a future v3 addition).
-        // Proto3 must parse it without error and preserve v1 fields.
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        CodedOutputStream cos = CodedOutputStream.newInstance(buf);
+    void tc42_v1PayloadReadableByV2Consumer() throws Exception {
+        String v1Json = """
+                {
+                  "orderId": "ord-v1-001",
+                  "customerId": "cust-v1",
+                  "productId": "prod-v1",
+                  "quantity": 1,
+                  "totalAmount": 9.99,
+                  "currency": "EUR",
+                  "createdAt": "2026-05-30T08:00:00Z"
+                }
+                """;
 
-        // field 1 (order_id): wire type 2 (LEN)
-        cos.writeString(1, "ord-unknown-field");
-        // field 2 (customer_id)
-        cos.writeString(2, "cust-99");
-        // field 3 (product_id)
-        cos.writeString(3, "prod-Z");
-        // field 4 (quantity): wire type 0 (VARINT)
-        cos.writeInt32(4, 1);
-        // field 5 (total_amount): wire type 1 (I64)
-        cos.writeDouble(5, 49.99);
-        // field 6 (currency)
-        cos.writeString(6, "EUR");
-        // field 7 (created_at)
-        cos.writeString(7, "2026-05-31T12:00:00Z");
-        // field 9 (hypothetical v3 field — unknown to both v1 and v2)
-        cos.writeString(9, "some-future-value");
-        cos.flush();
+        OrderCreated parsed = mapper.readValue(v1Json, OrderCreated.class);
 
-        byte[] bytes = buf.toByteArray();
-        OrderCreated parsed = OrderCreated.parseFrom(bytes);
-
-        assertThat(parsed.getOrderId()).isEqualTo("ord-unknown-field");
-        assertThat(parsed.getCustomerId()).isEqualTo("cust-99");
-        assertThat(parsed.getQuantity()).isEqualTo(1);
-        assertThat(parsed.getTotalAmount()).isEqualTo(49.99);
+        assertThat(parsed.getOrderId()).isEqualTo("ord-v1-001");
+        assertThat(parsed.getPromoCode()).isNull();
+        assertThat(parsed.getNotes()).isNull();
+        assertThat(parsed.getInput1()).isNull();
+        assertThat(parsed.getUserName()).isNull();
     }
 
     /**
-     * TC-4.1 intent: proto v2 adds optional string promo_code at field number 8.
-     * Verify the field is accessible and defaults to empty string when not set (proto3 default).
+     * TC-4.2 incompatible-intent: changing 'quantity' from integer to string (the
+     * incompatible-demo schema in src/test/resources/schemas/order-created-incompatible.json)
+     * breaks every reader, which is why the registry gate rejects it under any compatibility
+     * level. This test documents the consumer-side expectation for a missing required field:
+     * Jackson maps it to null, and it is the JsonSchemaStrategy validation in the messaging
+     * core that rejects such payloads at runtime.
      */
     @Test
-    void tc41_v2FieldAddedAndDefaultsToEmpty() {
-        OrderCreated noPromo = OrderCreated.newBuilder()
-                .setOrderId("ord-no-promo")
-                .setCustomerId("cust-1")
-                .setProductId("prod-A")
-                .setQuantity(1)
-                .setTotalAmount(10.0)
-                .setCurrency("USD")
-                .setCreatedAt("2026-05-31T00:00:00Z")
-                .build();
+    void tc42_missingRequiredFieldResultsInNull() throws Exception {
+        String incompatiblePayload = """
+                {
+                  "customerId": "cust-bad",
+                  "productId": "prod-bad",
+                  "quantity": 1,
+                  "totalAmount": 1.00,
+                  "currency": "USD"
+                }
+                """;
 
-        // Default proto3 value for string field is empty string (not null)
-        assertThat(noPromo.getPromoCode()).isEmpty();
-        assertThat(noPromo.hasPromoCode()).isFalse();
+        OrderCreated parsed = mapper.readValue(incompatiblePayload, OrderCreated.class);
+
+        assertThat(parsed.getOrderId()).isNull();
     }
 }

@@ -1,0 +1,52 @@
+{
+  "title": "OrderCreated",
+  "description": "Event emitted when a new order is created.",
+  "type": "object",
+  "properties": {
+    "orderId": {
+      "type": "string",
+      "description": "Unique order identifier (UUID)"
+    },
+    "customerId": {
+      "type": "string",
+      "description": "Identifier of the ordering customer"
+    },
+    "productId": {
+      "type": "string",
+      "description": "Identifier of the ordered product"
+    },
+    "quantity": {
+      "type": "integer",
+      "description": "Number of units ordered"
+    },
+    "totalAmount": {
+      "type": "number",
+      "description": "Total order amount"
+    },
+    "currency": {
+      "type": "string",
+      "description": "ISO-4217 currency code"
+    },
+    "createdAt": {
+      "type": "string",
+      "description": "ISO-8601 UTC timestamp of order creation"
+    },
+    "promoCode": {
+      "type": "string",
+      "description": "Optional promo code applied to the order (v2 addition)"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional free-text order notes (v2 addition)"
+    },
+    "input1": {
+      "type": "string",
+      "description": "Optional extra input (v2 addition)"
+    },
+    "userName": {
+      "type": "string",
+      "description": "Optional name of the user placing the order (v2 addition)"
+    }
+  },
+  "required": ["orderId", "customerId", "productId", "quantity", "totalAmount", "currency"]
+}
