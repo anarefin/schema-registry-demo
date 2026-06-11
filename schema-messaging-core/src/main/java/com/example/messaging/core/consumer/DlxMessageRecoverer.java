@@ -1,7 +1,5 @@
-package com.example.consumer.amqp;
+package com.example.messaging.core.consumer;
 
-import com.example.messaging.core.consumer.EventConsumerSupport;
-import com.example.messaging.core.consumer.RoutingDecision;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,10 +13,10 @@ import org.springframework.amqp.rabbit.retry.MessageRecoverer;
  *
  * <p>Decision table:
  * <ul>
- *   <li>Permanent failure (validation, deserialization, type-mismatch) → {@code events.dlx} immediately.</li>
- *   <li>Transient failure with {@code X-Retry-Count} &lt; maxRetries → {@code events.retry.exchange}
+ *   <li>Permanent failure (validation, deserialization, type-mismatch) → dlxExchange immediately.</li>
+ *   <li>Transient failure with {@code X-Retry-Count} &lt; maxRetries → retryExchange
  *       with routing key {@code <original-routing-key>.retry.<tier>} (TTL queue for that tier).</li>
- *   <li>Transient failure with {@code X-Retry-Count} ≥ maxRetries → {@code events.dlx}.</li>
+ *   <li>Transient failure with {@code X-Retry-Count} ≥ maxRetries → dlxExchange.</li>
  * </ul>
  */
 public class DlxMessageRecoverer implements MessageRecoverer {

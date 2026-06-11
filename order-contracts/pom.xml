@@ -10,7 +10,9 @@
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
-  <!-- T-3.7: Protobuf contracts jar. Depends only on protobuf-java (spec §10.3). -->
+  <!-- T-3.7: Protobuf contracts jar. Carries OrderCreated schema (protobuf-java) plus its
+       own AMQP routing/topology auto-configuration (spring-amqp + spring-boot-autoconfigure),
+       self-contained with no dependency on schema-messaging-core. -->
   <artifactId>order-contracts</artifactId>
   <packaging>jar</packaging>
 
@@ -23,6 +25,16 @@
     <dependency>
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
+    </dependency>
+
+    <!-- AMQP routing/topology for OrderCreated (self-contained, no dependency on schema-messaging-core) -->
+    <dependency>
+      <groupId>org.springframework.amqp</groupId>
+      <artifactId>spring-amqp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
     </dependency>
 
     <dependency>

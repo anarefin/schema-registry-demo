@@ -1,5 +1,6 @@
 package com.example.consumer.listener;
 
+import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
 import com.example.messaging.core.consumer.IdempotencyFilter;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
@@ -23,7 +24,7 @@ public class CustomerEventListener {
         this.idempotencyFilter = idempotencyFilter;
     }
 
-    @RabbitListener(queues = "customers.registered.queue",
+    @RabbitListener(queues = CustomerEventRouting.QUEUE_NAME,
                     containerFactory = "rabbitListenerContainerFactory")
     public void onCustomerRegistered(
             CustomerRegistered event,

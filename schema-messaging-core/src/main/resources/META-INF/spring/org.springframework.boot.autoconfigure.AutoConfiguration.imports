@@ -1,1 +1,2 @@
 com.example.messaging.core.config.SchemaMessagingAutoConfiguration
+com.example.messaging.core.config.SchemaMessagingConsumerAutoConfiguration

@@ -1,6 +1,7 @@
 package com.example.consumer.listener;
 
 import com.example.contracts.orders.OrderCreated;
+import com.example.contracts.orders.OrderEventRouting;
 import com.example.messaging.core.consumer.IdempotencyFilter;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import org.slf4j.Logger;
@@ -23,7 +24,7 @@ public class OrderEventListener {
         this.idempotencyFilter = idempotencyFilter;
     }
 
-    @RabbitListener(queues = "orders.created.queue",
+    @RabbitListener(queues = OrderEventRouting.QUEUE_NAME,
                     containerFactory = "rabbitListenerContainerFactory")
     public void onOrderCreated(
             OrderCreated event,

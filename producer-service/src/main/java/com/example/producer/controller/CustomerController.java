@@ -1,9 +1,9 @@
 package com.example.producer.controller;
 
 import com.example.contracts.customers.CustomerRegistered;
+import com.example.contracts.customers.amqp.EventExchanges;
 import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.publisher.EventPublisher;
-import com.example.producer.config.AmqpConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -49,7 +49,7 @@ public class CustomerController {
         event.setPhoneNumber(request.phoneNumber());
         event.setRegisteredAt(Instant.now().toString());
 
-        eventPublisher.publish(AmqpConfiguration.EVENTS_EXCHANGE, event);
+        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
         log.info("Published CustomerRegistered customerId={}", event.getCustomerId());
     }
 

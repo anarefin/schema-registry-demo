@@ -1,5 +1,6 @@
 package com.example.producer.config;
 
+import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
 import com.example.messaging.core.mapping.TypeMapping;
 import com.example.messaging.core.model.SchemaCoordinates;
@@ -24,6 +25,6 @@ public class CustomerContractsConfiguration {
         SchemaCoordinates coords = (pinnedVersion == null || pinnedVersion.isBlank())
                 ? SchemaCoordinates.latest("events.customers", "CustomerRegistered")
                 : new SchemaCoordinates("events.customers", "CustomerRegistered", pinnedVersion);
-        return new TypeMapping(CustomerRegistered.class, coords, SchemaType.JSON, "customers.registered");
+        return new TypeMapping(CustomerRegistered.class, coords, SchemaType.JSON, CustomerEventRouting.ROUTING_KEY);
     }
 }

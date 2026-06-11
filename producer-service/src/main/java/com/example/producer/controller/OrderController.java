@@ -1,10 +1,11 @@
 package com.example.producer.controller;
 
 import com.example.contracts.orders.OrderCreated;
+import com.example.contracts.orders.OrderEventRouting;
+import com.example.contracts.orders.amqp.EventExchanges;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.publisher.EventPublisher;
-import com.example.producer.config.AmqpConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
@@ -61,7 +62,7 @@ public class OrderController {
                 .setCreatedAt(Instant.now().toString())
                 .build();
 
-        eventPublisher.publish(AmqpConfiguration.EVENTS_EXCHANGE, event);
+        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
         log.info("Published OrderCreated orderId={}", event.getOrderId());
     }
 
@@ -82,7 +83,7 @@ public class OrderController {
         props.setHeader(SchemaMessageHeaders.TYPE, "PROTOBUF");
         props.setHeader(SchemaMessageHeaders.MESSAGE_ID, UUID.randomUUID().toString());
         byte[] garbage = "NOT_VALID_PROTOBUF_BYTES".getBytes(StandardCharsets.UTF_8);
-        rabbitTemplate.send(AmqpConfiguration.EVENTS_EXCHANGE, "orders.created", new Message(garbage, props));
+        rabbitTemplate.send(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.ROUTING_KEY, new Message(garbage, props));
         log.warn("Published poison message to orders.created (bypass-validation demo)");
     }
 

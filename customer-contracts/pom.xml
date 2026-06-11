@@ -10,7 +10,9 @@
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
-  <!-- T-2.7: JSON Schema contracts jar. Depends only on Jackson (no Spring, no core). -->
+  <!-- T-2.7: JSON Schema contracts jar. Carries CustomerRegistered schema (Jackson) plus its
+       own AMQP routing/topology auto-configuration (spring-amqp + spring-boot-autoconfigure),
+       self-contained with no dependency on schema-messaging-core. -->
   <artifactId>customer-contracts</artifactId>
   <packaging>jar</packaging>
 
@@ -23,6 +25,16 @@
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!-- AMQP routing/topology for CustomerRegistered (self-contained, no dependency on schema-messaging-core) -->
+    <dependency>
+      <groupId>org.springframework.amqp</groupId>
+      <artifactId>spring-amqp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
     </dependency>
 
     <dependency>

@@ -1,6 +1,7 @@
 package com.example.consumer.health;
 
-import com.example.consumer.config.AmqpConfiguration;
+import com.example.contracts.customers.CustomerEventRouting;
+import com.example.contracts.orders.OrderEventRouting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -32,10 +33,10 @@ public class QueueDepthHealthIndicator implements HealthIndicator {
     public Health health() {
         try {
             Map<String, Object> details = new LinkedHashMap<>();
-            int customersDlqDepth = queueDepth(AmqpConfiguration.CUSTOMERS_DLQ, details);
-            int ordersDlqDepth    = queueDepth(AmqpConfiguration.ORDERS_DLQ, details);
-            queueDepth(AmqpConfiguration.CUSTOMERS_REGISTERED_QUEUE, details);
-            queueDepth(AmqpConfiguration.ORDERS_CREATED_QUEUE, details);
+            int customersDlqDepth = queueDepth(CustomerEventRouting.DLQ_NAME, details);
+            int ordersDlqDepth    = queueDepth(OrderEventRouting.DLQ_NAME, details);
+            queueDepth(CustomerEventRouting.QUEUE_NAME, details);
+            queueDepth(OrderEventRouting.QUEUE_NAME, details);
 
             boolean dlqEmpty = customersDlqDepth == 0 && ordersDlqDepth == 0;
             return (dlqEmpty ? Health.up() : Health.down())

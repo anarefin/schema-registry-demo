@@ -1,7 +1,8 @@
 package com.example.consumer;
 
+import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
-import com.example.consumer.config.AmqpConfiguration;
+import com.example.contracts.customers.amqp.EventExchanges;
 import com.example.consumer.listener.CustomerEventListener;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.exception.SchemaNotFoundException;
@@ -94,7 +95,7 @@ class DlxRoutingIT {
         when(apicurioClient.latestVersion(any(), any())).thenReturn(schema);
 
         // Drain DLQ so each test starts with an empty queue
-        drainQueue(AmqpConfiguration.CUSTOMERS_DLQ);
+        drainQueue(CustomerEventRouting.DLQ_NAME);
     }
 
     // ---- TC-5.2 / TC-5.3 / TC-5.7 ----------------------------------------
@@ -106,10 +107,10 @@ class DlxRoutingIT {
      */
     @Test
     void tc52_53_57_deserializationPoisonRoutesToDlqWithHeaders() {
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY,
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
                 "{INVALID_JSON".getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString());
 
-        Message dlqMsg = awaitDlq(AmqpConfiguration.CUSTOMERS_DLQ);
+        Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME);
 
         // TC-5.2 / TC-5.3: permanent → DLQ, retry count = 0
         assertThat(SchemaMessageHeaders.getRetryCount(dlqMsg.getMessageProperties())).isEqualTo(0);
@@ -121,7 +122,7 @@ class DlxRoutingIT {
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_MESSAGE)).isNotBlank();
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_STACK_TRACE)).isNotBlank();
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_ROUTING_KEY))
-                .isEqualTo(AmqpConfiguration.CUSTOMERS_ROUTING_KEY);
+                .isEqualTo(CustomerEventRouting.ROUTING_KEY);
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_FAILED_AT)).isNotBlank();
         assertThat(SchemaMessageHeaders.getRetryCount(p)).isEqualTo(0);
     }
@@ -139,10 +140,10 @@ class DlxRoutingIT {
         when(apicurioClient.fetchByCoordinates(any()))
                 .thenThrow(new SchemaNotFoundException("coordinates"));
 
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY,
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
                 "{}".getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString());
 
-        Message dlqMsg = awaitDlq(AmqpConfiguration.CUSTOMERS_DLQ, 15);
+        Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME, 15);
         assertThat(dlqMsg.getMessageProperties()
                 .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
     }
@@ -162,7 +163,7 @@ class DlxRoutingIT {
         }).when(customerEventListener).onCustomerRegistered(any(), any());
 
         byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY,
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
                 validJson, UUID.randomUUID().toString());
 
         // 4 calls = initial delivery + 3 retries via TTL queues
@@ -170,7 +171,7 @@ class DlxRoutingIT {
                .untilAsserted(() -> assertThat(callCount.get()).isGreaterThanOrEqualTo(4));
 
         // TC-5.6: X-Retry-Count=3 in DLQ message
-        Message dlqMsg = awaitDlq(AmqpConfiguration.CUSTOMERS_DLQ);
+        Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME);
         assertThat(dlqMsg.getMessageProperties()
                 .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
     }
@@ -189,7 +190,7 @@ class DlxRoutingIT {
         String messageId = UUID.randomUUID().toString();
         byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
 
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY, validJson, messageId);
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY, validJson, messageId);
 
         // Wait for the first delivery to be processed
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
@@ -197,7 +198,7 @@ class DlxRoutingIT {
                        .onCustomerRegistered(any(), any()));
 
         // Send the duplicate (same X-Message-Id)
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY, validJson, messageId);
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY, validJson, messageId);
 
         // Give the duplicate time to arrive and be handled (returns early via idempotency)
         await().atMost(5, TimeUnit.SECONDS).untilAsserted(() ->
@@ -205,7 +206,7 @@ class DlxRoutingIT {
                        .onCustomerRegistered(any(), any()));
 
         // No DLQ message: neither delivery caused a failure routing
-        assertThat(rabbitTemplate.receive(AmqpConfiguration.CUSTOMERS_DLQ, 300)).isNull();
+        assertThat(rabbitTemplate.receive(CustomerEventRouting.DLQ_NAME, 300)).isNull();
     }
 
     // ---- helpers -----------------------------------------------------------

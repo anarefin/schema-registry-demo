@@ -1,4 +1,4 @@
-package com.example.consumer.amqp;
+package com.example.messaging.core.consumer;
 
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
