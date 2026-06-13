@@ -6,7 +6,6 @@ author: Platform / Architecture
 theme: default
 paginate: true
 header: 'Schema-Governed Messaging POC'
-footer: 'Apicurio Registry · RabbitMQ · GitHub Actions · Java 25 / Spring Boot 4'
 style: |
   section { font-size: 26px; }
   section.lead h1 { font-size: 52px; }
@@ -113,11 +112,11 @@ The center of the design is `SchemaAwareMessageConverter` (a Spring AMQP `Messag
 Format-specific behavior lives behind a **`SerializationStrategy` SPI** — today with a single
 built-in implementation:
 
-| | JSON Schema |
-|---|---|
-| Strategy | `JsonSchemaStrategy` (networknt validation + Jackson) |
+| Detail | JSON Schema implementation |
+|--------|--------------------------|
+| Strategy | `JsonSchemaStrategy` (networknt Draft 2020-12 + Jackson) |
 | Contracts modules | `order-contracts` · `customer-contracts` |
-| Depends only on | Jackson |
+| Strategy depends on | Jackson only (no Spring, no core) |
 | Content-type | `application/json` |
 
 Each contracts module is a **self-contained Spring Boot starter**: it contributes its
@@ -129,7 +128,7 @@ all in the new contracts module — **no converter and no service wiring changes
 
 <!--
 Architect takeaway: the format is a plug-in. The converter, resolver, cache, and failure routing
-are all format-neutral. Adding Avro (or re-adding Protobuf) would be a strategy + mapping, no core changes.
+are all format-neutral. Adding another format (Avro, Protobuf) would be a strategy + mapping, no core changes.
 The routing-config-separation refactor pushed topology ownership INTO the contracts modules
 (OrderEventTopologyAutoConfiguration / CustomerEventTopologyAutoConfiguration), replacing the old
 hand-written AmqpConfiguration in the services — so a contracts module is now a true starter.
