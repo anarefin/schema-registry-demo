@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.support.converter.MessageConversionException;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -52,6 +53,9 @@ public class EventConsumerSupport {
     public RoutingDecision classify(Exception e) {
         Throwable current = e;
         while (current != null) {
+            if (current instanceof MessageConversionException) {
+                return RoutingDecision.DLQ_DIRECT;
+            }
             for (Class<? extends Exception> permanentType : PERMANENT_EXCEPTIONS) {
                 if (permanentType.isInstance(current)) return RoutingDecision.DLQ_DIRECT;
             }
@@ -98,6 +102,10 @@ public class EventConsumerSupport {
         if (s == null) return "";
         byte[] bytes = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         if (bytes.length <= maxBytes) return s;
-        return new String(bytes, 0, maxBytes, java.nio.charset.StandardCharsets.UTF_8) + "...[truncated]";
+        int len = maxBytes;
+        while (len > 0 && (bytes[len] & 0xC0) == 0x80) {
+            len--;
+        }
+        return new String(bytes, 0, len, java.nio.charset.StandardCharsets.UTF_8) + "...[truncated]";
     }
 }

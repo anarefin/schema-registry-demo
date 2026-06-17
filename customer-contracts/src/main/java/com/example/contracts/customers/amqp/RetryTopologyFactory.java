@@ -32,6 +32,7 @@ public final class RetryTopologyFactory {
     }
 
     public static String tierSuffix(int tier) {
+        // Keep aligned with schema-messaging-core RetryTierSuffixes
         return switch (tier) {
             case 0 -> "5s";
             case 1 -> "30s";

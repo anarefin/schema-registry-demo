@@ -3,6 +3,7 @@ package com.example.messaging.core.config;
 import com.example.messaging.core.consumer.DlxMessageRecoverer;
 import com.example.messaging.core.consumer.DlxRoutingAdvice;
 import com.example.messaging.core.consumer.EventConsumerSupport;
+import com.example.messaging.core.consumer.IdempotencyFilter;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -11,6 +12,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -32,6 +34,7 @@ import org.springframework.context.annotation.Bean;
  * {@code events.dlx} / {@code events.retry.exchange} if needed.
  */
 @AutoConfiguration(after = SchemaMessagingAutoConfiguration.class)
+@ConditionalOnProperty(name = "schema-messaging.consumer.enabled", havingValue = "true")
 public class SchemaMessagingConsumerAutoConfiguration {
 
     @Value("${events.dlx:events.dlx}")
@@ -43,6 +46,12 @@ public class SchemaMessagingConsumerAutoConfiguration {
     @Value("${events.retry.tier0.ms:5000}")   private long tier0Ms;
     @Value("${events.retry.tier1.ms:30000}")  private long tier1Ms;
     @Value("${events.retry.tier2.ms:300000}") private long tier2Ms;
+
+    @Bean
+    @ConditionalOnMissingBean
+    public IdempotencyFilter idempotencyFilter() {
+        return new IdempotencyFilter();
+    }
 
     @Bean
     @ConditionalOnMissingBean

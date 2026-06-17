@@ -29,7 +29,7 @@ public class CustomerEventListener {
     public void onCustomerRegistered(
             CustomerRegistered event,
             @Header(value = SchemaMessageHeaders.MESSAGE_ID, required = false) String messageId) {
-        if (idempotencyFilter.isDuplicate(messageId)) {
+        if (idempotencyFilter.alreadyProcessed(messageId)) {
             log.info("Duplicate CustomerRegistered messageId={}, skipping", messageId);
             return;
         }
@@ -38,5 +38,6 @@ public class CustomerEventListener {
                 event.getEmail(),
                 event.getFirstName(),
                 event.getLastName());
+        idempotencyFilter.markProcessed(messageId);
     }
 }

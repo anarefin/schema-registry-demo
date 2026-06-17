@@ -9,6 +9,7 @@ import com.example.messaging.core.exception.SerializationException;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.amqp.support.converter.MessageConversionException;
 
 import java.util.stream.Stream;
 
@@ -28,6 +29,7 @@ class EventConsumerSupportTest {
             Arguments.of(new DeserializationException("ctx", new RuntimeException()), RoutingDecision.DLQ_DIRECT),
             Arguments.of(new SerializationException("ctx", new RuntimeException()),   RoutingDecision.DLQ_DIRECT),
             Arguments.of(new IncompatibleSchemaTypeException("JSON", "PROTOBUF", "c"), RoutingDecision.DLQ_DIRECT),
+            Arguments.of(new MessageConversionException("No TypeMapping"), RoutingDecision.DLQ_DIRECT),
             // TRANSIENT — eligible for retry
             Arguments.of(new SchemaNotFoundException("coords"),              RoutingDecision.RETRY),
             Arguments.of(new RegistryUnavailableException("down"),           RoutingDecision.RETRY),

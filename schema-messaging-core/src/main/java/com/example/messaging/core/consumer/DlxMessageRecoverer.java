@@ -59,19 +59,11 @@ public class DlxMessageRecoverer implements MessageRecoverer {
                     dlxExchange, originalRoutingKey, retryCount, ex.getMessage());
         } else {
             props.setHeader(SchemaMessageHeaders.RETRY_COUNT, retryCount + 1);
-            String retryRoutingKey = originalRoutingKey + ".retry." + tierSuffix(retryCount);
+            String retryRoutingKey = originalRoutingKey + ".retry." + RetryTierSuffixes.suffix(retryCount);
             rabbitTemplate.send(retryExchange, retryRoutingKey, message);
             log.warn("→ retry exchange={} routingKey={} retryCount={} ttlMs={}",
                     retryExchange, retryRoutingKey, retryCount + 1, retryDelaysMs[retryCount]);
         }
     }
 
-    private String tierSuffix(int tier) {
-        return switch (tier) {
-            case 0 -> "5s";
-            case 1 -> "30s";
-            case 2 -> "5m";
-            default -> "t" + tier;
-        };
-    }
 }

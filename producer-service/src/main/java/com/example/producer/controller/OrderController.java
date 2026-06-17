@@ -45,12 +45,12 @@ public class OrderController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public void createOrder(@RequestBody CreateOrderRequest request) {
-        if (request.productId() == null || request.currency() == null
+        if (request.customerId() == null || request.productId() == null || request.currency() == null
                 || request.quantity() == null || request.quantity() <= 0
                 || request.totalAmount() == null) {
             throw new SchemaValidationException(
                     "events.orders:OrderCreated",
-                    "Missing or invalid required fields (productId, currency, quantity>0, totalAmount)");
+                    "Missing or invalid required fields (customerId, productId, currency, quantity>0, totalAmount)");
         }
         OrderCreated event = new OrderCreated()
                 .withOrderId(UUID.randomUUID().toString())

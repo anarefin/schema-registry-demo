@@ -29,7 +29,7 @@ public class OrderEventListener {
     public void onOrderCreated(
             OrderCreated event,
             @Header(value = SchemaMessageHeaders.MESSAGE_ID, required = false) String messageId) {
-        if (idempotencyFilter.isDuplicate(messageId)) {
+        if (idempotencyFilter.alreadyProcessed(messageId)) {
             log.info("Duplicate OrderCreated messageId={}, skipping", messageId);
             return;
         }
@@ -38,5 +38,6 @@ public class OrderEventListener {
                 event.getCustomerId(),
                 event.getProductId(),
                 event.getQuantity());
+        idempotencyFilter.markProcessed(messageId);
     }
 }

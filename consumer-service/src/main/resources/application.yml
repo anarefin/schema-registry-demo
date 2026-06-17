@@ -24,6 +24,10 @@ schema:
   customers:
     pinned-version: ${SCHEMA_CUSTOMERS_PINNED_VERSION:}
 
+schema-messaging:
+  consumer:
+    enabled: true
+
 server:
   port: 8082
 

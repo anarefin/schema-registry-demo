@@ -15,13 +15,14 @@ import java.util.Map;
 /**
  * Reports RabbitMQ queue and DLQ message counts (T-6.5, AC-6.1).
  *
- * <p>Status is WARNING when either DLQ contains messages (signals processing failures).
+ * <p>Status is DOWN when either DLQ contains messages (signals processing failures).
  * Main-queue depth is reported as info; never triggers DOWN on its own.
  */
 @Component
 public class QueueDepthHealthIndicator implements HealthIndicator {
 
     private static final Logger log = LoggerFactory.getLogger(QueueDepthHealthIndicator.class);
+    private static final int DEPTH_UNAVAILABLE = -1;
 
     private final RabbitAdmin rabbitAdmin;
 
@@ -38,6 +39,10 @@ public class QueueDepthHealthIndicator implements HealthIndicator {
             queueDepth(CustomerEventRouting.QUEUE_NAME, details);
             queueDepth(OrderEventRouting.QUEUE_NAME, details);
 
+            if (customersDlqDepth < 0 || ordersDlqDepth < 0) {
+                return Health.unknown().withDetails(details).build();
+            }
+
             boolean dlqEmpty = customersDlqDepth == 0 && ordersDlqDepth == 0;
             return (dlqEmpty ? Health.up() : Health.down())
                     .withDetails(details).build();
@@ -50,12 +55,12 @@ public class QueueDepthHealthIndicator implements HealthIndicator {
     private int queueDepth(String queueName, Map<String, Object> details) {
         try {
             var info = rabbitAdmin.getQueueInfo(queueName);
-            int depth = info != null ? (int) info.getMessageCount() : -1;
+            int depth = info != null ? (int) info.getMessageCount() : DEPTH_UNAVAILABLE;
             details.put(queueName + ".depth", depth);
             return depth;
         } catch (Exception e) {
             details.put(queueName + ".depth", "error: " + e.getMessage());
-            return 0;
+            return DEPTH_UNAVAILABLE;
         }
     }
 }

@@ -4,6 +4,7 @@ import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
 import com.example.contracts.customers.amqp.EventExchanges;
 import com.example.consumer.listener.CustomerEventListener;
+import com.example.messaging.core.consumer.IdempotencyFilter;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.exception.SchemaNotFoundException;
 import com.example.messaging.core.model.ResolvedSchema;
@@ -71,6 +72,9 @@ class DlxRoutingIT {
 
     @MockitoSpyBean
     CustomerEventListener customerEventListener;
+
+    @Autowired
+    IdempotencyFilter idempotencyFilter;
 
     @Autowired
     RabbitTemplate rabbitTemplate;
@@ -207,6 +211,36 @@ class DlxRoutingIT {
 
         // No DLQ message: neither delivery caused a failure routing
         assertThat(rabbitTemplate.receive(CustomerEventRouting.DLQ_NAME, 300)).isNull();
+    }
+
+    /**
+     * Idempotency must not mark a message processed until handler success, so retries after
+     * downstream failure still invoke the handler (not short-circuited as a duplicate).
+     */
+    @Test
+    void idempotencyDoesNotBlockRetryAfterHandlerFailure() throws Exception {
+        AtomicInteger callCount = new AtomicInteger(0);
+        doAnswer(inv -> {
+            String messageId = inv.getArgument(1);
+            if (idempotencyFilter.alreadyProcessed(messageId)) {
+                return null;
+            }
+            callCount.incrementAndGet();
+            throw new RuntimeException("simulated downstream error");
+        }).when(customerEventListener).onCustomerRegistered(any(), any());
+
+        byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
+        String messageId = UUID.randomUUID().toString();
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
+                validJson, messageId);
+
+        await().atMost(10, TimeUnit.SECONDS)
+               .untilAsserted(() -> assertThat(callCount.get()).isGreaterThanOrEqualTo(4));
+
+        Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME);
+        assertThat(dlqMsg.getMessageProperties()
+                .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
+        assertThat(idempotencyFilter.alreadyProcessed(messageId)).isFalse();
     }
 
     // ---- helpers -----------------------------------------------------------
