@@ -37,7 +37,7 @@
       <artifactId>apicurio-registry-java-sdk</artifactId>
     </dependency>
 
-    <!-- Caffeine cache -->
+    <!-- Caffeine: schema cache (SchemaResolver) + compiled-schema cache (JsonSchemaStrategy) -->
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
       <artifactId>caffeine</artifactId>
@@ -55,14 +55,7 @@
       <artifactId>jackson-databind</artifactId>
     </dependency>
 
-    <!-- T-6.5: Health indicators (optional — only wired when actuator is on classpath) -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-actuator</artifactId>
-      <optional>true</optional>
-    </dependency>
-
-    <!-- Annotation processor for @ConfigurationProperties metadata -->
+    <!-- Annotation processor for apicurio.cache.* @ConfigurationProperties metadata -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-configuration-processor</artifactId>
@@ -94,7 +87,6 @@
                 <bannedDependencies>
                   <excludes>
                     <exclude>com.example:order-contracts</exclude>
-                    <exclude>com.example:customer-contracts</exclude>
                   </excludes>
                   <message>schema-messaging-core must not depend on any *-contracts module (it is domain-agnostic).</message>
                 </bannedDependencies>

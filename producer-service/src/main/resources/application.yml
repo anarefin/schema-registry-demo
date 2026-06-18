@@ -10,21 +10,14 @@ spring:
 apicurio:
   registry:
     url: ${APICURIO_REGISTRY_URL:http://localhost:8080}
+  # Schema cache tuning (defaults shown). ttl drives how quickly the producer's 'latest'
+  # coordinate picks up a newly registered version.
   cache:
-    max-size: 100
-    ttl: 600s
-    refresh-after-write: 300s
-  # T-6.6: Set to OFF to fail fast on startup if a pinned schema version is not registered.
-  # Default ON allows the service to start and register schemas lazily.
-  auto-register: ${APICURIO_AUTO_REGISTER:ON}
+    max-size: 1000
+    ttl: 5m
+    refresh-after-write: 1m
 
-# T-4.7 (spec §10.5): Schema version pinning.
-schema:
-  orders:
-    pinned-version: ${SCHEMA_ORDERS_PINNED_VERSION:}
-  customers:
-    pinned-version: ${SCHEMA_CUSTOMERS_PINNED_VERSION:}
-
+# Producer only publishes; it does not declare consumer-side retry/DLQ infrastructure.
 schema-messaging:
   consumer:
     enabled: false
@@ -32,7 +25,6 @@ schema-messaging:
 server:
   port: 8081
 
-# T-6.5: Actuator — expose health endpoints
 management:
   endpoints:
     web:
@@ -41,17 +33,3 @@ management:
   endpoint:
     health:
       show-details: always
-      show-components: always
-
----
-# T-6.4: Structured JSON logging for prod profile (Spring Boot 4.0 native)
-spring:
-  config:
-    activate:
-      on-profile: prod
-  application:
-    name: producer-service
-logging:
-  structured:
-    format:
-      console: ecs

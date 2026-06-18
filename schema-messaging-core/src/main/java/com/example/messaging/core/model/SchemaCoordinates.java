@@ -3,7 +3,7 @@ package com.example.messaging.core.model;
 /**
  * Immutable key identifying a schema artifact version in Apicurio Registry.
  * {@code version} is nullable; null means "latest".
- * Used as Caffeine cache key — records provide correct equals/hashCode.
+ * Used as schema-memo cache key — records provide correct equals/hashCode.
  */
 public record SchemaCoordinates(String groupId, String artifactId, String version) {
 

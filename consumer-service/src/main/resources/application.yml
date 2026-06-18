@@ -10,28 +10,29 @@ spring:
 apicurio:
   registry:
     url: ${APICURIO_REGISTRY_URL:http://localhost:8080}
+  # Schema cache tuning (these are the defaults — shown for tunability). ttl drives how quickly
+  # a 'latest' coordinate picks up a newly registered version; refresh-after-write does an async
+  # stale-while-revalidate reload. The globalId cache is immutable and is size-bounded only.
   cache:
-    max-size: 100
-    ttl: 600s
-    refresh-after-write: 300s
-  # T-6.6: Set to OFF to fail fast on startup if a pinned schema version is not registered.
-  auto-register: ${APICURIO_AUTO_REGISTER:ON}
+    max-size: 1000
+    ttl: 5m
+    refresh-after-write: 1m
 
-# T-4.7 (spec §10.5): Schema version pinning.
-schema:
-  orders:
-    pinned-version: ${SCHEMA_ORDERS_PINNED_VERSION:}
-  customers:
-    pinned-version: ${SCHEMA_CUSTOMERS_PINNED_VERSION:}
-
+# Consumer declares the events/DLX/retry topology and runs the schema-aware listener factory.
 schema-messaging:
   consumer:
     enabled: true
 
+# Single 5s retry tier, cycled up to max-attempts times before a transient failure hits the DLQ.
+events:
+  retry:
+    tier:
+      ms: 5000
+    max-attempts: 3
+
 server:
   port: 8082
 
-# T-6.5: Actuator — expose health endpoints
 management:
   endpoints:
     web:
@@ -40,17 +41,3 @@ management:
   endpoint:
     health:
       show-details: always
-      show-components: always
-
----
-# T-6.4: Structured JSON logging for prod profile (Spring Boot 4.0 native)
-spring:
-  config:
-    activate:
-      on-profile: prod
-  application:
-    name: consumer-service
-logging:
-  structured:
-    format:
-      console: ecs

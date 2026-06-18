@@ -1,10 +1,9 @@
 package com.example.consumer;
 
-import com.example.contracts.customers.CustomerEventRouting;
-import com.example.contracts.customers.CustomerRegistered;
-import com.example.contracts.customers.amqp.EventExchanges;
-import com.example.consumer.listener.CustomerEventListener;
-import com.example.messaging.core.consumer.IdempotencyFilter;
+import com.example.contracts.orders.OrderCreated;
+import com.example.contracts.orders.OrderEventRouting;
+import com.example.contracts.orders.amqp.EventExchanges;
+import com.example.consumer.listener.OrderEventListener;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.exception.SchemaNotFoundException;
 import com.example.messaging.core.model.ResolvedSchema;
@@ -42,24 +41,21 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 /**
- * TC-5.1 I  — schema-not-found → retried per TTL ladder then DLQ
- * TC-5.2 I  — deserialization poison → DLQ, X-Retry-Count=0
- * TC-5.3 I  — permanent (deserialization) failure → DLQ immediately
- * TC-5.4 I  — registry unavailable (SchemaNotFoundException) → retried then DLQ
- * TC-5.5 I  — downstream RuntimeException → retried 3×, then DLQ
- * TC-5.6 I  — retry increments X-Retry-Count, correct tier
- * TC-5.7 I  — all X-Failure-* DLQ headers present
- * TC-5.8 I  — duplicate X-Message-Id processed once (idempotency)
+ * Failure-model integration tests (single 5s retry tier collapsed to a fast TTL for the test):
+ * <ul>
+ *   <li>Poison (deserialization) failure is permanent → DLQ immediately with X-Retry-Count=0
+ *       and all X-Failure-* headers populated.</li>
+ *   <li>Schema-not-found is transient → retried up to max-attempts then DLQ with X-Retry-Count=3.</li>
+ *   <li>Downstream RuntimeException is transient → retried (4 total deliveries) then DLQ.</li>
+ * </ul>
  *
- * <p>Uses short TTL tiers (200/400/600 ms) for speed.
- * RabbitMQ = real Testcontainer; ApicurioClient = mock.
+ * <p>RabbitMQ = real Testcontainer; ApicurioClient = mock. Retry TTL shortened to 200ms.
  */
 @SpringBootTest
 @Testcontainers
 @TestPropertySource(properties = {
-        "events.retry.tier0.ms=200",
-        "events.retry.tier1.ms=400",
-        "events.retry.tier2.ms=600"
+        "events.retry.tier.ms=200",
+        "events.retry.max-attempts=3"
 })
 class DlxRoutingIT {
 
@@ -71,10 +67,7 @@ class DlxRoutingIT {
     ApicurioClient apicurioClient;
 
     @MockitoSpyBean
-    CustomerEventListener customerEventListener;
-
-    @Autowired
-    IdempotencyFilter idempotencyFilter;
+    OrderEventListener orderEventListener;
 
     @Autowired
     RabbitTemplate rabbitTemplate;
@@ -90,157 +83,79 @@ class DlxRoutingIT {
         byte[] schemaBytes = loadSchemaBytes();
         schema = new ResolvedSchema(MOCK_GLOBAL_ID, SchemaType.JSON, schemaBytes);
 
-        // Reset mock + spy to clean state before every test
         Mockito.reset(apicurioClient);
-        Mockito.reset(customerEventListener);
+        Mockito.reset(orderEventListener);
 
         when(apicurioClient.fetchByCoordinates(any(SchemaCoordinates.class))).thenReturn(schema);
         when(apicurioClient.fetchByGlobalId(eq(MOCK_GLOBAL_ID), eq(SchemaType.JSON))).thenReturn(schema);
         when(apicurioClient.latestVersion(any(), any())).thenReturn(schema);
 
-        // Drain DLQ so each test starts with an empty queue
-        drainQueue(CustomerEventRouting.DLQ_NAME);
+        drainQueue(OrderEventRouting.DLQ_NAME);
     }
 
-    // ---- TC-5.2 / TC-5.3 / TC-5.7 ----------------------------------------
-
     /**
-     * TC-5.2 + TC-5.3 + TC-5.7:
      * Invalid JSON bytes → DeserializationException (permanent) → DLQ immediately with
      * X-Retry-Count=0 and all X-Failure-* headers populated.
      */
     @Test
-    void tc52_53_57_deserializationPoisonRoutesToDlqWithHeaders() {
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
+    void deserializationPoisonRoutesToDlqWithHeaders() {
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.ROUTING_KEY,
                 "{INVALID_JSON".getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString());
 
-        Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME);
+        Message dlqMsg = awaitDlq(OrderEventRouting.DLQ_NAME);
 
-        // TC-5.2 / TC-5.3: permanent → DLQ, retry count = 0
         assertThat(SchemaMessageHeaders.getRetryCount(dlqMsg.getMessageProperties())).isEqualTo(0);
 
-        // TC-5.7: all X-Failure-* headers present
-        // Use headerStr() helper — avoids generic inference picking String.valueOf(char[]) overload
         MessageProperties p = dlqMsg.getMessageProperties();
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_REASON)).isNotBlank();
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_MESSAGE)).isNotBlank();
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_STACK_TRACE)).isNotBlank();
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_ROUTING_KEY))
-                .isEqualTo(CustomerEventRouting.ROUTING_KEY);
+                .isEqualTo(OrderEventRouting.ROUTING_KEY);
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_FAILED_AT)).isNotBlank();
-        assertThat(SchemaMessageHeaders.getRetryCount(p)).isEqualTo(0);
     }
 
-    // ---- TC-5.1 / TC-5.4 --------------------------------------------------
-
     /**
-     * TC-5.1 + TC-5.4: every fetch throws SchemaNotFoundException (classified RETRY) →
-     * retried per TTL ladder → DLQ with X-Retry-Count=3 after max retries.
+     * Every fetch throws SchemaNotFoundException (classified RETRY) → retried per the single
+     * 5s tier → DLQ with X-Retry-Count=3 after max attempts.
      */
     @Test
-    void tc51_54_schemaNotFoundRetriedThenDlq() {
+    void schemaNotFoundRetriedThenDlq() {
         when(apicurioClient.fetchByGlobalId(eq(MOCK_GLOBAL_ID), eq(SchemaType.JSON)))
                 .thenThrow(new SchemaNotFoundException("globalId=" + MOCK_GLOBAL_ID));
         when(apicurioClient.fetchByCoordinates(any()))
                 .thenThrow(new SchemaNotFoundException("coordinates"));
 
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.ROUTING_KEY,
                 "{}".getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString());
 
-        Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME, 15);
+        Message dlqMsg = awaitDlq(OrderEventRouting.DLQ_NAME, 15);
         assertThat(dlqMsg.getMessageProperties()
                 .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
     }
 
-    // ---- TC-5.5 / TC-5.6 --------------------------------------------------
-
     /**
-     * TC-5.5 + TC-5.6: downstream RuntimeException → retried 3× (X-Retry-Count increments)
-     * then DLQ with X-Retry-Count=3. Verifies retry count = 4 total listener invocations.
+     * Downstream RuntimeException → retried (4 total deliveries = initial + 3 retries) then DLQ
+     * with X-Retry-Count=3.
      */
     @Test
-    void tc55_56_downstreamErrorRetriedThenDlq() throws Exception {
+    void downstreamErrorRetriedThenDlq() throws Exception {
         AtomicInteger callCount = new AtomicInteger(0);
         doAnswer(inv -> {
             callCount.incrementAndGet();
             throw new RuntimeException("simulated downstream error");
-        }).when(customerEventListener).onCustomerRegistered(any(), any());
+        }).when(orderEventListener).onOrderCreated(any());
 
-        byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
+        byte[] validJson = objectMapper.writeValueAsBytes(validOrder());
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.ROUTING_KEY,
                 validJson, UUID.randomUUID().toString());
 
-        // 4 calls = initial delivery + 3 retries via TTL queues
         await().atMost(10, TimeUnit.SECONDS)
                .untilAsserted(() -> assertThat(callCount.get()).isGreaterThanOrEqualTo(4));
 
-        // TC-5.6: X-Retry-Count=3 in DLQ message
-        Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME);
+        Message dlqMsg = awaitDlq(OrderEventRouting.DLQ_NAME);
         assertThat(dlqMsg.getMessageProperties()
                 .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
-    }
-
-    // ---- TC-5.8 ------------------------------------------------------------
-
-    /**
-     * TC-5.8: same X-Message-Id delivered twice → idempotency guard prevents double-processing.
-     *
-     * <p>Both messages arrive at the listener (spy invoked 2×) but only the first triggers
-     * actual processing — the second returns early in the real method. The test verifies
-     * that exactly 2 deliveries arrived and the DLQ is empty (no routing error from either).
-     */
-    @Test
-    void tc58_duplicateMessageIdProcessedOnce() throws Exception {
-        String messageId = UUID.randomUUID().toString();
-        byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY, validJson, messageId);
-
-        // Wait for the first delivery to be processed
-        await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
-                Mockito.verify(customerEventListener, Mockito.atLeastOnce())
-                       .onCustomerRegistered(any(), any()));
-
-        // Send the duplicate (same X-Message-Id)
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY, validJson, messageId);
-
-        // Give the duplicate time to arrive and be handled (returns early via idempotency)
-        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() ->
-                Mockito.verify(customerEventListener, Mockito.times(2))
-                       .onCustomerRegistered(any(), any()));
-
-        // No DLQ message: neither delivery caused a failure routing
-        assertThat(rabbitTemplate.receive(CustomerEventRouting.DLQ_NAME, 300)).isNull();
-    }
-
-    /**
-     * Idempotency must not mark a message processed until handler success, so retries after
-     * downstream failure still invoke the handler (not short-circuited as a duplicate).
-     */
-    @Test
-    void idempotencyDoesNotBlockRetryAfterHandlerFailure() throws Exception {
-        AtomicInteger callCount = new AtomicInteger(0);
-        doAnswer(inv -> {
-            String messageId = inv.getArgument(1);
-            if (idempotencyFilter.alreadyProcessed(messageId)) {
-                return null;
-            }
-            callCount.incrementAndGet();
-            throw new RuntimeException("simulated downstream error");
-        }).when(customerEventListener).onCustomerRegistered(any(), any());
-
-        byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-        String messageId = UUID.randomUUID().toString();
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
-                validJson, messageId);
-
-        await().atMost(10, TimeUnit.SECONDS)
-               .untilAsserted(() -> assertThat(callCount.get()).isGreaterThanOrEqualTo(4));
-
-        Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME);
-        assertThat(dlqMsg.getMessageProperties()
-                .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
-        assertThat(idempotencyFilter.alreadyProcessed(messageId)).isFalse();
     }
 
     // ---- helpers -----------------------------------------------------------
@@ -249,8 +164,8 @@ class DlxRoutingIT {
         MessageProperties props = new MessageProperties();
         props.setContentType(SchemaType.JSON.contentType());
         props.setHeader(SchemaMessageHeaders.GLOBAL_ID, MOCK_GLOBAL_ID);
-        props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.customers");
-        props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "CustomerRegistered");
+        props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
+        props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
         props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
         props.setHeader(SchemaMessageHeaders.MESSAGE_ID, messageId);
         rabbitTemplate.send(exchange, routingKey, new Message(body, props));
@@ -271,20 +186,21 @@ class DlxRoutingIT {
         }
     }
 
-    private static CustomerRegistered validCustomer() {
-        CustomerRegistered c = new CustomerRegistered();
-        c.setCustomerId(UUID.randomUUID().toString());
-        c.setEmail("test@example.com");
-        c.setFirstName("Test");
-        c.setLastName("User");
-        c.setRegisteredAt("2026-05-31T00:00:00Z");
-        return c;
+    private static OrderCreated validOrder() {
+        return new OrderCreated()
+                .withOrderId(UUID.randomUUID().toString())
+                .withCustomerId("cust-1")
+                .withProductId("prod-A")
+                .withQuantity(2)
+                .withTotalAmount(19.99)
+                .withCurrency("USD")
+                .withCreatedAt("2026-05-31T00:00:00Z");
     }
 
     private static byte[] loadSchemaBytes() throws Exception {
         try (var stream = DlxRoutingIT.class.getClassLoader()
-                .getResourceAsStream("schemas/customer-registered.json")) {
-            return Objects.requireNonNull(stream, "customer-registered.json not on classpath")
+                .getResourceAsStream("schemas/order-created.json")) {
+            return Objects.requireNonNull(stream, "order-created.json not on classpath")
                     .readAllBytes();
         }
     }

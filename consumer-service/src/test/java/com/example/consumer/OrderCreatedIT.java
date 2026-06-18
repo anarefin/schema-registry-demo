@@ -90,7 +90,7 @@ class OrderCreatedIT {
 
         ArgumentCaptor<OrderCreated> captor = ArgumentCaptor.forClass(OrderCreated.class);
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
-                verify(orderEventListener).onOrderCreated(captor.capture(), any()));
+                verify(orderEventListener).onOrderCreated(captor.capture()));
 
         OrderCreated received = captor.getValue();
         assertThat(received.getOrderId()).isEqualTo("ord-e2e");

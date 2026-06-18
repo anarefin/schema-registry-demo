@@ -38,9 +38,7 @@ public final class SchemaMessageHeaders {
     /**
      * Populates all {@code X-Schema-*} identity headers and sets the AMQP content-type.
      *
-     * @param contentType MIME type from the {@link com.example.messaging.core.serde.SerializationStrategy};
-     *                    allows strategies to advertise a custom content-type (e.g. avro-binary)
-     *                    independent of the {@link SchemaType} enum.
+     * @param contentType MIME type from the serde (e.g. {@code application/json}).
      */
     public static void setSchemaHeaders(
             MessageProperties props,

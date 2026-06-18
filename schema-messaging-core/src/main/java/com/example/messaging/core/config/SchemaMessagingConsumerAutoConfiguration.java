@@ -3,7 +3,6 @@ package com.example.messaging.core.config;
 import com.example.messaging.core.consumer.DlxMessageRecoverer;
 import com.example.messaging.core.consumer.DlxRoutingAdvice;
 import com.example.messaging.core.consumer.EventConsumerSupport;
-import com.example.messaging.core.consumer.IdempotencyFilter;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -43,15 +42,8 @@ public class SchemaMessagingConsumerAutoConfiguration {
     @Value("${events.retry.exchange:events.retry.exchange}")
     private String retryExchange;
 
-    @Value("${events.retry.tier0.ms:5000}")   private long tier0Ms;
-    @Value("${events.retry.tier1.ms:30000}")  private long tier1Ms;
-    @Value("${events.retry.tier2.ms:300000}") private long tier2Ms;
-
-    @Bean
-    @ConditionalOnMissingBean
-    public IdempotencyFilter idempotencyFilter() {
-        return new IdempotencyFilter();
-    }
+    @Value("${events.retry.tier.ms:5000}")     private long retryDelayMs;
+    @Value("${events.retry.max-attempts:3}")   private int maxAttempts;
 
     @Bean
     @ConditionalOnMissingBean
@@ -64,8 +56,8 @@ public class SchemaMessagingConsumerAutoConfiguration {
     public DlxMessageRecoverer dlxMessageRecoverer(
             EventConsumerSupport consumerSupport,
             RabbitTemplate rabbitTemplate) {
-        long[] delays = {tier0Ms, tier1Ms, tier2Ms};
-        return new DlxMessageRecoverer(consumerSupport, rabbitTemplate, dlxExchange, retryExchange, delays);
+        return new DlxMessageRecoverer(
+                consumerSupport, rabbitTemplate, dlxExchange, retryExchange, retryDelayMs, maxAttempts);
     }
 
     @Bean

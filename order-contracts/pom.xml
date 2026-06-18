@@ -111,11 +111,46 @@
   </build>
 
   <profiles>
-    <!-- T-4.5 CI merge gate: checks the current schema is compatible (FORWARD for this
-         JSON artifact) with what is registered. Requires a running registry. Run during CI
-         after docker compose up:
-         ./mvnw -pl order-contracts verify -Pcompat-check
-         Or explicitly: ./mvnw -pl order-contracts apicurio-registry:test -Pcompat-check -->
+    <!-- Step 1 of the rule-first flow: register ONLY the v1 baseline so the OrderCreated
+         artifact exists. An artifact-level compatibility rule can only be attached to an
+         existing artifact, so the baseline must be created before the rule is attached.
+         Run: ./mvnw -pl order-contracts verify -Pbaseline -Dapicurio.registry.url=http://localhost:8080 -->
+    <profile>
+      <id>baseline</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.apicurio</groupId>
+            <artifactId>apicurio-registry-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>register-baseline</id>
+                <phase>verify</phase>
+                <goals><goal>register</goal></goals>
+                <configuration>
+                  <registryUrl>${apicurio.registry.url}</registryUrl>
+                  <artifacts>
+                    <artifact>
+                      <groupId>events.orders</groupId>
+                      <artifactId>OrderCreated</artifactId>
+                      <file>${project.basedir}/src/test/resources/schemas/order-created-v1.json</file>
+                      <artifactType>JSON</artifactType>
+                      <ifExists>FIND_OR_CREATE_VERSION</ifExists>
+                    </artifact>
+                  </artifacts>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!-- Optional dry-run pre-flight: checks the current schema is compatible (FORWARD for this
+         JSON artifact) with what is registered, WITHOUT writing a new version. Requires a
+         running registry. Governance itself is enforced by the real (non-dry-run) register
+         goal above — this profile is just a convenience check.
+         Run: ./mvnw -pl order-contracts verify -Pcompat-check -->
     <profile>
       <id>compat-check</id>
       <build>

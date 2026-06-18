@@ -10,7 +10,7 @@ import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
 import com.example.messaging.core.registry.SchemaResolver;
-import com.example.messaging.core.serde.SerializationStrategy;
+import com.example.messaging.core.serde.JsonSchemaStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
@@ -18,11 +18,7 @@ import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.support.converter.MessageConversionException;
 import org.springframework.amqp.support.converter.MessageConverter;
 
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * Spring AMQP {@link MessageConverter} that enforces schema governance (spec §10.1).
@@ -41,22 +37,22 @@ public class SchemaAwareMessageConverter implements MessageConverter {
 
     private final TypeMappingRegistry typeMappingRegistry;
     private final SchemaResolver schemaResolver;
-    private final Map<SchemaType, SerializationStrategy> strategies;
+    private final JsonSchemaStrategy strategy;
 
     public SchemaAwareMessageConverter(
             TypeMappingRegistry typeMappingRegistry,
             SchemaResolver schemaResolver,
-            List<SerializationStrategy> strategies) {
+            JsonSchemaStrategy strategy) {
         this.typeMappingRegistry = typeMappingRegistry;
         this.schemaResolver = schemaResolver;
-        this.strategies = strategies.stream()
-                .collect(Collectors.toUnmodifiableMap(SerializationStrategy::schemaType, Function.identity()));
-        // Fail fast: every registered TypeMapping must have a matching strategy available.
+        this.strategy = strategy;
+        // Fail fast: JSON is the only wire format in this minimal POC, so every registered
+        // TypeMapping must declare SchemaType.JSON.
         typeMappingRegistry.all().forEach(mapping -> {
-            if (!this.strategies.containsKey(mapping.schemaType())) {
+            if (mapping.schemaType() != strategy.schemaType()) {
                 throw new IllegalStateException(
-                        "No SerializationStrategy registered for SchemaType." + mapping.schemaType()
-                        + " (required by TypeMapping for " + mapping.javaType().getName() + ")");
+                        "Only " + strategy.schemaType() + " is supported, but TypeMapping for "
+                        + mapping.javaType().getName() + " declares " + mapping.schemaType());
             }
         });
     }
@@ -72,7 +68,6 @@ public class SchemaAwareMessageConverter implements MessageConverter {
                         "No TypeMapping registered for " + type.getName()));
 
         ResolvedSchema schema = schemaResolver.resolveByCoordinates(mapping.coordinates());
-        SerializationStrategy strategy = strategyFor(mapping.schemaType());
 
         byte[] bytes;
         try {
@@ -118,7 +113,6 @@ public class SchemaAwareMessageConverter implements MessageConverter {
 
         SchemaType effectiveType = mapping.schemaType();
         ResolvedSchema schema = resolveSchema(props, effectiveType);
-        SerializationStrategy strategy = strategyFor(effectiveType);
 
         byte[] body = message.getBody();
         try {
@@ -148,12 +142,6 @@ public class SchemaAwareMessageConverter implements MessageConverter {
             throw new SchemaNotFoundException("missing X-Schema-* headers");
         }
         return schemaResolver.resolveByCoordinates(new SchemaCoordinates(groupId, artifactId, version));
-    }
-
-    private SerializationStrategy strategyFor(SchemaType type) {
-        SerializationStrategy s = strategies.get(type);
-        if (s == null) throw new MessageConversionException("No SerializationStrategy for " + type);
-        return s;
     }
 
     private static void ensureMessageId(MessageProperties props) {

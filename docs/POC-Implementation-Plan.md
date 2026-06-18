@@ -1,5 +1,10 @@
 # Apicurio + RabbitMQ Schema Registry POC — Implementation Plan (Maven)
 
+> **Historical document.** This plan describes the **full** POC. The `minimal-poc` branch is an
+> aggressively simplified teaching cut (one message type, single 5s retry tier; caching, health
+> indicators, version pinning, idempotency, OIDC, and customers all removed). For the current
+> minimal system see `../minimal-poc-guide.md` and the root `README.md`.
+
 > **Refactor note (June 2026):** the POC was refactored after completion to be **JSON
 > Schema-only** — `OrderCreated` is now a JSON Schema artifact (FORWARD rule, generated POJO
 > via jsonschema2pojo); all Protobuf tooling was removed. Protobuf tasks/criteria below are

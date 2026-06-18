@@ -1,10 +1,9 @@
 package com.example.contracts.orders.amqp;
 
 /**
- * Shared AMQP exchange names + bean names (spec §9). Declared identically in
- * customer-contracts; name-based @ConditionalOnMissingBean in
- * OrderEventTopologyAutoConfiguration / CustomerEventTopologyAutoConfiguration ensures only
- * one copy registers when both contract modules are on the classpath.
+ * Shared AMQP exchange names + bean names (spec §9). The name-based
+ * {@code @ConditionalOnMissingBean} in OrderEventTopologyAutoConfiguration declares each
+ * exchange idempotently.
  */
 public final class EventExchanges {
 

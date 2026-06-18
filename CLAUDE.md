@@ -2,27 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project status: fully implemented (Phases 0–6 complete)
+## Project status: minimal cut (branch `minimal-poc`)
 
-All six phases are done. One minor task is outstanding:
+This branch is the **minimal teaching cut** of the full POC: one message type (`OrderCreated`),
+a single 5s retry tier, real Apicurio + RabbitMQ. The aggressive simplification (5 modules → 4,
+core 32 → ~19 classes) is intentional — it keeps all three core concepts demonstrable with the
+least code. The step-by-step runbook with seed data is **`minimal-poc-guide.md`** at the repo root.
 
-- **T-3.4** — Register `OrderCreated` to a live Apicurio registry:
-  `./mvnw -pl order-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080`
+The original spec-derived plan documents live in `docs/` as historical record (they describe the
+full POC, not this cut):
 
-Planning documents live in `docs/`:
-
-- `docs/POC-Implementation-Plan.md` — spec-derived phase plan (architecture, wire format,
-  topology, failure model, acceptance criteria; tasks `T-`, tests `TC-`, gates `AC-`).
-- `docs/TODO.md` — checkbox execution breakdown with done-checks; treat as the source of truth
-  if scope changes.
+- `docs/POC-Implementation-Plan.md` — phase plan (architecture, wire format, topology, failure
+  model, acceptance criteria; tasks `T-`, tests `TC-`, gates `AC-`).
+- `docs/TODO.md` — checkbox execution breakdown.
 
 ## What this is
 
 A Maven multi-module POC proving end-to-end **schema-governed messaging**: Apicurio Registry
 3.2.0 (schema source of truth) + RabbitMQ (transport) + Spring Boot 4.0 services on **Java 25**.
-It demonstrates **JSON Schema** message types (orders + customers) flowing producer → registry
-→ consumer, schema-compatibility governance as a CI merge gate, and a full DLX/DLQ/retry
-failure topology.
+It demonstrates a single **JSON Schema** message type (`OrderCreated`) flowing producer →
+registry → consumer, schema-compatibility governance enforced at **real registration time** via
+the Apicurio Maven plugin, and a DLX/DLQ + single-tier retry failure topology.
 
 ## Commands (as the project is built per the plan)
 
@@ -35,16 +35,14 @@ The build uses the **committed Maven Wrapper** (`./mvnw`) — always prefer it o
 ./mvnw -pl schema-messaging-core test   # test a single module
 ./mvnw -pl schema-messaging-core compile
 
-# Schema governance (official apicurio-registry-maven-plugin; requires a running registry)
-./mvnw -pl customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
-./mvnw -pl order-contracts     apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
+# Schema governance — real registration IS the gate (requires a running registry)
+./mvnw -pl order-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
 
-# CI merge gate — fails on incompatible schema changes
-./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check
+# Optional dry-run pre-flight (checks compatibility without writing a version)
+./mvnw -pl order-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
 
-# Incompatible-change demo (triggers rejection from a running registry)
-./mvnw -pl order-contracts    verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
-./mvnw -pl customer-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
+# Incompatible-change demo (triggers rejection from a running registry — must fail)
+./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
 
 # Run services (producer :8081, consumer :8082)
 ./mvnw -pl producer-service spring-boot:run
@@ -52,17 +50,19 @@ The build uses the **committed Maven Wrapper** (`./mvnw`) — always prefer it o
 
 # Infrastructure (Postgres, Apicurio + UI, RabbitMQ-management)
 docker compose up                       # cold start must reach all-healthy
-# Then register schemas from the host (the contracts modules carry the apicurio-registry plugin):
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
-# ...and attach the compatibility rules via REST (register does not — see README §2):
-#   OrderCreated / CustomerRegistered (both JSON Schema) → FORWARD
-#   (adding a JSON property is only FORWARD-compatible in Apicurio:
-#    BACKWARD rejects it as NARROWED)
-#   POST /apis/registry/v3/groups/{group}/artifacts/{id}/rules {"ruleType":"COMPATIBILITY","config":"<LEVEL>"}
+# Then register the schema from the host, rule-first (order-contracts carries the apicurio-registry plugin).
+# Full sequence in minimal-poc-guide.md §4: baseline → attach rule → dry-run → register current.
+#   1. register the v1 baseline (creates the artifact — a rule can only attach to an existing artifact):
+./mvnw -pl order-contracts verify -Pbaseline -Dapicurio.registry.url=http://localhost:8080
+#   2. attach the FORWARD compatibility rule via REST (register does not):
+#      POST /apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules {"ruleType":"COMPATIBILITY","config":"FORWARD"}
+#   3. (optional) dry-run pre-flight:  ./mvnw -pl order-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
+#   4. register the current schema for real (now governed by the FORWARD rule):
+./mvnw -pl order-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
 ```
 
 Run a single test class/method with the standard Surefire/Failsafe selectors, e.g.
-`./mvnw -pl schema-messaging-core test -Dtest=SchemaResolverTest#cacheHit`.
+`./mvnw -pl schema-messaging-core test -Dtest=SchemaAwareMessageConverterTest`.
 
 **Test split is load-bearing:** Surefire (`*Test.java`) stays fast and mock-based; Failsafe
 (`*IT.java`, Testcontainers) runs only on `verify`. Keep new tests on the correct side.
@@ -84,38 +84,39 @@ Run a single test class/method with the standard Surefire/Failsafe selectors, e.
 
 ## Architecture (the big picture)
 
-Five Maven modules (parent root = this directory):
+Four Maven modules (parent root = this directory):
 
 - **`schema-messaging-core`** — domain-agnostic library (`jar`, no Spring Boot repackage).
-  All the reusable plumbing lives here; the two services and contracts plug into it.
+  All the reusable plumbing lives here; the services and contracts plug into it.
 - **`order-contracts`** — `OrderCreated` JSON Schema + generated POJOs
-  (`com.example.contracts.orders.*`). Depends only on Jackson.
-- **`customer-contracts`** — `CustomerRegistered` JSON Schema + generated POJOs
-  (`com.example.contracts.customers.*`). Depends only on Jackson.
+  (`com.example.contracts.orders.*`) + its AMQP topology. Depends only on Jackson + spring-amqp.
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
-  both contracts modules.
+  `order-contracts`.
 
 ### Schema-aware message flow
 
 The center of the design is `SchemaAwareMessageConverter` (a Spring AMQP `MessageConverter`):
 
 - **Produce** (`toMessage`): look up the Java type in the `TypeMappingRegistry` → resolve the
-  schema via `SchemaResolver` → **validate** the payload → serialize via the type's
-  `SerializationStrategy` → populate `X-Schema-*` headers + content-type. Validation failure
-  throws `SchemaValidationException` and **no message is emitted**.
+  schema via `SchemaResolver` → **validate** the payload → serialize via `JsonSchemaStrategy` →
+  populate `X-Schema-*` headers + content-type. Validation failure throws
+  `SchemaValidationException` and **no message is emitted**.
 - **Consume** (`fromMessage`): read `X-Schema-*` headers → resolve schema (preferring
-  `X-Schema-GlobalId` to skip the coordinate lookup) → dispatch to the matching strategy →
-  return the typed object.
+  `X-Schema-GlobalId` to skip the coordinate lookup) → validate + deserialize → return the
+  typed object.
 
 Supporting pieces in core:
 - **`ApicurioClient`** — thin façade over the Apicurio Java SDK (`fetchByGlobalId`,
-  `fetchByCoordinates`, `latestVersion`); accepts a bearer-token supplier (OIDC, off by default).
-- **`SchemaResolver`** — Caffeine cache (`byGlobalId` + `byCoordinates`) with TTL +
-  refresh-after-write; pre-warms on startup; on registry outage **serves stale from cache**
-  and only throws `RegistryUnavailableException` when nothing is cached.
-- **`SerializationStrategy`** SPI with `JsonSchemaStrategy` as the sole built-in strategy
-  (the SPI remains for future formats, e.g. Avro). Each contracts module contributes one
-  `TypeMapping` bean (Java type ↔ coordinates ↔ type ↔ routing).
+  `fetchByCoordinates`, `latestVersion`); anonymous access.
+- **`SchemaResolver`** — Caffeine-backed cache over `ApicurioClient` with two deliberately
+  different caches: `byCoordinates` (mutable — `latest` can advance) is a `LoadingCache` with
+  `expireAfterWrite` (TTL) + `refreshAfterWrite` (async stale-while-revalidate); `byGlobalId`
+  (immutable mapping) is size-bounded only, **no TTL**. Both are size-bounded and
+  `recordStats()`-enabled. On a registry outage it serves **last-known-good** content and only
+  throws `RegistryUnavailableException` when nothing is cached. Tunable via `apicurio.cache.*`
+  (`ApicurioCacheProperties`).
+- **`JsonSchemaStrategy`** — the sole serde (networknt validation + Jackson). Each contracts
+  module contributes one `TypeMapping` bean (Java type ↔ coordinates ↔ type ↔ routing).
 - **`EventPublisher`** / **`EventConsumerSupport`** wrap `RabbitTemplate` / `@RabbitListener`
   and own the failure-routing decision.
 
@@ -129,11 +130,11 @@ Schema identity travels entirely in `X-Schema-*` headers, plus
 
 Consumer declares the topology idempotently on startup: `events.exchange`, `events.dlx`,
 `events.retry.exchange` + queues/bindings. **Transient** failures (registry unavailable,
-schema-not-found, downstream errors) go through the retry exchange with a TTL ladder
-(5s/30s/5m, max 3) before the DLQ. **Permanent** failures (validation, deserialization, type
-mismatch) go **straight to the DLQ, no retry**. DLQ messages carry the full `X-Failure-*`
-header set (stack trace truncated to 4KB). Consumer dedupes on `X-Message-Id` (POC-only,
-in-memory Caffeine).
+schema-not-found, downstream errors) go through the retry exchange via a **single 5s tier**
+(`orders.created.retry.5s`), cycled up to `events.retry.max-attempts` (default 3) before the
+DLQ. **Permanent** failures (validation, deserialization, type mismatch) go **straight to the
+DLQ, no retry**. DLQ messages carry the full `X-Failure-*` header set (stack trace truncated to
+4KB). (Idempotency/dedupe was cut in this minimal version.)
 
 ### Exception taxonomy (drives routing)
 
@@ -144,20 +145,20 @@ table-drive — keep them aligned.
 
 ### Schema governance
 
-Both artifacts are registered under groups `events.orders` / `events.customers` and carry a
-**FORWARD** rule — Apicurio's JSON Schema checker classifies adding any property as
-`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`, which BACKWARD rejects but FORWARD accepts (so optional
-JSON field additions only validate under FORWARD). The `compat-check` Maven profile in both
-contracts POMs wires `apicurio-registry:register -DdryRun` as the CI merge gate: an incompatible
-change fails the goal and fails the merge. Producers can pin a schema version via `schema.{orders,customers}.pinned-version` in
-`application.yml`; with `auto-register=OFF` an unregistered pinned schema must **fail fast on
-startup**.
+`OrderCreated` is registered under group `events.orders` with a **FORWARD** rule — Apicurio's
+JSON Schema checker classifies adding any property as `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`,
+which BACKWARD rejects but FORWARD accepts (so optional JSON field additions only validate under
+FORWARD). Governance is enforced by the **real (non-dry-run) `apicurio-registry:register` Maven
+command, run manually** — the registry rejects an incompatible schema and the goal fails. The
+`compat-check` profile (`register -DdryRun`) is kept only as an optional pre-flight; the
+`incompatible-demo` profile reproduces a rejection on demand. (Schema-version pinning and the
+`auto-register=OFF` fail-fast validator were cut in this minimal version.)
 
 ### Health checks
 
-`QueueDepthHealthIndicator` (consumer) and `RegistryHealthIndicator` (core) expose Spring Boot
-Actuator health checks at `/actuator/health` on both services. (The metrics/tracing stack —
-Micrometer, Prometheus, Grafana, OpenTelemetry/Jaeger — was removed from the POC.)
+Both services expose the default Spring Boot Actuator health endpoint at `/actuator/health`. (The
+custom `QueueDepthHealthIndicator` and `RegistryHealthIndicator`, and the metrics/tracing stack,
+were cut in this minimal version — watch the RabbitMQ management UI to see DLQ depth.)
 
 ### DLQ demo
 

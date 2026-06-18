@@ -15,7 +15,6 @@
   <modules>
     <module>schema-messaging-core</module>
     <module>order-contracts</module>
-    <module>customer-contracts</module>
     <module>producer-service</module>
     <module>consumer-service</module>
   </modules>

@@ -4,31 +4,36 @@ import com.example.messaging.core.exception.RegistryUnavailableException;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
-import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Ticker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Caching layer over {@link ApicurioClient} (spec §10.2).
+ * Caffeine-backed cache over {@link ApicurioClient}, using two caches with deliberately
+ * different semantics:
  *
- * <p>Two caches:
  * <ul>
- *   <li>{@code byCoordinates} — Caffeine {@link LoadingCache} with TTL + refreshAfterWrite.
- *   <li>{@code byGlobalId} — plain Caffeine {@link Cache} cross-populated on every coordinate fetch
- *       (the globalIds SDK endpoint returns content-only, so the type must come from context).
+ *   <li><b>{@code byCoordinates}</b> — keyed by group/artifact/version. A coordinate pinned to
+ *       {@code latest} is <b>mutable</b> (a newly registered version changes what it resolves
+ *       to), so this is a {@link LoadingCache} with {@code expireAfterWrite} (TTL) +
+ *       {@code refreshAfterWrite} (async stale-while-revalidate). Using a {@code LoadingCache}
+ *       means concurrent misses for the same key load <b>once</b> — no cache stampede.</li>
+ *   <li><b>{@code byGlobalId}</b> — keyed by Apicurio global ID. A globalId always maps to the
+ *       <b>same immutable content</b>, so this cache is size-bounded only, with <b>no TTL</b>
+ *       (expiring it would just cause needless refetches of identical bytes). It is
+ *       cross-populated on every coordinate fetch.</li>
  * </ul>
  *
- * <p>Stale-on-failure strategy:
- * <ul>
- *   <li>During background {@code reload()}: registry down → returns stale + WARN (TC-1.4/TC-1.7).
- *   <li>After TTL expiry with registry down: checks {@code lastKnownGood} → stale + WARN (TC-1.7).
- *   <li>Not cached + registry down → throws {@link RegistryUnavailableException} (TC-1.8).
- * </ul>
+ * <p>Both caches are size-bounded (no unbounded growth) and {@code recordStats()}-enabled for
+ * observability. On a registry outage the resolver serves <b>last-known-good</b> content from
+ * {@link #lastKnownGoodById}/{@link #lastKnownGoodByCoords}; it only throws
+ * {@link RegistryUnavailableException} when nothing has ever been cached for the key.
  */
 public class SchemaResolver {
 
@@ -36,36 +41,43 @@ public class SchemaResolver {
 
     private final ApicurioClient apicurioClient;
 
-    /**
-     * Primary coordinate cache: supports auto-refresh-after-write (TC-1.3, TC-1.4).
-     */
+    /** Mutable coordinate cache: TTL + async refresh so {@code latest} advances. */
     private final LoadingCache<SchemaCoordinates, ResolvedSchema> byCoordinates;
 
-    /**
-     * Secondary global-ID cache: plain cache cross-populated by coordinate fetches.
-     * The globalIds SDK endpoint returns raw content only, so SchemaType is injected by the caller.
-     */
+    /** Immutable global-ID cache: size-bounded, no TTL. */
     private final Cache<Long, ResolvedSchema> byGlobalId;
 
-    // Survive cache TTL expiry when registry is down (TC-1.7)
+    // Survive TTL expiry during a full registry outage (serve-stale fallback).
     private final ConcurrentHashMap<Long, ResolvedSchema> lastKnownGoodById = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<SchemaCoordinates, ResolvedSchema> lastKnownGoodByCoords = new ConcurrentHashMap<>();
 
     public SchemaResolver(ApicurioClient apicurioClient, ApicurioCacheProperties props) {
+        this(apicurioClient, props, Ticker.systemTicker());
+    }
+
+    /** Test seam: inject a controllable {@link Ticker} to drive TTL/refresh behaviour deterministically. */
+    SchemaResolver(ApicurioClient apicurioClient, ApicurioCacheProperties props, Ticker ticker) {
         this.apicurioClient = apicurioClient;
-        this.byCoordinates = buildCoordinatesCache(props);
+        this.byCoordinates = Caffeine.newBuilder()
+                .maximumSize(props.getMaxSize())
+                .expireAfterWrite(props.getTtl())
+                .refreshAfterWrite(props.getRefreshAfterWrite())
+                .ticker(ticker)
+                .recordStats()
+                .build(coordinatesLoader());
         this.byGlobalId = Caffeine.newBuilder()
-                .maximumSize(props.maxSize())
-                .expireAfterWrite(props.ttl())
+                .maximumSize(props.getMaxSize())
+                .ticker(ticker)
+                .recordStats()
                 .build();
     }
 
     // ---- public API -------------------------------------------------------
 
     /**
-     * Resolve by global ID using the schema type from message headers.
-     * The type is required because the Apicurio SDK's globalIds endpoint returns content only.
-     * Checks {@code byGlobalId} cache first (populated by prior coordinate fetches).
+     * Resolve by global ID (the fast consumer path). The {@link SchemaType} is required because
+     * the Apicurio globalIds endpoint returns raw content only. Checks {@code byGlobalId} first
+     * (populated by prior coordinate fetches).
      */
     public ResolvedSchema resolveByGlobalId(long globalId, SchemaType schemaType) {
         ResolvedSchema cached = byGlobalId.getIfPresent(globalId);
@@ -76,88 +88,62 @@ public class SchemaResolver {
     }
 
     public ResolvedSchema resolveByCoordinates(SchemaCoordinates coords) {
-        ResolvedSchema cached = byCoordinates.getIfPresent(coords);
-        if (cached != null) {
-            return cached;
-        }
         return byCoordinates.get(coords);
     }
 
-    /**
-     * Pre-warm a schema into both caches (T-1.4). On fetch failure: WARN + continue.
-     */
-    public void preWarm(SchemaCoordinates coords) {
-        try {
-            ResolvedSchema schema = apicurioClient.fetchByCoordinates(coords);
-            storeInAllCaches(schema, coords);
-            byCoordinates.put(coords, schema);
-            log.debug("Pre-warmed schema: {}", coords);
-        } catch (Exception e) {
-            log.warn("Pre-warm failed for {} — continuing startup", coords, e);
-        }
-    }
+    // ---- byCoordinates loader ---------------------------------------------
 
-    // ---- byCoordinates LoadingCache builder --------------------------------
-
-    private LoadingCache<SchemaCoordinates, ResolvedSchema> buildCoordinatesCache(ApicurioCacheProperties props) {
-        return Caffeine.newBuilder()
-                .maximumSize(props.maxSize())
-                .expireAfterWrite(props.ttl())
-                .refreshAfterWrite(props.refreshAfterWrite())
-                .build(new CacheLoader<>() {
-                    @Override
-                    public ResolvedSchema load(SchemaCoordinates coords) {
-                        return loadByCoords(coords);
+    private CacheLoader<SchemaCoordinates, ResolvedSchema> coordinatesLoader() {
+        return new CacheLoader<>() {
+            @Override
+            public ResolvedSchema load(SchemaCoordinates coords) {
+                try {
+                    ResolvedSchema schema = apicurioClient.fetchByCoordinates(coords);
+                    storeFresh(schema, coords);
+                    return schema;
+                } catch (RegistryUnavailableException e) {
+                    ResolvedSchema stale = lastKnownGoodByCoords.get(coords);
+                    if (stale != null) {
+                        log.warn("Registry unavailable for {}, serving last-known-good (stale)", coords, e);
+                        return stale;
                     }
-
-                    @Override
-                    public ResolvedSchema reload(SchemaCoordinates coords, ResolvedSchema oldValue) {
-                        try {
-                            ResolvedSchema fresh = apicurioClient.fetchByCoordinates(coords);
-                            storeInAllCaches(fresh, coords);
-                            return fresh;
-                        } catch (Exception e) {
-                            log.warn("Registry unavailable during refresh for {}, serving stale", coords, e);
-                            return oldValue.asStale();
-                        }
-                    }
-                });
-    }
-
-    // ---- load helpers -----------------------------------------------------
-
-    private ResolvedSchema loadByCoords(SchemaCoordinates coords) {
-        try {
-            ResolvedSchema schema = apicurioClient.fetchByCoordinates(coords);
-            storeInAllCaches(schema, coords);
-            return schema;
-        } catch (RegistryUnavailableException e) {
-            ResolvedSchema stale = lastKnownGoodByCoords.get(coords);
-            if (stale != null) {
-                log.warn("Registry unavailable for {}, serving last-known-good (stale)", coords, e);
-                return stale.asStale();
+                    throw e;
+                }
             }
-            throw e;
-        }
+
+            @Override
+            public ResolvedSchema reload(SchemaCoordinates coords, ResolvedSchema oldValue) {
+                try {
+                    ResolvedSchema fresh = apicurioClient.fetchByCoordinates(coords);
+                    storeFresh(fresh, coords);
+                    return fresh;
+                } catch (Exception e) {
+                    log.warn("Registry unavailable during refresh for {}, keeping current value", coords, e);
+                    return oldValue;
+                }
+            }
+        };
     }
+
+    // ---- byGlobalId loader -------------------------------------------------
 
     private ResolvedSchema loadById(long globalId, SchemaType schemaType) {
-        String ctx = "globalId=" + globalId;
         try {
             ResolvedSchema schema = apicurioClient.fetchByGlobalId(globalId, schemaType);
-            storeInAllCaches(schema, null);
+            storeFresh(schema, null);
             return schema;
         } catch (RegistryUnavailableException e) {
             ResolvedSchema stale = lastKnownGoodById.get(globalId);
             if (stale != null) {
-                log.warn("Registry unavailable for {}, serving last-known-good (stale)", ctx, e);
-                return stale.asStale();
+                log.warn("Registry unavailable for globalId={}, serving last-known-good (stale)", globalId, e);
+                return stale;
             }
             throw e;
         }
     }
 
-    private void storeInAllCaches(ResolvedSchema schema, SchemaCoordinates coords) {
+    /** Populate both caches + the last-known-good fallback maps from a freshly fetched schema. */
+    private void storeFresh(ResolvedSchema schema, SchemaCoordinates coords) {
         byGlobalId.put(schema.globalId(), schema);
         lastKnownGoodById.put(schema.globalId(), schema);
         if (coords != null) {

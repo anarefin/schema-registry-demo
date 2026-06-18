@@ -41,21 +41,4 @@ class ProducerValidationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Schema validation failed")));
     }
-
-    @Test
-    void tc59_customerValidationFailureReturns400() throws Exception {
-        CustomerController controller = new CustomerController(eventPublisher);
-        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
-
-        doThrow(new SchemaValidationException("events.customers:CustomerRegistered", "email invalid"))
-                .when(eventPublisher).publish(any(), any());
-
-        mockMvc.perform(post("/api/customers")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"email":"bad","firstName":"T","lastName":"U","phoneNumber":"555"}
-                                """))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("Schema validation failed")));
-    }
 }

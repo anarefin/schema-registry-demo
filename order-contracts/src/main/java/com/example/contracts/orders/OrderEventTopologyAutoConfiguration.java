@@ -14,19 +14,16 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 
 /**
- * AMQP topology for OrderCreated events (spec §9): the 3 shared exchanges (declared
- * identically in customer-contracts; only one copy wins via @ConditionalOnMissingBean), plus
- * the orders.created main queue, DLQ, and 3-tier TTL retry queues + bindings. Any service
+ * AMQP topology for OrderCreated events (spec §9): the 3 shared exchanges, plus the
+ * orders.created main queue, DLQ, and the single 5s TTL retry queue + binding. Any service
  * depending on order-contracts declares this topology idempotently on startup.
  */
 @AutoConfiguration
 public class OrderEventTopologyAutoConfiguration {
 
-    @Value("${events.retry.tier0.ms:5000}")   private long tier0Ms;
-    @Value("${events.retry.tier1.ms:30000}")  private long tier1Ms;
-    @Value("${events.retry.tier2.ms:300000}") private long tier2Ms;
+    @Value("${events.retry.tier.ms:5000}") private long retryTtlMs;
 
-    // ---- Shared exchanges (also declared in customer-contracts; first one wins) ----
+    // ---- Shared exchanges ----
 
     @Bean(EventExchanges.BEAN_EVENTS_EXCHANGE)
     @ConditionalOnMissingBean(name = EventExchanges.BEAN_EVENTS_EXCHANGE)
@@ -78,37 +75,13 @@ public class OrderEventTopologyAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(name = "ordersRetry5s")
-    public Queue ordersRetry5s() { return RetryTopologyFactory.retryQueue(OrderEventRouting.ROUTING_KEY, 0, tier0Ms); }
-
-    @Bean
-    @ConditionalOnMissingBean(name = "ordersRetry30s")
-    public Queue ordersRetry30s() { return RetryTopologyFactory.retryQueue(OrderEventRouting.ROUTING_KEY, 1, tier1Ms); }
-
-    @Bean
-    @ConditionalOnMissingBean(name = "ordersRetry5m")
-    public Queue ordersRetry5m() { return RetryTopologyFactory.retryQueue(OrderEventRouting.ROUTING_KEY, 2, tier2Ms); }
+    public Queue ordersRetry5s() { return RetryTopologyFactory.retryQueue(OrderEventRouting.ROUTING_KEY, retryTtlMs); }
 
     @Bean
     @ConditionalOnMissingBean(name = "ordersRetry5sBinding")
     public Binding ordersRetry5sBinding(
             @Qualifier("ordersRetry5s") Queue ordersRetry5s,
             @Qualifier(EventExchanges.BEAN_EVENTS_RETRY_EXCHANGE) TopicExchange eventsRetryExchange) {
-        return RetryTopologyFactory.retryBinding(ordersRetry5s, eventsRetryExchange, OrderEventRouting.ROUTING_KEY, 0);
-    }
-
-    @Bean
-    @ConditionalOnMissingBean(name = "ordersRetry30sBinding")
-    public Binding ordersRetry30sBinding(
-            @Qualifier("ordersRetry30s") Queue ordersRetry30s,
-            @Qualifier(EventExchanges.BEAN_EVENTS_RETRY_EXCHANGE) TopicExchange eventsRetryExchange) {
-        return RetryTopologyFactory.retryBinding(ordersRetry30s, eventsRetryExchange, OrderEventRouting.ROUTING_KEY, 1);
-    }
-
-    @Bean
-    @ConditionalOnMissingBean(name = "ordersRetry5mBinding")
-    public Binding ordersRetry5mBinding(
-            @Qualifier("ordersRetry5m") Queue ordersRetry5m,
-            @Qualifier(EventExchanges.BEAN_EVENTS_RETRY_EXCHANGE) TopicExchange eventsRetryExchange) {
-        return RetryTopologyFactory.retryBinding(ordersRetry5m, eventsRetryExchange, OrderEventRouting.ROUTING_KEY, 2);
+        return RetryTopologyFactory.retryBinding(ordersRetry5s, eventsRetryExchange, OrderEventRouting.ROUTING_KEY);
     }
 }

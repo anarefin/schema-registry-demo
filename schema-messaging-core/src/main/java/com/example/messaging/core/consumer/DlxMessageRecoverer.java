@@ -9,37 +9,47 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.retry.MessageRecoverer;
 
 /**
- * Routes failed messages to the AMQP TTL retry ladder or DLQ (spec §9/§11 / T-5.2–5.4).
+ * Routes failed messages to a single-tier AMQP TTL retry queue or straight to the DLQ
+ * (spec §9/§11, minimal cut).
  *
  * <p>Decision table:
  * <ul>
  *   <li>Permanent failure (validation, deserialization, type-mismatch) → dlxExchange immediately.</li>
- *   <li>Transient failure with {@code X-Retry-Count} &lt; maxRetries → retryExchange
- *       with routing key {@code <original-routing-key>.retry.<tier>} (TTL queue for that tier).</li>
- *   <li>Transient failure with {@code X-Retry-Count} ≥ maxRetries → dlxExchange.</li>
+ *   <li>Transient failure with {@code X-Retry-Count} &lt; maxAttempts → retryExchange with
+ *       routing key {@code <original-routing-key>.retry.5s} (the single 5s TTL queue).</li>
+ *   <li>Transient failure with {@code X-Retry-Count} ≥ maxAttempts → dlxExchange.</li>
  * </ul>
+ *
+ * <p>The original POC had a 3-tier 5s/30s/5m ladder; the minimal cut keeps a single 5s tier
+ * cycled up to {@code maxAttempts} times.
  */
 public class DlxMessageRecoverer implements MessageRecoverer {
 
     private static final Logger log = LoggerFactory.getLogger(DlxMessageRecoverer.class);
 
+    /** Routing-key suffix of the single retry queue. Must match the queue declared in the contract topology. */
+    public static final String RETRY_SUFFIX = "5s";
+
     private final EventConsumerSupport consumerSupport;
     private final RabbitTemplate rabbitTemplate;
     private final String dlxExchange;
     private final String retryExchange;
-    private final long[] retryDelaysMs;
+    private final long retryDelayMs;
+    private final int maxAttempts;
 
     public DlxMessageRecoverer(
             EventConsumerSupport consumerSupport,
             RabbitTemplate rabbitTemplate,
             String dlxExchange,
             String retryExchange,
-            long[] retryDelaysMs) {
+            long retryDelayMs,
+            int maxAttempts) {
         this.consumerSupport = consumerSupport;
         this.rabbitTemplate = rabbitTemplate;
         this.dlxExchange = dlxExchange;
         this.retryExchange = retryExchange;
-        this.retryDelaysMs = retryDelaysMs;
+        this.retryDelayMs = retryDelayMs;
+        this.maxAttempts = maxAttempts;
     }
 
     @Override
@@ -52,17 +62,17 @@ public class DlxMessageRecoverer implements MessageRecoverer {
         String originalRoutingKey = props.getReceivedRoutingKey() != null
                 ? props.getReceivedRoutingKey() : "unknown";
 
-        if (decision == RoutingDecision.DLQ_DIRECT || retryCount >= retryDelaysMs.length) {
+        if (decision == RoutingDecision.DLQ_DIRECT || retryCount >= maxAttempts) {
             consumerSupport.populateFailureHeaders(message, ex, RoutingDecision.DLQ_DIRECT);
             rabbitTemplate.send(dlxExchange, originalRoutingKey, message);
             log.error("→ DLQ exchange={} routingKey={} retries={} cause={}",
                     dlxExchange, originalRoutingKey, retryCount, ex.getMessage());
         } else {
             props.setHeader(SchemaMessageHeaders.RETRY_COUNT, retryCount + 1);
-            String retryRoutingKey = originalRoutingKey + ".retry." + RetryTierSuffixes.suffix(retryCount);
+            String retryRoutingKey = originalRoutingKey + ".retry." + RETRY_SUFFIX;
             rabbitTemplate.send(retryExchange, retryRoutingKey, message);
             log.warn("→ retry exchange={} routingKey={} retryCount={} ttlMs={}",
-                    retryExchange, retryRoutingKey, retryCount + 1, retryDelaysMs[retryCount]);
+                    retryExchange, retryRoutingKey, retryCount + 1, retryDelayMs);
         }
     }
 

@@ -22,7 +22,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * JSON Schema serialization strategy (spec §6).
+ * JSON Schema serde (spec §6): the sole wire format in this minimal POC.
  * Validates payload via networknt json-schema-validator (Draft 2020-12),
  * then serializes / deserializes with Jackson.
  *
@@ -35,16 +35,20 @@ import java.util.stream.Collectors;
  * a mis-deployed producer) is caught and routed to DLQ rather than silently deserializing
  * into a partial POJO.
  */
-public class JsonSchemaStrategy implements SerializationStrategy {
+public class JsonSchemaStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(JsonSchemaStrategy.class);
+
+    /** A globalId maps to immutable schema content, so a small bounded cache suffices. */
+    private static final int COMPILED_SCHEMA_CACHE_MAX = 200;
 
     private final ObjectMapper objectMapper;
     private final boolean validateOnDeserialize;
 
-    // Compiled JsonSchema objects are immutable and thread-safe; cache by globalId.
+    // Compiled JsonSchema objects are immutable and thread-safe; cache by globalId (bounded, no
+    // TTL — the globalId→schema mapping never changes).
     private final Cache<Long, JsonSchema> compiledSchemaCache = Caffeine.newBuilder()
-            .maximumSize(200)
+            .maximumSize(COMPILED_SCHEMA_CACHE_MAX)
             .build();
 
     public JsonSchemaStrategy(ObjectMapper objectMapper, boolean validateOnDeserialize) {
@@ -56,12 +60,15 @@ public class JsonSchemaStrategy implements SerializationStrategy {
         this(objectMapper, true);
     }
 
-    @Override
     public SchemaType schemaType() {
         return SchemaType.JSON;
     }
 
-    @Override
+    /** MIME content-type for the wire format, used to populate the AMQP content-type header. */
+    public String contentType() {
+        return SchemaType.JSON.contentType();
+    }
+
     public byte[] serialize(Object payload, ResolvedSchema schema)
             throws SchemaValidationException, SerializationException {
         try {
@@ -75,7 +82,6 @@ public class JsonSchemaStrategy implements SerializationStrategy {
         }
     }
 
-    @Override
     public Object deserialize(byte[] bytes, Class<?> targetType, ResolvedSchema schema)
             throws DeserializationException {
         String ctx = targetType.getSimpleName();

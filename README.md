@@ -1,178 +1,46 @@
-# Schema Registry POC — Apicurio + RabbitMQ + Spring Boot 4.0
+# Schema Registry POC (minimal) — Apicurio + RabbitMQ + Spring Boot 4.0
 
-End-to-end schema-governed messaging: **Apicurio Registry 3.2.0** as schema source of truth,
-**RabbitMQ** as transport, two **Spring Boot 4.0** services on **Java 25**. Demonstrates JSON
-Schema message flows (orders + customers), schema-compatibility governance as a CI merge gate
-(FORWARD — see §2 for why JSON Schema artifacts use FORWARD), and a full DLX/DLQ/retry failure
-topology.
+End-to-end schema-governed messaging, stripped to the thinnest version that still demonstrates
+all three core ideas: **Apicurio Registry 3.2.0** as the schema source of truth, **RabbitMQ** as
+transport, two **Spring Boot 4.0** services on **Java 25**.
 
----
+This is the **minimal-poc** cut: one message type (`OrderCreated`), one 5s retry tier, real
+infrastructure. For the full step-by-step walkthrough with seed data, see
+**[`minimal-poc-guide.md`](minimal-poc-guide.md)**.
 
-## What this POC proves
+## The three concepts
 
-| Spec §18 criterion | Demonstrated by |
+1. **Schema-governed flow** — the producer validates a payload against the registry schema,
+   serializes it, and publishes with `X-Schema-*` headers; the consumer resolves the same
+   schema, validates, and deserializes into a typed `OrderCreated`.
+2. **Schema governance** — compatibility is enforced at **real registration time** by the
+   Apicurio Maven plugin: with a FORWARD rule attached, the registry rejects an incompatible
+   schema and the `register` goal fails. (`incompatible-demo` reproduces the rejection on demand.)
+3. **Failure model** — permanent failures (validation, deserialization, type mismatch) go
+   straight to the DLQ; transient failures (registry unavailable, schema-not-found, downstream
+   error) are retried via a single 5s tier up to 3 attempts before the DLQ.
+
+## Modules (4)
+
+| Module | Role |
 |---|---|
-| Cold `compose up` → all services healthy | `docker compose up`, healthchecks |
-| Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs |
-| Two artifacts with ≥2 versions, FORWARD compat rule on both | `apicurio-registry:register` (v1 + v2) |
-| Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
-| Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
-| Registry down → cached processing, new messages fail gracefully | `SchemaResolver` last-known-good |
-| `auto-register=OFF` + unregistered schema → fail to start | `StartupSchemaValidator` |
-| README walkthrough on fresh clone in under 15 min | This file |
+| `schema-messaging-core` | Domain-agnostic plumbing: `SchemaAwareMessageConverter`, `ApicurioClient`, `SchemaResolver` (Caffeine cache: TTL'd coordinates + immutable globalId cache + serve-stale-on-outage), `JsonSchemaStrategy`, `EventPublisher`, and the DLX/retry routing (`DlxMessageRecoverer` + `DlxRoutingAdvice`). |
+| `order-contracts` | `OrderCreated` JSON Schema + generated POJO, AMQP topology (single retry tier), and the apicurio `register` / `compat-check` / `incompatible-demo` plugin config. |
+| `producer-service` | REST `:8081` — `POST /api/orders` publishes; `POST /api/orders/poison` drives the DLQ demo. |
+| `consumer-service` | `:8082` — `@RabbitListener` on `orders.created.queue`; declares the events/DLX/retry topology. |
 
----
-
-## Prerequisites
-
-| Tool | Version |
-|---|---|
-| JDK | 25 (entry in `~/.m2/toolchains.xml`, vendor `oracle`, `id` `25-oracle`) |
-| Docker + Docker Compose | Compose v2 (`docker compose`) |
-| Maven | Provided via `./mvnw` (Maven Wrapper — **always use `./mvnw` not `mvn`**) |
-
-No system Maven installation needed. The wrapper downloads Maven 3.9.11 automatically.
-
----
-
-## Quick start (≤ 15 min)
-
-### 1. Build all modules
+## Quick start
 
 ```bash
-./mvnw clean install -DskipTests
+./mvnw clean install -DskipTests       # build the 4 modules
+docker compose up                      # Postgres + Apicurio (+UI) + RabbitMQ, wait for healthy
+# register the schema + attach the FORWARD rule, run the services, then exercise the flow:
 ```
 
-Compiles all five modules, runs code generation (jsonschema2pojo), and installs
-JARs into the local Maven repository. Skip tests for speed; run them later with `./mvnw verify`.
-
-### 2. Start infrastructure
-
-```bash
-docker compose up
-```
-
-Starts (in dependency order, all with health checks):
-
-| Service | Port(s) | Notes |
-|---|---|---|
-| `postgres` | 5432 | Apicurio SQL storage |
-| `apicurio` | 8080 | Registry API |
-| `apicurio-ui` | 8888 | Registry UI |
-| `rabbitmq` | 5672 / 15672 | AMQP + management UI |
-
-Schema registration is **not** a compose service — it's a host-Maven step. The contracts modules
-already carry the `apicurio-registry-maven-plugin`, so once Apicurio is healthy you register both
-schemas and attach their compatibility rules directly from the host.
-
-Both artifacts are JSON Schema and use the **FORWARD** compatibility level — in Apicurio's
-JSON Schema checker, adding a property (even an optional/permissive one) is classified as
-`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED` and is rejected under BACKWARD; it is only valid
-under FORWARD.
-
-```bash
-# 1. Register both schemas (v1 + v2)
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
-
-# 2. Attach the compatibility rules (register does not do this)
-curl -s -o /dev/null -X POST \
-  "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
-  -H 'Content-Type: application/json' \
-  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
-curl -s -o /dev/null -X POST \
-  "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
-  -H 'Content-Type: application/json' \
-  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
-```
-
-Step 2 can also be run via the **Schema Governance Bootstrap** GitHub workflow
-(`.github/workflows/schema-governance-bootstrap.yml`).
-
-### 3. Start the services
-
-Two separate terminals:
-
-```bash
-# Terminal 1 — producer (port 8081)
-./mvnw -pl producer-service spring-boot:run
-
-# Terminal 2 — consumer (port 8082)
-./mvnw -pl consumer-service spring-boot:run
-```
-
-### 4. Demo: publish messages
-
-```bash
-# Publish an order event (JSON Schema → events.orders)
-curl -s -X POST http://localhost:8081/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"customerId":"cust-1","productId":"prod-42","quantity":2,"totalAmount":99.99,"currency":"USD"}'
-
-# Publish a customer event (JSON Schema → events.customers)
-curl -s -X POST http://localhost:8081/api/customers \
-  -H "Content-Type: application/json" \
-  -d '{"email":"alice@example.com","firstName":"Alice","lastName":"Smith","phoneNumber":"+15551234567"}'
-```
-
-Consumer logs confirm receipt and full deserialization. Check `X-Schema-*` headers in RabbitMQ
-management UI → queues → `orders.created.queue` or `customers.registered.queue`.
-
-### 5. Demo: schema validation failure (producer-side)
-
-Publisher validates before sending. Missing required field returns `400`; no message is emitted.
-
-```bash
-# Missing required firstName / lastName → 400 Bad Request, nothing published
-curl -s -X POST http://localhost:8081/api/customers \
-  -H "Content-Type: application/json" \
-  -d '{"email":"bad@example.com"}'
-```
-
-### 6. Demo: malformed payload → DLQ
-
-```bash
-# Publishes garbage JSON bytes with valid X-Schema-* headers
-curl -s -X POST http://localhost:8081/api/orders/poison
-```
-
-Consumer fails schema validation (unparseable JSON) → `SchemaValidationException` → **no retry** → `orders.created.dlq`.
-In RabbitMQ management UI (http://localhost:15672, guest/guest) browse `orders.created.dlq` to
-inspect all `X-Failure-*` headers (reason, message, stack trace truncated to 4 KB, original
-routing key, failed-at, retry-count).
-
-### 7. Demo: schema evolution — accept and reject
-
-**Accepted:** add an optional property — FORWARD-compatible for both artifacts
-(`promoCode` etc. on `OrderCreated`, `promoCode`/`input1` on `CustomerRegistered`).
-Apicurio rejects JSON property additions under BACKWARD, which is why both artifacts
-use a FORWARD rule.
-
-```bash
-# Register v2 (optional promoCode etc. already present in order-created.json)
-./mvnw -pl order-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
-
-# ≥2 versions visible in Apicurio UI → events.orders / OrderCreated
-```
-
-**Rejected (incompatible):** changing an existing property's type (`quantity` integer → string)
-violates every compatibility level.
-
-```bash
-# Dry-run incompatible schema — BUILD FAILURE with Apicurio rejection message
-./mvnw -pl order-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
-```
-
-Same CI gate for customers:
-
-```bash
-./mvnw -pl customer-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
-```
-
----
+Follow **[`minimal-poc-guide.md`](minimal-poc-guide.md)** from step 4 — it has the exact
+register command, the rule-attach curl, the run commands, and copy-paste seed payloads for the
+happy path, the schema-violation 400, the poison→DLQ demo, the transient→retry demo, and both
+governance cases.
 
 ## Inspecting the system
 
@@ -183,7 +51,12 @@ Same CI gate for customers:
 | Producer health | http://localhost:8081/actuator/health | none |
 | Consumer health | http://localhost:8082/actuator/health | none |
 
----
+## Wire format
+
+The message body is the **raw serialized JSON document only** — no envelope. Schema identity
+travels entirely in headers: `X-Schema-GlobalId` / `X-Schema-GroupId` / `X-Schema-ArtifactId` /
+`X-Schema-Version` / `X-Schema-Type`, plus `X-Message-Id` / `X-Correlation-Id`. Content-type is
+`application/json`.
 
 ## Sequence diagrams
 
@@ -199,12 +72,12 @@ sequenceDiagram
 
     C->>P: POST /api/orders {payload}
     P->>P: build OrderCreated (JSON)
-    P->>R: resolve(SchemaCoordinates)
-    R->>A: GET /apis/registry/v3/groups/events.orders/artifacts/OrderCreated
+    P->>R: resolveByCoordinates(events.orders:OrderCreated)
+    R->>A: GET artifact (or serve from Caffeine cache)
     A-->>R: schema bytes
-    R-->>P: ResolvedSchema (cached)
+    R-->>P: ResolvedSchema
     P->>P: validate + serialize (raw JSON bytes)
-    P->>MQ: publish to events.exchange<br/>X-Schema-GlobalId / X-Schema-Type / X-Message-Id
+    P->>MQ: publish to events.exchange<br/>X-Schema-* / X-Message-Id
     P-->>C: 201 Created
 ```
 
@@ -218,124 +91,69 @@ sequenceDiagram
     participant A as ApicurioRegistry
 
     MQ->>CS: deliver message (JSON bytes + X-Schema-* headers)
-    CS->>R: fetchByGlobalId(X-Schema-GlobalId)
-    alt cache hit
-        R-->>CS: ResolvedSchema (from Caffeine cache)
-    else cache miss
-        R->>A: GET /apis/registry/v3/ids/globalIds/{id}
-        A-->>R: schema bytes
-        R-->>CS: ResolvedSchema (now cached)
-    end
-    CS->>CS: deserialize → OrderCreated
-    CS->>CS: business logic (OrderEventListener)
+    CS->>R: resolveByGlobalId(X-Schema-GlobalId)
+    R->>A: GET schema by globalId (or serve from Caffeine cache)
+    A-->>R: schema bytes
+    R-->>CS: ResolvedSchema
+    CS->>CS: validate + deserialize → OrderCreated
+    CS->>CS: OrderEventListener logs it
+    Note over CS: on failure → DlxRoutingAdvice → retry.5s or DLQ
 ```
 
-### Evolution rejected
+### Governance — incompatible change rejected
 
 ```mermaid
 sequenceDiagram
     participant Dev as Developer
-    participant CI as CI Pipeline
+    participant M as Maven plugin
     participant A as ApicurioRegistry
 
-    Dev->>CI: push incompatible schema change
-    CI->>A: apicurio-registry:register -DdryRun (compatibility check)
-    A-->>CI: 409 Conflict — compatibility rule violated (FORWARD)
-    CI-->>Dev: BUILD FAILURE (clear rejection message)
-    Note over Dev,A: Merge blocked — incompatible change never lands
+    Dev->>M: ./mvnw apicurio-registry:register (incompatible schema)
+    M->>A: register new version
+    A-->>M: 409 Conflict — FORWARD rule violated
+    M-->>Dev: BUILD FAILURE (clear rejection message)
 ```
 
-### Validation failed
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant P as ProducerService
-    participant A as ApicurioRegistry
-
-    C->>P: POST /api/customers {missing required fields}
-    P->>A: resolve schema
-    A-->>P: JSON Schema
-    P->>P: networknt validate → FAIL
-    P->>P: throw SchemaValidationException
-    P-->>C: 400 Bad Request (no message emitted)
-    Note over P,A: RabbitMQ never sees the message
-```
-
----
-
-## Running the test suite
+## Running the tests
 
 ```bash
-./mvnw test           # unit tests only (fast, no Docker)
-./mvnw verify         # unit + Testcontainers integration tests
-./mvnw -pl schema-messaging-core test   # single-module
-./mvnw -pl schema-messaging-core test -Dtest=SchemaResolverTest#cacheHit   # single test
+./mvnw test                              # unit tests only (Surefire, *Test.java — fast, no Docker)
+./mvnw verify                            # unit + Testcontainers ITs (Failsafe, *IT.java)
+./mvnw -pl schema-messaging-core test    # single module
 ```
 
-Tests are split by convention: `*Test.java` → Surefire (unit, mock-based);
-`*IT.java` → Failsafe (Testcontainers, real RabbitMQ + Apicurio). Keep new tests on the
-correct side — the split is load-bearing.
-
----
-
-## POC-only shortcuts
-
-The following design decisions are intentional simplifications for a proof-of-concept.
-They are not appropriate for production use as-is.
-
-| Shortcut | POC rationale | Production path |
-|---|---|---|
-| In-memory idempotency (`IdempotencyFilter`, Caffeine ~10 K entries, TTL 1 h) | Avoids distributed state | Redis / database deduplication store keyed on `X-Message-Id` |
-| Single-instance Apicurio Registry (no HA) | Simplifies compose topology | Multi-node Apicurio behind a load balancer, connection pooling |
-| Cache TTL vs evolution latency | 300 s `refresh-after-write` means producers see new schemas within 5 min | Tune or use event-driven cache invalidation (registry webhooks) |
-| OIDC disabled by default | No Keycloak setup needed for the demo | Enable via `RegistryClientOptions.oauth2(...)` in `SchemaMessagingAutoConfiguration` — see Javadoc for Keycloak token-url pattern |
-| Schema registration is a manual host-Maven step after `docker compose up` | Keeps the build single-source (no second Maven toolchain in a container) | CI: run `apicurio-registry:register` + rule attachment as a dedicated post-deploy Maven step with a populated cache layer |
-| `apicurio.auto-register=ON` (default) | Services start without pre-registered schemas | Set `OFF` in production; `StartupSchemaValidator` then fails fast if a pinned schema is missing |
-
----
+The split is load-bearing: `*Test.java` is fast and mock-based; `*IT.java` spins up real
+RabbitMQ via Testcontainers. Keep new tests on the correct side.
 
 ## Maven command reference
 
 ```bash
 # Build
 ./mvnw clean install                               # full build + local install
-./mvnw clean install -DskipTests                   # skip all tests
-./mvnw -pl schema-messaging-core compile           # compile one module
-
-# Test
-./mvnw test                                        # unit tests (Surefire, *Test.java)
-./mvnw verify                                      # unit + IT (Failsafe, *IT.java)
-./mvnw -pl consumer-service verify                 # IT for one module
+./mvnw clean install -DskipTests                   # skip tests
 
 # Schema governance (requires docker compose up)
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
-
-./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
-       -Dapicurio.registry.url=http://localhost:8080
-
-# Incompatible change dry-run (CI gate demo)
+./mvnw -pl order-contracts apicurio-registry:register \
+       -Dapicurio.registry.url=http://localhost:8080      # real registration = the gate
 ./mvnw -pl order-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
-./mvnw -pl customer-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
+       -Dapicurio.registry.url=http://localhost:8080      # demonstrate rejection (must fail)
+./mvnw -pl order-contracts verify -Pcompat-check \
+       -Dapicurio.registry.url=http://localhost:8080      # optional dry-run pre-flight
 
 # Run services
-./mvnw -pl producer-service spring-boot:run        # port 8081
-./mvnw -pl consumer-service spring-boot:run        # port 8082
-
-# Run with prod profile (structured JSON logging)
-./mvnw -pl producer-service spring-boot:run -Dspring-boot.run.profiles=prod
-
-# Version pinning demo (resolves exact schema version at startup)
-SCHEMA_ORDERS_PINNED_VERSION=1 ./mvnw -pl producer-service spring-boot:run
+./mvnw -pl producer-service spring-boot:run        # :8081
+./mvnw -pl consumer-service spring-boot:run        # :8082
 ```
 
----
+## What was cut from the full POC
 
-## Gradle migration (deferred)
+This branch is a teaching cut. Relative to the full POC it drops: the second message type
+(customers), cache pre-warming, the registry health indicator, the `auto-register=OFF`
+fail-fast startup validator and schema-version pinning, OIDC, the `SerializationStrategy` SPI
+(folded into `JsonSchemaStrategy`), the in-memory idempotency/dedupe filter, the queue-depth
+health indicator, and the 3-tier (5s/30s/5m) retry ladder (now a single 5s tier). The original
+plan documents live in `docs/` as historical record.
 
-The POC uses Maven by design: `apicurio-registry-maven-plugin` provides first-class
-`register` and `test` goals with no trusted Gradle equivalent. Migrating the build to Gradle
-is explicitly out of scope for this POC and tracked as a future epic (spec §0.4).
+> Note: the `SchemaResolver` Caffeine cache (TTL'd coordinate cache + immutable globalId cache +
+> serve-stale-on-outage, tunable via `apicurio.cache.*`) was reinstated on top of the minimal
+> cut — see the `schema-messaging-core` row above.

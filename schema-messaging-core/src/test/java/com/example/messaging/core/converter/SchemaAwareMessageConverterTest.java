@@ -8,7 +8,7 @@ import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
 import com.example.messaging.core.registry.SchemaResolver;
-import com.example.messaging.core.serde.SerializationStrategy;
+import com.example.messaging.core.serde.JsonSchemaStrategy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,7 +32,7 @@ import static org.mockito.Mockito.*;
 class SchemaAwareMessageConverterTest {
 
     @Mock private SchemaResolver schemaResolver;
-    @Mock private SerializationStrategy strategy;
+    @Mock private JsonSchemaStrategy strategy;
 
     private SchemaAwareMessageConverter converter;
 
@@ -53,7 +53,7 @@ class SchemaAwareMessageConverterTest {
         TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.created");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
 
-        converter = new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy));
+        converter = new SchemaAwareMessageConverter(registry, schemaResolver, strategy);
     }
 
     /** TC-1.9: object → message → object round-trip produces equal payload. */
@@ -140,21 +140,5 @@ class SchemaAwareMessageConverterTest {
 
         assertThatThrownBy(() -> converter.fromMessage(msg))
                 .isInstanceOf(com.example.messaging.core.exception.DeserializationException.class);
-    }
-
-    /**
-     * TC-1.15: constructor rejects TypeMapping whose SchemaType has no registered strategy.
-     * Prevents a silent NPE at message-processing time from becoming a startup-time IllegalStateException.
-     */
-    @Test
-    void constructor_missingStrategy_throwsIllegalState() {
-        TypeMapping jsonMapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.json");
-        TypeMappingRegistry registry = new TypeMappingRegistry(List.of(jsonMapping));
-
-        // No strategy provided — JSON mapping has no matching strategy
-        assertThatThrownBy(() ->
-                new SchemaAwareMessageConverter(registry, schemaResolver, List.of()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("SchemaType.JSON");
     }
 }
