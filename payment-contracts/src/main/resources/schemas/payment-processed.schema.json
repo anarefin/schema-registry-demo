@@ -1,0 +1,39 @@
+{
+  "$id" : "PaymentProcessedEvent",
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "properties" : {
+    "amount" : {
+      "exclusiveMinimum" : 0.01,
+      "type" : "number"
+    },
+    "currency" : {
+      "maxLength" : 3,
+      "minLength" : 3,
+      "type" : "string"
+    },
+    "orderId" : {
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "paymentId" : {
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "paymentMethod" : {
+      "pattern" : "CARD|BANK_TRANSFER|WALLET",
+      "type" : "string"
+    },
+    "processedAt" : {
+      "format" : "date-time",
+      "type" : "string"
+    }
+  },
+  "required" : [
+    "amount",
+    "currency",
+    "orderId",
+    "paymentId"
+  ],
+  "title" : "PaymentProcessedEvent",
+  "type" : "object"
+}
