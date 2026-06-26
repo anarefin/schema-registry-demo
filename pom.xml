@@ -18,6 +18,7 @@
     <module>customer-contracts</module>
     <module>producer-service</module>
     <module>consumer-service</module>
+    <module>payment-contracts</module>
   </modules>
 
   <!-- T-0.3: single source of versions. Module POMs inherit and never re-declare. -->
@@ -42,6 +43,11 @@
     <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
     <jsonschema2pojo-maven-plugin.version>1.2.2</jsonschema2pojo-maven-plugin.version>
     <apicurio-registry-maven-plugin.version>3.2.0</apicurio-registry-maven-plugin.version>
+
+    <!-- Code-first schema generation (payment-contracts) -->
+    <victools.version>4.38.0</victools.version>
+    <jakarta.validation-api.version>3.1.1</jakarta.validation-api.version>
+    <exec-maven-plugin.version>3.5.0</exec-maven-plugin.version>
   </properties>
 
   <dependencyManagement>
@@ -69,6 +75,28 @@
         <groupId>io.apicurio</groupId>
         <artifactId>apicurio-registry-java-sdk</artifactId>
         <version>${apicurio.version}</version>
+      </dependency>
+
+      <!-- victools jsonschema-generator + modules (code-first, payment-contracts) -->
+      <dependency>
+        <groupId>com.github.victools</groupId>
+        <artifactId>jsonschema-generator</artifactId>
+        <version>${victools.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.github.victools</groupId>
+        <artifactId>jsonschema-module-jackson</artifactId>
+        <version>${victools.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.github.victools</groupId>
+        <artifactId>jsonschema-module-jakarta-validation</artifactId>
+        <version>${victools.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>jakarta.validation</groupId>
+        <artifactId>jakarta.validation-api</artifactId>
+        <version>${jakarta.validation-api.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -125,6 +153,12 @@
           <groupId>org.springframework.boot</groupId>
           <artifactId>spring-boot-maven-plugin</artifactId>
           <version>${spring-boot.version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>exec-maven-plugin</artifactId>
+          <version>${exec-maven-plugin.version}</version>
         </plugin>
       </plugins>
     </pluginManagement>
