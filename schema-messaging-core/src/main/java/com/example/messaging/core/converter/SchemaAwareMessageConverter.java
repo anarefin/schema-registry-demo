@@ -83,7 +83,7 @@ public class SchemaAwareMessageConverter implements MessageConverter {
             throw new MessageConversionException("Serialization failed for " + type.getName(), e);
         }
 
-        ensureMessageId(messageProperties);
+        ensureCorrelationId(messageProperties);
         SchemaMessageHeaders.setSchemaHeaders(messageProperties, schema.globalId(), mapping.coordinates(),
                 mapping.schemaType(), strategy.contentType());
 
@@ -156,10 +156,7 @@ public class SchemaAwareMessageConverter implements MessageConverter {
         return s;
     }
 
-    private static void ensureMessageId(MessageProperties props) {
-        if (props.getHeader(SchemaMessageHeaders.MESSAGE_ID) == null) {
-            props.setHeader(SchemaMessageHeaders.MESSAGE_ID, UUID.randomUUID().toString());
-        }
+    private static void ensureCorrelationId(MessageProperties props) {
         if (props.getHeader(SchemaMessageHeaders.CORRELATION_ID) == null) {
             props.setHeader(SchemaMessageHeaders.CORRELATION_ID, UUID.randomUUID().toString());
         }

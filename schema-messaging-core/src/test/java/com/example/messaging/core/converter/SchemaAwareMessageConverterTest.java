@@ -88,7 +88,7 @@ class SchemaAwareMessageConverterTest {
         assertThat((Object) props.getHeader(SchemaMessageHeaders.VERSION)).isEqualTo("1");
         assertThat((Object) props.getHeader(SchemaMessageHeaders.TYPE)).isEqualTo("JSON");
         assertThat(props.getContentType()).isEqualTo("application/json");
-        assertThat((Object) props.getHeader(SchemaMessageHeaders.MESSAGE_ID)).isNotNull();
+        assertThat((Object) props.getHeader(SchemaMessageHeaders.CORRELATION_ID)).isNotNull();
     }
 
     /**

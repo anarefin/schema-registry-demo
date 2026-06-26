@@ -30,12 +30,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up Java 21
-        # Provides JAVA_HOME for the Maven runtime; toolchains.xml supplies JDK 25 for compile.
+      - name: Set up Java 25
+        # Runtime JVM matches the compile target (<release>25</release>), so no toolchains split.
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
 
       - name: Run compatibility check (dry-run, no writes)
         run: |

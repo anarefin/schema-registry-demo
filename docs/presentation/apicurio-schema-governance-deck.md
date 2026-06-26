@@ -148,7 +148,7 @@ The message body is the **raw serialized bytes only** — the plain JSON documen
 │   X-Schema-Group      = events.orders                      │
 │   X-Schema-Artifact   = OrderCreated                       │
 │   X-Schema-Version    = 2                                  │
-│   X-Message-Id / X-Correlation-Id                          │
+│   X-Correlation-Id                                         │
 │ content-type: application/json                              │
 │ body: <raw serialized bytes — nothing else>               │
 └────────────────────────────────────────────────────────────┘
@@ -453,7 +453,8 @@ The exception taxonomy **drives** the routing decision:
 | `RegistryUnavailableException`, `SchemaNotFoundException`, *anything else* | **Transient** | retry ladder (5s/30s/5m, max 3) |
 
 Every DLQ message carries `X-Failure-*` headers (reason, message, **stack trace truncated to 4 KB**,
-original routing key, timestamp, retry count). Consumer dedupes on `X-Message-Id`.
+original routing key, timestamp, retry count). Delivery is honest at-least-once — no consumer-side
+dedup (downstream handlers own idempotency if needed).
 
 **Live demo:** `POST /api/orders/poison` publishes garbage JSON bytes → `SchemaValidationException`
 (permanent) → lands on `orders.created.dlq` fully annotated. Inspect at `http://localhost:15672`.

@@ -2,12 +2,10 @@ package com.example.producer.controller;
 
 import com.example.contracts.customers.CustomerRegistered;
 import com.example.contracts.customers.amqp.EventExchanges;
-import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.publisher.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -51,16 +49,6 @@ public class CustomerController {
 
         eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
         log.info("Published CustomerRegistered customerId={}", event.getCustomerId());
-    }
-
-    /**
-     * Global handler for schema validation failures — publisher validates before sending,
-     * invalid payloads return 400 (no message emitted, spec §5 / TC-5.9).
-     */
-    @org.springframework.web.bind.annotation.ExceptionHandler(SchemaValidationException.class)
-    public ResponseEntity<String> handleValidation(SchemaValidationException ex) {
-        log.warn("Schema validation failed: {}", ex.getMessage());
-        return ResponseEntity.badRequest().body("Schema validation failed: " + ex.getMessage());
     }
 
     public record RegisterCustomerRequest(

@@ -12,8 +12,6 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -80,16 +78,9 @@ public class OrderController {
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
         props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
-        props.setHeader(SchemaMessageHeaders.MESSAGE_ID, UUID.randomUUID().toString());
         byte[] garbage = "{NOT_VALID_JSON".getBytes(StandardCharsets.UTF_8);
         rabbitTemplate.send(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.ROUTING_KEY, new Message(garbage, props));
         log.warn("Published poison message to orders.created (bypass-validation demo)");
-    }
-
-    @ExceptionHandler(SchemaValidationException.class)
-    public ResponseEntity<String> handleValidation(SchemaValidationException ex) {
-        log.warn("Schema validation failed: {}", ex.getMessage());
-        return ResponseEntity.badRequest().body("Schema validation failed: " + ex.getMessage());
     }
 
     public record CreateOrderRequest(

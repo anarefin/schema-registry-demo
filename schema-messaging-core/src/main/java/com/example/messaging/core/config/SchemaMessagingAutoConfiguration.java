@@ -1,7 +1,6 @@
 package com.example.messaging.core.config;
 
 import com.example.messaging.core.consumer.EventConsumerSupport;
-import com.example.messaging.core.consumer.IdempotencyFilter;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.health.RegistryHealthIndicator;
 import com.example.messaging.core.mapping.TypeMapping;
@@ -118,12 +117,6 @@ public class SchemaMessagingAutoConfiguration {
     @ConditionalOnMissingBean
     public EventConsumerSupport eventConsumerSupport() {
         return new EventConsumerSupport();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean
-    public IdempotencyFilter idempotencyFilter() {
-        return new IdempotencyFilter();
     }
 
     @Bean

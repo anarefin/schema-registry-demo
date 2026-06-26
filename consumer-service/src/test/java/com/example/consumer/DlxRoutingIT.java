@@ -48,7 +48,6 @@ import static org.mockito.Mockito.when;
  * TC-5.5 I  — downstream RuntimeException → retried 3×, then DLQ
  * TC-5.6 I  — retry increments X-Retry-Count, correct tier
  * TC-5.7 I  — all X-Failure-* DLQ headers present
- * TC-5.8 I  — duplicate X-Message-Id processed once (idempotency)
  *
  * <p>Uses short TTL tiers (200/400/600 ms) for speed.
  * RabbitMQ = real Testcontainer; ApicurioClient = mock.
@@ -108,7 +107,7 @@ class DlxRoutingIT {
     @Test
     void tc52_53_57_deserializationPoisonRoutesToDlqWithHeaders() {
         sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
-                "{INVALID_JSON".getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString());
+                "{INVALID_JSON".getBytes(StandardCharsets.UTF_8));
 
         Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME);
 
@@ -141,7 +140,7 @@ class DlxRoutingIT {
                 .thenThrow(new SchemaNotFoundException("coordinates"));
 
         sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
-                "{}".getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString());
+                "{}".getBytes(StandardCharsets.UTF_8));
 
         Message dlqMsg = awaitDlq(CustomerEventRouting.DLQ_NAME, 15);
         assertThat(dlqMsg.getMessageProperties()
@@ -160,11 +159,10 @@ class DlxRoutingIT {
         doAnswer(inv -> {
             callCount.incrementAndGet();
             throw new RuntimeException("simulated downstream error");
-        }).when(customerEventListener).onCustomerRegistered(any(), any());
+        }).when(customerEventListener).onCustomerRegistered(any());
 
         byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY,
-                validJson, UUID.randomUUID().toString());
+        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY, validJson);
 
         // 4 calls = initial delivery + 3 retries via TTL queues
         await().atMost(10, TimeUnit.SECONDS)
@@ -176,49 +174,15 @@ class DlxRoutingIT {
                 .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
     }
 
-    // ---- TC-5.8 ------------------------------------------------------------
-
-    /**
-     * TC-5.8: same X-Message-Id delivered twice → idempotency guard prevents double-processing.
-     *
-     * <p>Both messages arrive at the listener (spy invoked 2×) but only the first triggers
-     * actual processing — the second returns early in the real method. The test verifies
-     * that exactly 2 deliveries arrived and the DLQ is empty (no routing error from either).
-     */
-    @Test
-    void tc58_duplicateMessageIdProcessedOnce() throws Exception {
-        String messageId = UUID.randomUUID().toString();
-        byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY, validJson, messageId);
-
-        // Wait for the first delivery to be processed
-        await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
-                Mockito.verify(customerEventListener, Mockito.atLeastOnce())
-                       .onCustomerRegistered(any(), any()));
-
-        // Send the duplicate (same X-Message-Id)
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.ROUTING_KEY, validJson, messageId);
-
-        // Give the duplicate time to arrive and be handled (returns early via idempotency)
-        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() ->
-                Mockito.verify(customerEventListener, Mockito.times(2))
-                       .onCustomerRegistered(any(), any()));
-
-        // No DLQ message: neither delivery caused a failure routing
-        assertThat(rabbitTemplate.receive(CustomerEventRouting.DLQ_NAME, 300)).isNull();
-    }
-
     // ---- helpers -----------------------------------------------------------
 
-    private void sendRaw(String exchange, String routingKey, byte[] body, String messageId) {
+    private void sendRaw(String exchange, String routingKey, byte[] body) {
         MessageProperties props = new MessageProperties();
         props.setContentType(SchemaType.JSON.contentType());
         props.setHeader(SchemaMessageHeaders.GLOBAL_ID, MOCK_GLOBAL_ID);
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.customers");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "CustomerRegistered");
         props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
-        props.setHeader(SchemaMessageHeaders.MESSAGE_ID, messageId);
         rabbitTemplate.send(exchange, routingKey, new Message(body, props));
     }
 

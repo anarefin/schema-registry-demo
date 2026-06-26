@@ -17,7 +17,6 @@ public final class SchemaMessageHeaders {
     public static final String TYPE           = "X-Schema-Type";
 
     // Message tracing headers
-    public static final String MESSAGE_ID     = "X-Message-Id";
     public static final String CORRELATION_ID = "X-Correlation-Id";
 
     // DLQ failure headers (spec §11, used by EventConsumerSupport)

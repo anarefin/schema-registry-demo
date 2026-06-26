@@ -123,7 +123,7 @@ Supporting pieces in core:
 
 Message body is the **raw serialized bytes only**: the JSON document, no envelope.
 Schema identity travels entirely in `X-Schema-*` headers, plus
-`X-Message-Id` / `X-Correlation-Id`. Content-type is `application/json`.
+`X-Correlation-Id`. Content-type is `application/json`.
 
 ### Failure model (spec §9/§11)
 
@@ -132,8 +132,9 @@ Consumer declares the topology idempotently on startup: `events.exchange`, `even
 schema-not-found, downstream errors) go through the retry exchange with a TTL ladder
 (5s/30s/5m, max 3) before the DLQ. **Permanent** failures (validation, deserialization, type
 mismatch) go **straight to the DLQ, no retry**. DLQ messages carry the full `X-Failure-*`
-header set (stack trace truncated to 4KB). Consumer dedupes on `X-Message-Id` (POC-only,
-in-memory Caffeine).
+header set (stack trace truncated to 4KB). Delivery is honest **at-least-once** — there is no
+consumer-side deduplication; idempotency, if needed, is the responsibility of downstream
+handlers (out of POC scope).
 
 ### Exception taxonomy (drives routing)
 

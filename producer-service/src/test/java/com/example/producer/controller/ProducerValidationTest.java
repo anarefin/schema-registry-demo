@@ -27,7 +27,9 @@ class ProducerValidationTest {
     @Test
     void tc59_orderValidationFailureReturns400() throws Exception {
         OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
-        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
 
         doThrow(new SchemaValidationException("events.orders:OrderCreated", "field missing"))
                 .when(eventPublisher).publish(any(), any());
@@ -45,7 +47,9 @@ class ProducerValidationTest {
     @Test
     void tc59_customerValidationFailureReturns400() throws Exception {
         CustomerController controller = new CustomerController(eventPublisher);
-        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
 
         doThrow(new SchemaValidationException("events.customers:CustomerRegistered", "email invalid"))
                 .when(eventPublisher).publish(any(), any());

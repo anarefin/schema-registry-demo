@@ -3,7 +3,7 @@ graph TD
     EX --> Q2["customers.registered.queue"]
     Q1 --> L["Listener processes message<br/>EventConsumerSupport.classify()"]
 
-    L -->|success| Done["&#9989; done<br/>(dedupe on X-Message-Id)"]
+    L -->|success| Done["&#9989; done<br/>(at-least-once · no dedup)"]
     L -->|"PERMANENT failure<br/>validation · deserialization ·<br/>serialization · type-mismatch"| DLX["events.dlx"]
     L -->|"TRANSIENT failure<br/>registry-unavailable ·<br/>schema-not-found · other"| RetryEX["events.retry.exchange"]
 

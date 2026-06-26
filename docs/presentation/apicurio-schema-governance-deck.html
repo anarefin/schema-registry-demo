@@ -263,7 +263,7 @@ section.lead { text-align: center; }
 │   X-Schema-Group      = events.orders                      │
 │   X-Schema-Artifact   = OrderCreated                       │
 │   X-Schema-Version    = 2                                  │
-│   X-Message-Id / X-Correlation-Id                          │
+│   X-Correlation-Id                                         │
 │ content-type: application/json                              │
 │ body: &lt;raw serialized bytes — nothing else&gt;               │
 └────────────────────────────────────────────────────────────┘
@@ -854,7 +854,7 @@ section.lead { text-align: center; }
 </tbody>
 </table>
 <p>Every DLQ message carries <code>X-Failure-*</code> headers (reason, message, <strong>stack trace truncated to 4 KB</strong>,<br />
-original routing key, timestamp, retry count). Consumer dedupes on <code>X-Message-Id</code>.</p>
+original routing key, timestamp, retry count). Delivery is honest at-least-once — no consumer-side dedup (downstream handlers own idempotency if needed).</p>
 <p><strong>Live demo:</strong> <code>POST /api/orders/poison</code> publishes garbage JSON bytes → <code>SchemaValidationException</code><br />
 (permanent) → lands on <code>orders.created.dlq</code> fully annotated. Inspect at <code>http://localhost:15672</code>.</p>
 <blockquote>

@@ -1,12 +1,5 @@
 # Technical Report: Schema-Governed Messaging (Beginner's Guide)
 
-> **Refactor note (June 2026):** this POC has been refactored to be **JSON Schema-only**.
-> `OrderCreated` was converted from Protobuf to a JSON Schema artifact (generated POJO via
-> jsonschema2pojo) and now carries a **FORWARD** compatibility rule, same as
-> `CustomerRegistered`. Protobuf/BACKWARD passages below predate the refactor — treat them as
-> historical/educational context; the schema files are now `order-created*.json` and the wire
-> format is always `application/json`.
-
 > **Audience:** Developers new to message queues, schema registries, or this codebase.
 > **Goal:** Explain *what* this project does, *why* it exists, and *how* every piece fits
 > together — using plain language, analogies, diagrams, and concrete examples.
@@ -62,9 +55,8 @@ to be a production system.
 | **Consumer** | The program that receives and processes messages. | Person reading the letter. |
 | **Serialization** | Turning a Java object into bytes for transport. | Folding a letter into an envelope. |
 | **Deserialization** | Turning bytes back into a Java object. | Opening the envelope and reading. |
-| **Protobuf** | A compact binary serialization format (Google's Protocol Buffers). | A shorthand only the right decoder ring can read. |
-| **JSON Schema** | A way to describe and validate JSON documents. | A checklist for a plain-text form. |
-| **BACKWARD compatibility** | A new schema version can still read messages written with the old version. | A new form still accepts old submissions. |
+| **JSON Schema** | A way to describe and validate JSON documents. Both message types here are JSON Schema. | A checklist for a plain-text form. |
+| **FORWARD compatibility** | A consumer using the *old* schema can still read messages written with the *new* version. | An old reader can still handle the updated form. |
 | **DLQ** | Dead Letter Queue — where messages go when they can't be processed. | The "undeliverable mail" bin. |
 
 ---
@@ -139,7 +131,7 @@ place, so the children never disagree about which version of anything to use.
 graph TD
     Parent["pom.xml (parent)<br/>owns all versions"]
     Parent --> Core["schema-messaging-core<br/>(reusable library, domain-agnostic)"]
-    Parent --> OC["order-contracts<br/>(OrderCreated, Protobuf)"]
+    Parent --> OC["order-contracts<br/>(OrderCreated, JSON Schema)"]
     Parent --> CC["customer-contracts<br/>(CustomerRegistered, JSON Schema)"]
     Parent --> PS["producer-service<br/>(Spring Boot app)"]
     Parent --> CS["consumer-service<br/>(Spring Boot app)"]
@@ -158,7 +150,7 @@ graph TD
 | Module | What it is | Depends on |
 |--------|-----------|-----------|
 | `schema-messaging-core` | The reusable plumbing: schema resolution, caching, serialization strategies, the message converter, failure routing. **Knows nothing about orders or customers.** | Spring AMQP, Apicurio SDK, Caffeine |
-| `order-contracts` | The `OrderCreated` **Protobuf** schema and its generated Java classes. | `protobuf-java` only |
+| `order-contracts` | The `OrderCreated` **JSON Schema** and its generated POJOs (via jsonschema2pojo). | Jackson only |
 | `customer-contracts` | The `CustomerRegistered` **JSON Schema** and its generated POJOs. | Jackson only |
 | `producer-service` | A Spring Boot app exposing REST endpoints that publish events. | core + both contracts |
 | `consumer-service` | A Spring Boot app that listens to queues and processes events. | core + both contracts |
@@ -189,12 +181,12 @@ sequenceDiagram
     participant Pub as EventPublisher
     participant Conv as SchemaAwareMessageConverter
     participant Res as SchemaResolver
-    participant Strat as ProtobufStrategy
+    participant Strat as JsonSchemaStrategy
     participant MQ as RabbitMQ
 
     Client->>Ctrl: POST /api/orders {productId, qty, ...}
     Ctrl->>Ctrl: basic field check (qty>0, etc.)
-    Ctrl->>Ctrl: build OrderCreated protobuf object
+    Ctrl->>Ctrl: build OrderCreated object
     Ctrl->>Pub: publish(exchange, event)
     Pub->>Conv: toMessage(event, props)
     Conv->>Conv: find TypeMapping for OrderCreated
@@ -206,7 +198,7 @@ sequenceDiagram
         Conv-->>Client: 400 Bad Request (NO message sent)
     else payload valid
         Strat-->>Conv: bytes
-        Conv->>Conv: set X-Schema-* + X-Message-Id headers
+        Conv->>Conv: set X-Schema-* + X-Correlation-Id headers
         Conv->>MQ: send(bytes + headers)
         MQ-->>Client: 201 Created
     end
@@ -251,9 +243,8 @@ sequenceDiagram
     participant MQ as RabbitMQ
     participant Conv as SchemaAwareMessageConverter
     participant Res as SchemaResolver
-    participant Strat as ProtobufStrategy
+    participant Strat as JsonSchemaStrategy
     participant L as OrderEventListener
-    participant Idem as IdempotencyFilter
 
     MQ->>Conv: fromMessage(rawBytes + headers)
     Conv->>Conv: read X-Schema-* headers
@@ -262,13 +253,8 @@ sequenceDiagram
     Res-->>Conv: ResolvedSchema
     Conv->>Strat: deserialize(bytes, OrderCreated.class, schema)
     Strat-->>Conv: typed OrderCreated object
-    Conv->>L: onOrderCreated(event, X-Message-Id)
-    L->>Idem: isDuplicate(messageId)?
-    alt duplicate
-        Idem-->>L: yes -> skip (do nothing)
-    else first time
-        Idem-->>L: no -> process the order
-    end
+    Conv->>L: onOrderCreated(event)
+    L->>L: process the order
 ```
 
 Two beginner-friendly details:
@@ -276,17 +262,17 @@ Two beginner-friendly details:
 - **The fast path:** if the message carries an `X-Schema-GlobalId` header, the resolver fetches
   by that single numeric ID directly — no need to look up by group/artifact/version. This is
   cheaper, so it's preferred.
-- **Idempotency:** networks sometimes deliver the *same* message twice. The `IdempotencyFilter`
-  remembers recently-seen `X-Message-Id` values (in an in-memory cache) and skips duplicates, so
-  processing the same order twice does no harm. *(This is POC-grade — a real system would use a
-  shared store like Redis, not in-memory.)*
+- **At-least-once delivery:** networks sometimes deliver the *same* message twice. This POC does
+  **no** consumer-side deduplication — delivery is honest at-least-once and the listener simply
+  processes whatever arrives. If exactly-once effects matter, idempotency is the responsibility of
+  downstream handlers (e.g. a shared dedup store like Redis) — out of scope for this POC.
 
 ---
 
 ## 8. The wire format (what actually travels)
 
 This project uses a **strict, minimal wire format**. The message *body* is **nothing but the
-raw serialized bytes** — pure Protobuf or pure JSON. No magic byte, no length prefix, no
+raw serialized bytes** — the pure JSON document. No magic byte, no length prefix, no
 wrapper. All the schema identity lives in **headers**.
 
 ```mermaid
@@ -297,13 +283,12 @@ graph TB
             H2["X-Schema-GroupId: events.orders"]
             H3["X-Schema-ArtifactId: OrderCreated"]
             H4["X-Schema-Version: 1"]
-            H5["X-Schema-Type: PROTOBUF"]
-            H6["X-Message-Id: uuid"]
+            H5["X-Schema-Type: JSON"]
             H7["X-Correlation-Id: traceId"]
-            CT["content-type: application/x-protobuf"]
+            CT["content-type: application/json"]
         end
         subgraph Body["Body"]
-            B["raw Protobuf or JSON bytes — nothing else"]
+            B["raw JSON bytes — nothing else"]
         end
     end
 ```
@@ -312,41 +297,49 @@ graph TB
 |--------|---------|
 | `X-Schema-GlobalId` | The registry's unique numeric ID for this exact schema (enables the fast path). |
 | `X-Schema-GroupId` / `X-Schema-ArtifactId` / `X-Schema-Version` | The schema's "coordinates" — its address in the registry. |
-| `X-Schema-Type` | `PROTOBUF` or `JSON` — tells the consumer which deserializer to use. |
-| `X-Message-Id` | Unique per message; used for deduplication. |
+| `X-Schema-Type` | `JSON` — tells the consumer which deserializer to use. |
 | `X-Correlation-Id` | Links related messages together (a random UUID assigned at publish time when not already set). |
-| `content-type` | `application/x-protobuf` or `application/json`. |
+| `content-type` | `application/json`. |
 
 > **Why keep identity in headers instead of the body?** It keeps the body a clean, standard
 > payload that any tool can parse, and it lets the broker route or inspect messages without
 > decoding them. It's a clean separation of *metadata* (headers) from *data* (body).
 
-### Two message types, two strategies
+### One format today, pluggable for more
 
-The system supports two serialization formats side by side, via a small interface called
-`SerializationStrategy` (an **SPI** — Service Provider Interface, i.e. a plug-in point):
+Serialization goes through a small interface called `SerializationStrategy` (an **SPI** —
+Service Provider Interface, i.e. a plug-in point). Today there is a single built-in strategy:
 
-- `ProtobufStrategy` handles `OrderCreated` (compact binary).
-- `JsonSchemaStrategy` handles `CustomerRegistered` (human-readable JSON).
+- `JsonSchemaStrategy` handles **both** `OrderCreated` and `CustomerRegistered` (human-readable JSON).
 
-The converter picks the right strategy based on `X-Schema-Type`. Adding a third format later
-would mean writing one new strategy class — the rest of the system wouldn't change.
+The converter picks the strategy based on `X-Schema-Type`. The SPI stays in place so adding a
+future format (e.g. Avro) is one new strategy class — the rest of the system wouldn't change.
 
 Here are the two actual contracts in the repo:
 
-**`OrderCreated` (Protobuf):**
-```protobuf
-message OrderCreated {
-  string order_id     = 1;
-  string customer_id  = 2;
-  string product_id   = 3;
-  int32  quantity     = 4;
-  double total_amount = 5;
-  string currency     = 6;
-  string created_at   = 7;
-  optional string promo_code = 8;  // v2: backward-compatible addition
+**`OrderCreated` (JSON Schema):**
+```json
+{
+  "title": "OrderCreated",
+  "type": "object",
+  "properties": {
+    "orderId":     { "type": "string" },
+    "customerId":  { "type": "string" },
+    "productId":   { "type": "string" },
+    "quantity":    { "type": "integer" },
+    "totalAmount": { "type": "number" },
+    "currency":    { "type": "string" },
+    "createdAt":   { "type": "string" },
+    "promoCode":   { "type": "string" },
+    "notes":       { "type": "string" },
+    "input1":      { "type": "string" },
+    "userName":    { "type": "string" }
+  },
+  "required": ["orderId", "customerId", "productId", "quantity", "totalAmount", "currency"]
 }
 ```
+
+(`promoCode`, `notes`, `input1`, `userName` are the optional v2 additions — FORWARD-compatible.)
 
 **`CustomerRegistered` (JSON Schema):**
 ```json
@@ -405,22 +398,20 @@ Key behaviors of `SchemaResolver`:
 ## 10. Schema governance: stopping bad changes before they merge
 
 This is the heart of "schema *governance*." Each schema is registered in Apicurio under a
-compatibility rule — but the two artifacts use **different** rules:
+compatibility rule. Both artifacts are JSON Schema and use the **same** rule:
 
-- `OrderCreated` → group `events.orders` → **BACKWARD**
+- `OrderCreated` → group `events.orders` → **FORWARD**
 - `CustomerRegistered` → group `events.customers` → **FORWARD**
 
-**BACKWARD compatibility** (Protobuf) means: *a consumer using the new schema can still read
-messages produced with the old schema.* **FORWARD compatibility** (JSON Schema) means: *a
-consumer using the old schema can still read messages produced with the new schema.* The JSON
-artifact needs FORWARD because Apicurio's JSON Schema checker classifies adding **any** property
-(even an optional one) as a "narrowing" (`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`) that BACKWARD
-rejects — only FORWARD accepts it.
+**FORWARD compatibility** means: *a consumer using the old schema can still read messages
+produced with the new schema.* JSON Schema artifacts need FORWARD because Apicurio's JSON Schema
+checker classifies adding **any** property (even an optional one) as a "narrowing"
+(`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`) that BACKWARD *rejects* — only FORWARD accepts it. (This
+is the key non-obvious lesson: "use BACKWARD everywhere" is wrong advice for JSON Schema in Apicurio.)
 
-In practice both rules allow safe changes (like **adding an optional field** — `promo_code` as
-field 8 in Protobuf; `promoCode` and `input1` as non-required properties in JSON Schema) but
-forbid breaking changes (adding a *required* field; for BACKWARD, also removing or renaming a
-field).
+In practice FORWARD allows safe changes (like **adding an optional property** — `promoCode`,
+`notes`, `input1`, `userName` on `OrderCreated`; `promoCode` on `CustomerRegistered`) but forbids
+breaking changes (adding a *required* field, or changing an existing field's type).
 
 ### The CI merge gate
 
@@ -431,16 +422,15 @@ The clever part: this rule is wired into the build as a **merge gate** using the
 graph LR
     Dev["Developer edits a schema"] --> PR["Opens Pull Request"]
     PR --> CI["CI runs:<br/>mvn verify -Pcompat-check"]
-    CI --> Apicurio["apicurio-registry:test<br/>checks new schema vs registry"]
+    CI --> Apicurio["apicurio-registry:register -DdryRun<br/>checks new schema vs registry"]
     Apicurio -- "compatible" --> Pass["✅ build passes -> merge allowed"]
     Apicurio -- "incompatible" --> Fail["❌ build fails -> merge blocked"]
 ```
 
 So if someone tries to merge a change that would break existing message readers, **the build
 fails and the merge is blocked** — automatically, before the bad change can ever reach
-production. The repo even ships deliberately-broken schemas
-(`*-incompatible.proto` / `*-incompatible.json`) and an `incompatible-demo` profile so you can
-*watch* the registry reject a bad change.
+production. The repo even ships deliberately-broken schemas (`*-incompatible.json`) and an
+`incompatible-demo` profile so you can *watch* the registry reject a bad change.
 
 Run the gate yourself:
 ```bash
@@ -448,7 +438,7 @@ Run the gate yourself:
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check
 
 # Watch a rejection happen (needs a running registry):
-./mvnw -pl order-contracts apicurio-registry:test -Pincompatible-demo \
+./mvnw -pl order-contracts verify -Pincompatible-demo \
   -Dapicurio.registry.url=http://localhost:8080
 ```
 
@@ -468,7 +458,7 @@ Apicurio organises schemas in a three-level hierarchy:
 Group  (events.orders)
   └── Artifact  (OrderCreated)
         ├── Version 1  → globalId: N   ← original schema, immutable forever
-        ├── Version 2  → globalId: M   ← + optional promo_code field 8
+        ├── Version 2  → globalId: M   ← + optional promoCode/notes/input1/userName properties
         └── ... future versions
 ```
 
@@ -493,10 +483,11 @@ Schema registration is a host-Maven step (the contracts modules carry the
 healthy, it does three things:
 
 1. Registers v1 and v2 of both schemas (`apicurio-registry:register` on both contracts modules)
-2. POSTs a `BACKWARD` compatibility rule to `events.orders/OrderCreated`
-3. POSTs a `FORWARD` compatibility rule to `events.customers/CustomerRegistered` (the JSON Schema
-   artifact — Apicurio rejects property additions under BACKWARD as `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`;
-   only FORWARD accepts them)
+2. POSTs a `FORWARD` compatibility rule to `events.orders/OrderCreated`
+3. POSTs a `FORWARD` compatibility rule to `events.customers/CustomerRegistered`
+
+Both are JSON Schema, so both use FORWARD — Apicurio rejects property additions under BACKWARD as
+`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`; only FORWARD accepts them.
 
 Once those rules are attached they become **standing policy** stored inside Apicurio itself.
 Every future registration attempt — from a developer's local machine, from CI, or from a
@@ -510,9 +501,9 @@ sequenceDiagram
 
     DEV->>AP: register OrderCreated v1 + v2
     DEV->>AP: register CustomerRegistered v1 + v2
-    DEV->>AP: POST /groups/events.orders/artifacts/OrderCreated/rules {BACKWARD}
+    DEV->>AP: POST /groups/events.orders/artifacts/OrderCreated/rules {FORWARD}
     DEV->>AP: POST /groups/events.customers/artifacts/CustomerRegistered/rules {FORWARD}
-    Note over AP: Per-artifact rule (BACKWARD/FORWARD) now enforced on every future registration
+    Note over AP: Per-artifact FORWARD rule now enforced on every future registration
 ```
 
 ---
@@ -603,16 +594,17 @@ Every message landing on a DLQ carries a full set of `X-Failure-*` headers so yo
 docker compose up
 ```
 This brings up Postgres, Apicurio (+ UI), and RabbitMQ. Once the
-registry is healthy, register both schemas and apply their compatibility rules from the host
-(BACKWARD for the Protobuf artifact, FORWARD for the JSON artifact):
+registry is healthy, register both schemas **via the Apicurio Maven plugin** and apply their
+compatibility rules from the host (FORWARD for both JSON Schema artifacts):
 ```bash
+# Register both schemas (the contracts modules carry the apicurio-registry-maven-plugin)
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
-# OrderCreated (Protobuf) → BACKWARD; CustomerRegistered (JSON Schema) → FORWARD
+# Attach the compatibility rules (the register goal does not do this) — FORWARD for both
 # (adding a JSON property is only FORWARD-compatible in Apicurio, never BACKWARD).
 curl -s -o /dev/null -X POST \
   "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
-  -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+  -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 curl -s -o /dev/null -X POST \
   "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
   -H 'Content-Type: application/json' -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
@@ -624,15 +616,15 @@ Open http://localhost:8888 and follow these clicks:
 
 1. Click **"Explore"** in the left nav → you see a list of groups
 2. Click **`events.orders`** → click **`OrderCreated`** → you see 2 versions listed
-3. Click **Version 1**: the v1 `.proto` content is shown (fields 1–7, no `promo_code`)
-4. Click **Version 2**: the v2 content appears (same fields + optional `promo_code` field 8)
-5. Click the **"Rules"** tab on the artifact → the `BACKWARD` compatibility rule is shown
+3. Click **Version 1**: the v1 JSON Schema content is shown (required fields only, no `promoCode`)
+4. Click **Version 2**: the v2 content appears (same fields + optional `promoCode`/`notes`/`input1`/`userName`)
+5. Click the **"Rules"** tab on the artifact → the `FORWARD` compatibility rule is shown
 6. Note the **Global ID** value next to each version — this is the number the producer stamps
    in the `X-Schema-GlobalId` header on every message
 
 Repeat for **`events.customers`** → **`CustomerRegistered`** to see the JSON Schema versions
-(v1, v2 with optional `promoCode`, v3 with optional `input1`). Its **"Rules"** tab shows a
-`FORWARD` rule, not BACKWARD — JSON property additions only validate under FORWARD.
+(v1, v2 with optional `promoCode`). Its **"Rules"** tab shows a `FORWARD` rule too — JSON
+property additions only validate under FORWARD.
 
 **Step 2 — run the services (in two terminals):**
 ```bash
@@ -686,11 +678,13 @@ curl -X POST http://localhost:8081/api/orders/poison
 - **TypeMapping** — the plug-in bean that links a Java class ↔ schema coordinates ↔ format ↔
   routing key. Each contracts module contributes one.
 - **SerializationStrategy** — the plug-in that knows how to validate/serialize/deserialize one
-  format (Protobuf or JSON).
-- **BACKWARD compatibility** — new schema can read old messages; the basis of the merge gate.
+  format (today: JSON Schema; the SPI stays open for future formats like Avro).
+- **FORWARD compatibility** — a consumer on the old schema can still read messages produced with
+  the new schema; the basis of the merge gate (both artifacts use it).
 - **DLQ / DLX** — Dead Letter Queue / Exchange: where unprocessable messages end up.
 - **Transient vs. permanent failure** — retry-worthy vs. hopeless; drives routing.
-- **Idempotency** — processing the same message twice causes no extra effect.
+- **At-least-once delivery** — the consumer may see the same message more than once; this POC does
+  no dedup, so downstream handlers must be idempotent if exactly-once effects matter.
 
 ---
 

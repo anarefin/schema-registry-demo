@@ -1,5 +1,5 @@
 flowchart TB
-    boot["Workflow 1: bootstrap<br/>(manual · once per env)<br/>POST rules via REST<br/>orders=BACKWARD · customers=FORWARD"]
+    boot["Workflow 1: bootstrap<br/>(manual · once per env)<br/>POST rules via REST<br/>orders=FORWARD · customers=FORWARD"]
 
     dev["Developer edits<br/>*-contracts schema"] --> pr["Open Pull Request"]
     pr --> cc{"Workflow 2: compat-check<br/>on: pull_request (paths: *-contracts)<br/>mvnw verify -Pcompat-check<br/>register -DdryRun (READ-ONLY)"}

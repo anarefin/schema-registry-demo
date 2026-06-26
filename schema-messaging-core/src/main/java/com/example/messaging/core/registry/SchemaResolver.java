@@ -76,10 +76,8 @@ public class SchemaResolver {
     }
 
     public ResolvedSchema resolveByCoordinates(SchemaCoordinates coords) {
-        ResolvedSchema cached = byCoordinates.getIfPresent(coords);
-        if (cached != null) {
-            return cached;
-        }
+        // byCoordinates is a LoadingCache: get() returns the cached value if present,
+        // otherwise loads via the CacheLoader. No separate getIfPresent() check needed.
         return byCoordinates.get(coords);
     }
 

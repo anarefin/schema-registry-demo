@@ -88,7 +88,7 @@ class CustomerRegisteredIT {
 
         ArgumentCaptor<CustomerRegistered> captor = ArgumentCaptor.forClass(CustomerRegistered.class);
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
-                verify(customerEventListener).onCustomerRegistered(captor.capture(), any()));
+                verify(customerEventListener).onCustomerRegistered(captor.capture()));
 
         CustomerRegistered received = captor.getValue();
         assertThat(received.getCustomerId()).isEqualTo("e2e-id");
@@ -121,7 +121,7 @@ class CustomerRegisteredIT {
                 .isEqualTo("JSON");
         assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.VERSION))
                 .isNotBlank();
-        assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.MESSAGE_ID))
+        assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.CORRELATION_ID))
                 .isNotBlank();
     }
 

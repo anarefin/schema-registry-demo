@@ -204,7 +204,7 @@ sequenceDiagram
     A-->>R: schema bytes
     R-->>P: ResolvedSchema (cached)
     P->>P: validate + serialize (raw JSON bytes)
-    P->>MQ: publish to events.exchange<br/>X-Schema-GlobalId / X-Schema-Type / X-Message-Id
+    P->>MQ: publish to events.exchange<br/>X-Schema-GlobalId / X-Schema-Type / X-Correlation-Id
     P-->>C: 201 Created
 ```
 
@@ -286,7 +286,7 @@ They are not appropriate for production use as-is.
 
 | Shortcut | POC rationale | Production path |
 |---|---|---|
-| In-memory idempotency (`IdempotencyFilter`, Caffeine ~10 K entries, TTL 1 h) | Avoids distributed state | Redis / database deduplication store keyed on `X-Message-Id` |
+| No consumer-side deduplication (honest at-least-once delivery) | Keeps the consumer stateless; no distributed dedup store | Redis / database deduplication store keyed on a producer-supplied message id |
 | Single-instance Apicurio Registry (no HA) | Simplifies compose topology | Multi-node Apicurio behind a load balancer, connection pooling |
 | Cache TTL vs evolution latency | 300 s `refresh-after-write` means producers see new schemas within 5 min | Tune or use event-driven cache invalidation (registry webhooks) |
 | OIDC disabled by default | No Keycloak setup needed for the demo | Enable via `RegistryClientOptions.oauth2(...)` in `SchemaMessagingAutoConfiguration` — see Javadoc for Keycloak token-url pattern |
