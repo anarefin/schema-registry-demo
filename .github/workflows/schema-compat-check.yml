@@ -8,8 +8,8 @@ name: Schema Compatibility Check
 #
 # Prereqs (see docs/self-hosted-runner-setup.md):
 #   - `docker compose up -d` is running on the runner host (registry healthy; the host cold-start
-#     step in README §2 has seeded both artifacts + their compatibility rules — FORWARD for
-#     both OrderCreated and CustomerRegistered, the JSON Schema artifacts).
+#     step in README §2 has seeded all artifacts + their compatibility rules — FORWARD for
+#     OrderCreated, CustomerRegistered, and PaymentProcessed, all JSON Schema artifacts).
 #   - the runner is labelled `apicurio-local` and has JDK 25 + ~/.m2/toolchains.xml.
 
 on:
@@ -17,13 +17,14 @@ on:
     paths:
       - 'order-contracts/**'
       - 'customer-contracts/**'
+      - 'payment-contracts/**'
 
 env:
   REGISTRY_URL: http://localhost:8080
 
 jobs:
   compat-check:
-    name: Compatibility check (orders + customers)
+    name: Compatibility check (orders + customers + payments)
     runs-on: [self-hosted, apicurio-local]
 
     steps:
@@ -39,6 +40,6 @@ jobs:
 
       - name: Run compatibility check (dry-run, no writes)
         run: |
-          ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
+          ./mvnw -pl order-contracts,customer-contracts,payment-contracts verify -Pcompat-check \
             -Dapicurio.registry.url=${REGISTRY_URL} \
             --no-transfer-progress

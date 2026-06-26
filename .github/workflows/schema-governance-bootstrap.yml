@@ -1,7 +1,7 @@
 name: Schema Governance Bootstrap
 
 # Run this ONCE per new registry environment to attach the compatibility rules.
-# Both artifacts are JSON Schema and use FORWARD — in Apicurio's JSON Schema checker,
+# All artifacts are JSON Schema and use FORWARD — in Apicurio's JSON Schema checker,
 # adding an optional property is classified as a "narrowing" and is only
 # FORWARD-compatible, never BACKWARD (see README §2 / pom note).
 # It is safe to re-run — Apicurio returns 409 if the rule already exists, which this
@@ -27,22 +27,19 @@ jobs:
     name: Attach compatibility rules
     runs-on: [self-hosted, apicurio-local]
 
-    steps:
-      - name: Resolve registry URL
-        id: url
-        run: |
-          URL="${{ github.event.inputs.registry_url }}"
-          if [ -z "$URL" ]; then
-            URL="http://localhost:8080"
-          fi
-          echo "registry_url=$URL" >> "$GITHUB_OUTPUT"
+    # Resolve the registry URL once at the job level. Using env: here (not run:) means
+    # the ${{ }} interpolation sets a variable rather than being evaluated by the shell,
+    # which prevents command injection via the registry_url input.
+    env:
+      REGISTRY_URL: ${{ github.event.inputs.registry_url || 'http://localhost:8080' }}
 
+    steps:
       - name: Attach rule — events.orders / OrderCreated
         # JSON Schema: adding an optional property is FORWARD-compatible in Apicurio
         # (BACKWARD rejects it as OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED).
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
+            -X POST "${REGISTRY_URL}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
             -H 'Content-Type: application/json' \
             -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}')
           if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
@@ -57,7 +54,7 @@ jobs:
         # (BACKWARD rejects it as OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED).
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
+            -X POST "${REGISTRY_URL}/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
             -H 'Content-Type: application/json' \
             -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}')
           if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
@@ -67,10 +64,28 @@ jobs:
             exit 1
           fi
 
+      - name: Attach rule — events.payments / PaymentProcessed
+        # JSON Schema: adding an optional property is FORWARD-compatible in Apicurio
+        # (BACKWARD rejects it as OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED).
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${REGISTRY_URL}/apis/registry/v3/groups/events.payments/artifacts/PaymentProcessed/rules" \
+            -H 'Content-Type: application/json' \
+            -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}')
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
+            echo "events.payments/PaymentProcessed: FORWARD rule attached (HTTP $STATUS)"
+          else
+            echo "ERROR: unexpected HTTP $STATUS for events.payments/PaymentProcessed" >&2
+            exit 1
+          fi
+
       - name: Verify rules are active
         run: |
           echo "=== events.orders/OrderCreated rules ==="
-          curl -sf "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" | cat
+          curl -sf "${REGISTRY_URL}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" | cat
           echo ""
           echo "=== events.customers/CustomerRegistered rules ==="
-          curl -sf "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" | cat
+          curl -sf "${REGISTRY_URL}/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" | cat
+          echo ""
+          echo "=== events.payments/PaymentProcessed rules ==="
+          curl -sf "${REGISTRY_URL}/apis/registry/v3/groups/events.payments/artifacts/PaymentProcessed/rules" | cat

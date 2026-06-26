@@ -12,13 +12,14 @@ on:
     paths:
       - 'order-contracts/**'
       - 'customer-contracts/**'
+      - 'payment-contracts/**'
 
 env:
   REGISTRY_URL: http://localhost:8080
 
 jobs:
   register:
-    name: Register schemas (orders + customers)
+    name: Register schemas (orders + customers + payments)
     runs-on: [self-hosted, apicurio-local]
 
     steps:
@@ -33,6 +34,6 @@ jobs:
 
       - name: Register schemas
         run: |
-          ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+          ./mvnw -pl order-contracts,customer-contracts,payment-contracts apicurio-registry:register \
             -Dapicurio.registry.url=${REGISTRY_URL} \
             --no-transfer-progress

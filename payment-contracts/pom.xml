@@ -15,6 +15,11 @@
   <artifactId>payment-contracts</artifactId>
   <packaging>jar</packaging>
 
+  <properties>
+    <!-- Override on CLI: ./mvnw -pl payment-contracts apicurio-registry:register -Dapicurio.registry.url=http://host:8080 -->
+    <apicurio.registry.url>http://localhost:8080</apicurio.registry.url>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
@@ -49,6 +54,7 @@
 
   <build>
     <plugins>
+      <!-- T-3.4: generate payment-processed.schema.json from PaymentProcessedEvent record. -->
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
@@ -69,7 +75,68 @@
           </execution>
         </executions>
       </plugin>
+
+      <!-- T-5.2 bootstrap: registers PaymentProcessed v1 (FIND_OR_CREATE_VERSION is idempotent).
+           Run once after 'docker compose up', then attach the FORWARD rule:
+             ./mvnw -pl payment-contracts apicurio-registry:register
+             curl -s -X POST \
+               "http://localhost:8080/apis/registry/v3/groups/events.payments/artifacts/PaymentProcessed/rules" \
+               -H 'Content-Type: application/json' \
+               -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}' -->
+      <plugin>
+        <groupId>io.apicurio</groupId>
+        <artifactId>apicurio-registry-maven-plugin</artifactId>
+        <version>${apicurio-registry-maven-plugin.version}</version>
+        <configuration>
+          <registryUrl>${apicurio.registry.url}</registryUrl>
+          <artifacts>
+            <artifact>
+              <groupId>events.payments</groupId>
+              <artifactId>PaymentProcessed</artifactId>
+              <file>${project.basedir}/src/main/resources/schemas/payment-processed.schema.json</file>
+              <artifactType>JSON</artifactType>
+              <ifExists>FIND_OR_CREATE_VERSION</ifExists>
+            </artifact>
+          </artifacts>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- T-5.1 CI merge gate: dry-run register checks the generated schema is FORWARD-compatible
+         with the version already in the registry. Requires a running registry.
+         Run: ./mvnw -pl payment-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080 -->
+    <profile>
+      <id>compat-check</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.apicurio</groupId>
+            <artifactId>apicurio-registry-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>compat-gate</id>
+                <phase>verify</phase>
+                <goals><goal>register</goal></goals>
+                <configuration>
+                  <registryUrl>${apicurio.registry.url}</registryUrl>
+                  <dryRun>true</dryRun>
+                  <artifacts>
+                    <artifact>
+                      <groupId>events.payments</groupId>
+                      <artifactId>PaymentProcessed</artifactId>
+                      <file>${project.basedir}/src/main/resources/schemas/payment-processed.schema.json</file>
+                      <artifactType>JSON</artifactType>
+                    </artifact>
+                  </artifacts>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 
 </project>

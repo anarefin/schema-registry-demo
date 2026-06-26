@@ -71,8 +71,8 @@ JSON Schema checker, adding a property (even an optional/permissive one) is clas
 under FORWARD.
 
 ```bash
-# 1. Register both schemas (v1 + v2)
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+# 1. Register all schemas (order + customer: v1 + v2; payment: v1)
+./mvnw -pl order-contracts,customer-contracts,payment-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
 
 # 2. Attach the compatibility rules (register does not do this)
@@ -82,6 +82,10 @@ curl -s -o /dev/null -X POST \
   -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 curl -s -o /dev/null -X POST \
   "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
+  -H 'Content-Type: application/json' \
+  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
+curl -s -o /dev/null -X POST \
+  "http://localhost:8080/apis/registry/v3/groups/events.payments/artifacts/PaymentProcessed/rules" \
   -H 'Content-Type: application/json' \
   -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 ```
