@@ -20,7 +20,7 @@
       "type" : "string"
     },
     "paymentMethod" : {
-      "pattern" : "CARD|BANK_TRANSFER|WALLET",
+      "pattern" : "^(CARD|BANK_TRANSFER|WALLET)$",
       "type" : "string"
     },
     "processedAt" : {

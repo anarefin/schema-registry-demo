@@ -14,6 +14,6 @@ public record PaymentProcessedEvent(
         @NotNull UUID orderId,
         @NotNull @DecimalMin(value = "0.01", inclusive = false) BigDecimal amount,
         @NotNull @Size(min = 3, max = 3) String currency,
-        @Pattern(regexp = "CARD|BANK_TRANSFER|WALLET") String paymentMethod,
+        @Pattern(regexp = "^(CARD|BANK_TRANSFER|WALLET)$") String paymentMethod,
         Instant processedAt
 ) {}
