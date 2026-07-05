@@ -14,6 +14,7 @@ style: |
   code { font-size: 0.85em; }
   table { font-size: 0.78em; }
   section.lead { text-align: center; }
+  section.tight { font-size: 22px; }
   .small { font-size: 0.8em; }
   .green { color: #1a7f37; font-weight: bold; }
   .red { color: #b3261e; font-weight: bold; }
@@ -61,6 +62,8 @@ firefight. We want to convert that into a red CI check on a PR that never merges
 
 ---
 
+<!-- _class: tight -->
+
 ## What a schema registry is
 
 **Apicurio Registry** is a central service that stores the official, **versioned** definition of
@@ -73,29 +76,37 @@ each message type, addressed as `group / artifact-id`, with a **compatibility ru
 | **Compatibility rule** | Policy attached to an artifact: *which changes are allowed?* |
 | **Group** | A namespace for organizing artifacts (like a folder) |
 
-This POC governs **two JSON Schema artifacts** in separate groups:
+This POC governs **three JSON Schema artifacts** in separate groups — authored two
+different ways (schema-first and code-first), but governed identically:
 
-| Group | Artifact | Schema type | Rule |
-|-------|----------|-------------|------|
-| `events.orders` | `OrderCreated` | **JSON Schema** | **FORWARD** |
-| `events.customers` | `CustomerRegistered` | **JSON Schema** | **FORWARD** |
+| Group | Artifact | Schema type | Rule | Authoring |
+|-------|----------|-------------|------|-----------|
+| `events.orders` | `OrderCreated` | **JSON Schema** | **FORWARD** | schema-first |
+| `events.customers` | `CustomerRegistered` | **JSON Schema** | **FORWARD** | schema-first |
+| `events.payments` | `PaymentProcessed` | **JSON Schema** | **FORWARD** | **code-first** |
 
 <!--
 FORWARD (not BACKWARD) is not arbitrary — it falls out of how Apicurio's JSON Schema
 compatibility checker works. We get there in slides 10–12. Flag it now so it's not a surprise.
+The third artifact (PaymentProcessed) is authored code-first — a Java record generates the
+schema — but lands in the same registry under the same FORWARD policy. Covered in its own
+section after the CI workflows.
 -->
 
 ---
 
 ## System architecture
 
-![w:1080](diagrams/d1-architecture.svg)
+![w:850](diagrams/d1-architecture.svg)
 
 <!--
 SPEAKER: walk the three bands.
-- Build-time: 5 Maven modules. Single source of versions in the parent POM (Spring Boot 4.0 BOM).
+- Build-time: 6 Maven modules. Single source of versions in the parent POM (Spring Boot 4.0 BOM).
   `schema-messaging-core` is domain-agnostic; the `core ↛ contracts` rule is machine-enforced via
-  maven-enforcer bannedDependencies — core can never depend on a contracts module.
+  maven-enforcer bannedDependencies — core can never depend on a contracts module. order-contracts
+  and customer-contracts are schema-first (hand-authored schema → generated POJO); payment-contracts
+  is a code-first DEMO module (Java record → generated schema) and is intentionally NOT wired into
+  the producer/consumer runtime topology — it demonstrates the authoring + governance pipeline only.
 - Runtime: producer :8081, consumer :8082 (Spring Boot 4 / Java 25, bytecode 69). Each contracts
   module is a Spring Boot starter that auto-configures its own AMQP topology, so the services carry
   no topology wiring of their own — depending on the module is enough.
@@ -106,6 +117,8 @@ MERMAID SOURCE: diagrams/d1-architecture.mmd
 
 ---
 
+<!-- _class: tight -->
+
 ## One format, a format-agnostic core
 
 The center of the design is `SchemaAwareMessageConverter` (a Spring AMQP `MessageConverter`).
@@ -115,16 +128,18 @@ built-in implementation:
 | Detail | JSON Schema implementation |
 |--------|--------------------------|
 | Strategy | `JsonSchemaStrategy` (networknt Draft 2020-12 + Jackson) |
-| Contracts modules | `order-contracts` · `customer-contracts` |
+| Runtime contracts modules | `order-contracts` · `customer-contracts` (schema-first starters) |
 | Strategy depends on | Jackson only (no Spring, no core) |
 | Content-type | `application/json` |
 
-Each contracts module is a **self-contained Spring Boot starter**: it contributes its
+> A third contracts module, **`payment-contracts`**, is **code-first** (record → schema) — same
+> registry + FORWARD governance, but a **build/CI demo**, not a runtime starter (no `TypeMapping`/topology).
+
+Each **runtime** contracts module is a **self-contained Spring Boot starter**: it contributes its
 **`TypeMapping` bean** (*Java type ↔ registry coordinates ↔ schema type ↔ routing key*) **and owns
-its AMQP topology** — queues, DLQ, retry ladder, and bindings — via a `@AutoConfiguration`. Put
-the module on a service's classpath and it wires both, with no hand-written config in the service.
-Core stays domain-agnostic; adding a third format = a strategy + a mapping + a topology auto-config,
-all in the new contracts module — **no converter and no service wiring changes**.
+its AMQP topology** — queues, DLQ, retry ladder, bindings — via a `@AutoConfiguration`. Put it on a
+service's classpath and both wire up, no hand-written config. Core stays domain-agnostic; adding a
+format = a strategy + a mapping + a topology auto-config in the new module — **no core changes**.
 
 <!--
 Architect takeaway: the format is a plug-in. The converter, resolver, cache, and failure routing
@@ -281,23 +296,31 @@ change a type.
 | `NONE` | No checking | Dev / prototyping only |
 | `*_TRANSITIVE` | Same, but vs **every** prior version | Long-lived schemas, many lagging consumers |
 
-**This POC:** `OrderCreated` → **FORWARD** · `CustomerRegistered` → **FORWARD**.
+**This POC:** `OrderCreated` → **FORWARD** · `CustomerRegistered` → **FORWARD** ·
+`PaymentProcessed` → **FORWARD**.
 
 > The rule is a **per-artifact policy** — you choose it to match how that format evolves and how
 > your producers/consumers are deployed relative to each other.
 
 ---
 
-## Governance via CI — three workflows
+## Governance via CI — four workflows
 
-![w:880](diagrams/d3-ci-pipeline.svg)
+![w:1160](diagrams/d3-ci-pipeline.svg)
 
 <!--
-The three workflows form one pipeline:
-1. bootstrap (manual, once) — attaches the rules. Without it, nothing is enforced.
-2. compat-check (every PR) — read-only dry-run gate.
+The workflows form one pipeline:
+0. schema-drift-check (every PR touching payment-contracts) — OFFLINE, no registry, on a
+   GitHub-hosted ubuntu-latest runner. Regenerates the code-first schema and fails on drift.
+   Guards the code-first module only (schema-first modules commit the schema directly, so
+   there is nothing to regenerate). Detailed in the code-first section.
+1. bootstrap (manual, once) — attaches the FORWARD rules to all THREE artifacts (orders,
+   customers, payments). Without it, nothing is enforced.
+2. compat-check (every PR) — read-only dry-run gate; now spans
+   order-contracts,customer-contracts,payment-contracts.
 3. register (post-merge) — the write path.
-All run on a self-hosted runner co-located with the standing registry at localhost:8080.
+Workflows 1–3 run on a self-hosted runner co-located with the standing registry at
+localhost:8080; workflow 0 needs no registry and runs GitHub-hosted.
 
 MERMAID SOURCE: diagrams/d3-ci-pipeline.mmd
 -->
@@ -404,21 +427,130 @@ You can demo any of them live with `verify -Pincompatible-demo`.
 
 ---
 
+<!-- _class: lead -->
+
+# Code-first contracts
+## The inverse pipeline
+
+### `payment-contracts` — a Java record is the source of truth, the schema is generated
+
+---
+
+## Schema-first vs code-first — same registry, opposite pipeline
+
+Both produce a **JSON Schema artifact** governed by **FORWARD** in Apicurio. They differ only
+in **what a developer edits** and **which way code generation runs**.
+
+| | **Schema-first** (`order`/`customer-contracts`) | **Code-first** (`payment-contracts`) |
+|---|---|---|
+| Source of truth | Hand-authored **JSON Schema** | Java **record** + validation annotations |
+| Generation | schema → **POJO** (`jsonschema2pojo`) | record → **schema** (`victools`) |
+| Developer edits | the `.json` schema | the `.java` record |
+| Committed together | schema + generated POJO | record + generated schema |
+| Extra CI gate | — | **drift-check** (schema must match record) |
+| Governance | Apicurio · FORWARD · compat-check | **same** — Apicurio · FORWARD · compat-check |
+
+> Why offer both: schema-first gives you a language-neutral contract to design against;
+> code-first gives developers the **best DX** — author in Java, never hand-edit a schema —
+> while still publishing a language-neutral contract. Governance is identical either way.
+
+<!--
+The key architect message: code-first is not a different governance model. It converges on
+the exact same registry + FORWARD rule + dry-run compat gate. It just changes the authoring
+ergonomics and adds ONE extra gate (drift) to keep the generated schema honest.
+Spec: spec/pojo-to-schema.md — "JSON Schema is the published contract, not the implementation".
+-->
+
+---
+
+<!-- _class: tight -->
+
+## `PaymentProcessedEvent` → generated schema
+
+The developer writes a record; **Jakarta validation annotations enrich the schema**. victools
+generates JSON Schema (Draft 2020-12) at `process-classes` — no schema is hand-written.
+
+```java
+public record PaymentProcessedEvent(
+    @NotNull UUID paymentId,
+    @NotNull UUID orderId,
+    @NotNull @DecimalMin(value = "0.01", inclusive = false) BigDecimal amount,
+    @NotNull @Size(min = 3, max = 3) String currency,       // ISO 4217
+    @Pattern(regexp = "^(CARD|BANK_TRANSFER|WALLET)$") String paymentMethod,
+    Instant processedAt) {}
+```
+
+```json
+// generated payment-processed.schema.json (excerpt)
+"amount":   { "type": "number", "exclusiveMinimum": 0.01 },
+"currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+"paymentMethod": { "type": "string", "pattern": "^(CARD|BANK_TRANSFER|WALLET)$" },
+"required": ["amount", "currency", "orderId", "paymentId"]   // @NotNull → required
+```
+
+> `@NotNull` → `required`; `@DecimalMin` → `exclusiveMinimum`; `@Size` → `minLength/maxLength`;
+> `@Pattern` → `pattern`. The annotations you'd write anyway **become the contract**.
+
+<!--
+Config: victools SchemaGeneratorConfigBuilder(DRAFT_2020_12, PLAIN_JSON) + JacksonModule +
+JakartaValidationModule(NOT_NULLABLE_FIELD_IS_REQUIRED, INCLUDE_PATTERN_EXPRESSIONS). paymentMethod
+and processedAt are optional (no @NotNull), so they are NOT in required. The regex is anchored
+^...$ deliberately so victools' generated `pattern` matches what the runtime validator enforces.
+-->
+
+---
+
+<!-- _class: tight -->
+
+## The drift-check gate — keeping the generated schema honest
+
+Code-first has a failure mode schema-first doesn't: a developer edits the **record** but forgets
+to **regenerate + commit** the schema. Two things prevent stale contracts:
+
+- **Deterministic generation** — the generator injects a stable `$id`/`title` (class name only,
+  no timestamps), **sorts all keys alphabetically**, and uses a fixed pretty-printer, so output
+  is **byte-stable**. `SchemaDeterminismTest` asserts (a) two generations are byte-identical and
+  (b) a fresh generation equals the committed file.
+- **`schema-drift-check.yml`** — a **4th, offline** workflow (GitHub-hosted `ubuntu-latest`, **no
+  registry**). On every PR touching `payment-contracts/**`:
+
+```yaml
+- run: ./mvnw -pl payment-contracts process-classes   # regenerate from the record
+- run: git diff --exit-code -- payment-contracts/src/main/resources/schemas/
+```
+
+<span class="green">✅ regenerated schema == committed</span> → pass.
+<span class="red">❌ record changed but schema not re-committed</span> → non-empty diff → **PR blocked**.
+
+> Deterministic output is what makes the `git diff` gate trustworthy — without stable ordering,
+> the schema would "drift" on every build for no real reason.
+
+<!--
+Order of gates on a payment PR: drift-check (offline, is the schema up to date with the record?)
+THEN compat-check (against the live registry, is the change FORWARD-compatible?). Two different
+questions. Determinism is the load-bearing precondition for the offline gate.
+-->
+
+---
+
 ## Runner topology & cost model
 
-All three workflows run on a **self-hosted runner** (`[self-hosted, apicurio-local]`, JDK 25 +
-`toolchains.xml`) that **shares the machine** with the standing registry at `localhost:8080`.
+The three **registry-backed** workflows (bootstrap, compat-check, register) run on a
+**self-hosted runner** (`[self-hosted, apicurio-local]`, JDK 25 + `toolchains.xml`) that
+**shares the machine** with the standing registry at `localhost:8080`. The **offline
+drift-check** runs GitHub-hosted (`ubuntu-latest`) — it needs no registry.
 
-| Aspect | With this setup |
-|--------|-----------------|
-| GitHub Actions minutes | **None consumed** — jobs run on your machine |
-| Repo visibility | **Must be private** (fork-PR RCE risk on public) |
-| Availability | If the machine is off, jobs **queue** — they don't fail |
-| Speed | Fast — registry + `~/.m2` already warm, no per-job startup |
-| Scaling | Move runner + registry to an always-on VM, same label & workflows |
+| Aspect | Registry-backed (self-hosted) | drift-check (GitHub-hosted) |
+|--------|-------------------------------|-----------------------------|
+| GitHub Actions minutes | **None** — jobs run on your machine | Consumes minutes (but registry-free) |
+| Registry access | `localhost:8080`, real history | None needed |
+| Availability | Machine off → jobs **queue**, don't fail | Always available |
+| Speed | Fast — registry + `~/.m2` already warm | Fresh checkout + Maven each run |
 
-> Why self-hosted: the dry-run gate needs to reach a **live registry with real history**. Co-locating
-> the runner and the registry makes that a `localhost` call — no secrets, no tunnels.
+> Why self-hosted for the compat gate: the dry-run needs a **live registry with real history**;
+> co-locating runner + registry makes it a `localhost` call — no secrets, no tunnels. The drift
+> gate has no such need, so it stays on a standard hosted runner. Repo must be **private**
+> (fork-PR RCE risk on public self-hosted runners).
 
 ---
 
@@ -484,6 +616,8 @@ build on. The wire format here is registry-agnostic anyway (identity in headers)
 
 ---
 
+<!-- _class: tight -->
+
 ## Takeaways & adoption path
 
 **What this POC proves**
@@ -492,14 +626,18 @@ build on. The wire format here is registry-agnostic anyway (identity in headers)
 2. Breaking changes are caught **on the PR**, as a red check — not in production.
 3. The rule is **per-artifact** and must match the format (**JSON Schema→FORWARD**, since Apicurio
    classifies JSON property additions as narrowing under BACKWARD).
-4. Registry contents are a **projection of `main`**; resolution is **cached & outage-tolerant**.
-5. Bad messages are **contained** (DLQ + retry ladder), not lost or silently dropped.
+4. **Two authoring models, one governance layer** — schema-first (schema → POJO) and code-first
+   (record → schema) both publish to the same registry under the same FORWARD gate.
+5. Registry contents are a **projection of `main`**; resolution is **cached & outage-tolerant**.
+6. Bad messages are **contained** (DLQ + retry ladder), not lost or silently dropped.
 
 **How a team rolls this out**
 
 - Stand up Apicurio (+ Postgres) → run **bootstrap** once per environment.
 - Add the **compat-check** workflow + make it a **required status check** on `main`.
 - Add **register** on merge. Pick each artifact's rule from how that format evolves.
+- For **code-first** contracts, also add the **drift-check** gate so the generated schema can
+  never fall out of sync with its source record.
 
 ---
 
@@ -517,12 +655,17 @@ build on. The wire format here is registry-agnostic anyway (identity in headers)
 docker compose up                       # cold start → all-healthy
 
 # --- Register schemas + attach rules (host cold-start) ---
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+./mvnw -pl order-contracts,customer-contracts,payment-contracts apicurio-registry:register \
   -Dapicurio.registry.url=http://localhost:8080
-#   OrderCreated / CustomerRegistered (both JSON Schema) → FORWARD
+#   OrderCreated / CustomerRegistered / PaymentProcessed (all JSON Schema) → FORWARD
 
-# --- Compat gate (what a PR runs; read-only dry-run) ---
-./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check
+# --- Code-first (payment-contracts): regenerate schema from the record + drift/determinism test ---
+./mvnw -pl payment-contracts process-classes     # record → payment-processed.schema.json
+git diff --exit-code -- payment-contracts/src/main/resources/schemas/   # drift gate (offline)
+./mvnw -pl payment-contracts test                # SchemaDeterminismTest (byte-stable + no drift)
+
+# --- Compat gate (what a PR runs; read-only dry-run) — all three artifacts ---
+./mvnw -pl order-contracts,customer-contracts,payment-contracts verify -Pcompat-check
 
 # --- Incompatible-change demos (MUST fail with INCOMPATIBLE) ---
 ./mvnw -pl order-contracts    verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
@@ -547,11 +690,13 @@ health `:8081/actuator/health`, `:8082/actuator/health`
 
 This deck distills:
 
-- `docs/short-tutorial.md` — compatibility-mode narrative + the three workflows
+- `docs/short-tutorial.md` — compatibility-mode narrative + the three registry workflows
 - `docs/CI-SCHEMA-TESTING-GUIDE.md` — change-type → outcome decision matrix + worked examples
 - `docs/github_ci_steps.md` — workflow wiring, branch protection, cost model
 - `docs/TECHNICAL-REPORT.md` — message lifecycle, resolution/caching, failure topology
-- `.github/workflows/{schema-compat-check,schema-register,schema-governance-bootstrap}.yml`
+- `spec/pojo-to-schema.md` · `spec/tasks.md` · `spec/testing-guide.md` — the **code-first**
+  (`payment-contracts`) authoring/governance workflow, tasks, and test guide
+- `.github/workflows/{schema-drift-check,schema-compat-check,schema-register,schema-governance-bootstrap}.yml`
 - `CLAUDE.md` — architecture, wire format, exception taxonomy
 
 > Diagrams: editable Mermaid source in `docs/presentation/diagrams/*.mmd`; rendered SVGs alongside.

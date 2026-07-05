@@ -1,8 +1,9 @@
 graph TB
     subgraph dev["Build-time (Maven modules)"]
         core["schema-messaging-core<br/>(domain-agnostic library)"]
-        oc["order-contracts<br/>OrderCreated · JSON Schema"]
-        cc["customer-contracts<br/>CustomerRegistered · JSON Schema"]
+        oc["order-contracts<br/>OrderCreated · JSON Schema<br/>schema-first (schema → POJO)"]
+        cc["customer-contracts<br/>CustomerRegistered · JSON Schema<br/>schema-first (schema → POJO)"]
+        pc["payment-contracts<br/>PaymentProcessed · JSON Schema<br/>code-first (record → schema) · demo"]
         core -. "core must NOT depend<br/>on contracts (enforcer-banned)" .- oc
         core -. "core must NOT depend<br/>on contracts (enforcer-banned)" .- cc
     end
@@ -24,6 +25,7 @@ graph TB
     cons --> oc & cc
 
     reg --> pg
+    pc -. "generated schema<br/>registered via CI" .-> reg
     prod -->|"resolve + validate schema"| reg
     cons -->|"resolve schema"| reg
     prod -->|"publish raw bytes<br/>+ X-Schema-* headers"| rmq

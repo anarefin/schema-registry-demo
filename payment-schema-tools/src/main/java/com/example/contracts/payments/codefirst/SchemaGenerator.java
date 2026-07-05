@@ -18,11 +18,26 @@ import com.github.victools.jsonschema.module.jakarta.validation.JakartaValidatio
 import com.github.victools.jsonschema.module.jakarta.validation.JakartaValidationOption;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 public class SchemaGenerator {
+
+    public static void main(String[] args) throws IOException {
+        if (args.length < 1) {
+            throw new IllegalArgumentException("Usage: SchemaGenerator <output-path>");
+        }
+        Path outputPath = Paths.get(args[0]);
+        String schema = generateSchema();
+        Files.createDirectories(outputPath.getParent());
+        Files.writeString(outputPath, schema, StandardCharsets.UTF_8);
+        System.out.println("Schema written to " + outputPath.toAbsolutePath());
+    }
 
     public static String generateSchema() throws IOException {
         SchemaGeneratorConfig config = new SchemaGeneratorConfigBuilder(
@@ -61,7 +76,6 @@ public class SchemaGenerator {
         return mapper.writer(printer).writeValueAsString(sorted) + "\n";
     }
 
-    // Produce a deep copy of node with all ObjectNode keys sorted alphabetically.
     private static JsonNode sortedNode(JsonNode node, ObjectMapper mapper) {
         if (!node.isObject()) {
             return node;
