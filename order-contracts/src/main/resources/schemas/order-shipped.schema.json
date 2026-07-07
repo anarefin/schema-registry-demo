@@ -1,0 +1,35 @@
+{
+  "$id" : "urn:example:schema:OrderShipped",
+  "$schema" : "http://json-schema.org/draft-07/schema#",
+  "description" : "Emitted when an order is shipped to the customer.",
+  "properties" : {
+    "carrier" : {
+      "description" : "Shipping carrier; one of DHL, FEDEX, UPS.",
+      "pattern" : "^(DHL|FEDEX|UPS)$",
+      "type" : "string"
+    },
+    "orderId" : {
+      "description" : "Unique identifier of the shipped order.",
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "shippedAt" : {
+      "description" : "Instant the order was shipped (ISO-8601).",
+      "format" : "date-time",
+      "type" : "string"
+    },
+    "trackingNumber" : {
+      "description" : "Carrier tracking number for the shipment.",
+      "maxLength" : 64,
+      "minLength" : 1,
+      "type" : "string"
+    }
+  },
+  "required" : [
+    "carrier",
+    "orderId",
+    "trackingNumber"
+  ],
+  "title" : "OrderShipped",
+  "type" : "object"
+}

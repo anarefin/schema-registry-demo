@@ -1,10 +1,11 @@
 package com.example.producer.controller;
 
+import com.example.contracts.orders.OrderCancelled;
 import com.example.contracts.orders.OrderCreated;
 import com.example.contracts.orders.OrderEventRouting;
-import com.example.contracts.orders.amqp.EventExchanges;
+import com.example.contracts.orders.OrderShipped;
+import com.example.messaging.core.amqp.EventExchanges;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
-import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.publisher.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,13 +19,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * T-3.5: Demo REST endpoint — maps a JSON body to OrderCreated (JSON Schema) and publishes via EventPublisher.
- * Returns 201 on success, 400 on schema validation failure (spec §5).
+ * T-3.4: one demo REST endpoint per order event — maps the request DTO to the code-first record and
+ * publishes via {@link EventPublisher}. There are no manual field checks:
+ * {@code SchemaAwareMessageConverter} is the single validation authority (a schema violation throws
+ * {@code SchemaValidationException} → 400, and no message is emitted). Returns 201 on success.
  */
 @RestController
 @RequestMapping("/api/orders")
@@ -43,30 +47,46 @@ public class OrderController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public void createOrder(@RequestBody CreateOrderRequest request) {
-        if (request.productId() == null || request.currency() == null
-                || request.quantity() == null || request.quantity() <= 0
-                || request.totalAmount() == null) {
-            throw new SchemaValidationException(
-                    "events.orders:OrderCreated",
-                    "Missing or invalid required fields (productId, currency, quantity>0, totalAmount)");
-        }
-        OrderCreated event = new OrderCreated()
-                .withOrderId(UUID.randomUUID().toString())
-                .withCustomerId(request.customerId())
-                .withProductId(request.productId())
-                .withQuantity(request.quantity())
-                .withTotalAmount(request.totalAmount())
-                .withCurrency(request.currency())
-                .withCreatedAt(Instant.now().toString());
-
+        OrderCreated event = new OrderCreated(
+                UUID.randomUUID(),
+                request.customerId(),
+                request.productId(),
+                request.quantity(),
+                request.totalAmount(),
+                request.currency(),
+                Instant.now());
         eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
-        log.info("Published OrderCreated orderId={}", event.getOrderId());
+        log.info("Published OrderCreated orderId={}", event.orderId());
+    }
+
+    @PostMapping("/ship")
+    @ResponseStatus(HttpStatus.CREATED)
+    public void shipOrder(@RequestBody ShipOrderRequest request) {
+        OrderShipped event = new OrderShipped(
+                request.orderId(),
+                request.trackingNumber(),
+                request.carrier(),
+                Instant.now());
+        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        log.info("Published OrderShipped orderId={}", event.orderId());
+    }
+
+    @PostMapping("/cancel")
+    @ResponseStatus(HttpStatus.CREATED)
+    public void cancelOrder(@RequestBody CancelOrderRequest request) {
+        OrderCancelled event = new OrderCancelled(
+                request.orderId(),
+                request.reason(),
+                request.refundAmount(),
+                Instant.now());
+        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        log.info("Published OrderCancelled orderId={}", event.orderId());
     }
 
     /**
-     * T-5.7: bypass-validation poison demo — publishes a malformed payload directly to
-     * events.exchange with valid X-Schema-* headers but garbage bytes. Consumer fails
-     * schema validation (unparseable JSON) → DLQ_DIRECT routing. FOR DEMO/TEST USE ONLY.
+     * Bypass-validation poison demo — publishes a malformed payload directly to events.exchange with
+     * valid X-Schema-* headers but garbage bytes. The consumer fails schema validation (unparseable
+     * JSON) → DLQ. FOR DEMO/TEST USE ONLY.
      *
      * <p>curl -X POST http://localhost:8081/api/orders/poison
      */
@@ -79,14 +99,25 @@ public class OrderController {
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
         props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
         byte[] garbage = "{NOT_VALID_JSON".getBytes(StandardCharsets.UTF_8);
-        rabbitTemplate.send(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.ROUTING_KEY, new Message(garbage, props));
+        rabbitTemplate.send(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.CREATED_ROUTING_KEY,
+                new Message(garbage, props));
         log.warn("Published poison message to orders.created (bypass-validation demo)");
     }
 
     public record CreateOrderRequest(
-            String customerId,
-            String productId,
+            UUID customerId,
+            UUID productId,
             Integer quantity,
-            Double totalAmount,
+            BigDecimal totalAmount,
             String currency) {}
+
+    public record ShipOrderRequest(
+            UUID orderId,
+            String trackingNumber,
+            String carrier) {}
+
+    public record CancelOrderRequest(
+            UUID orderId,
+            String reason,
+            BigDecimal refundAmount) {}
 }

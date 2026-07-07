@@ -10,15 +10,19 @@
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
-  <!-- T-3.7: JSON Schema contracts jar. Carries OrderCreated schema (Jackson) plus its
-       own AMQP routing/topology auto-configuration (spring-amqp + spring-boot-autoconfigure),
-       self-contained with no dependency on schema-messaging-core. -->
+  <!-- Code-first order contracts (spec code-first D2/D4). PURE contract jar: the annotated event
+       records are the source of truth, their JSON Schemas are generated (by schema-gen-tools) and
+       committed under resources/schemas/. No victools and no Spring/AMQP on the classpath — only
+       Jackson (records) + Jakarta Validation (annotations read at generation time). -->
   <artifactId>order-contracts</artifactId>
   <packaging>jar</packaging>
 
   <properties>
-    <!-- Override on CLI: ./mvnw apicurio-registry:register -Dapicurio.registry.url=http://host:8080 -->
-    <apicurio.registry.url>http://localhost:8080</apicurio.registry.url>
+    <!-- The one incompatible-change resource for this domain, consumed by the parent's
+         incompatible-demo profile (spec code-first D4). apicurio.registry.url is inherited. -->
+    <apicurio.incompatible.group>events.orders</apicurio.incompatible.group>
+    <apicurio.incompatible.artifact>OrderCreated</apicurio.incompatible.artifact>
+    <apicurio.incompatible.file>${project.basedir}/src/test/resources/schemas/order-created-incompatible.schema.json</apicurio.incompatible.file>
   </properties>
 
   <dependencies>
@@ -26,15 +30,10 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>
-
-    <!-- AMQP routing/topology for OrderCreated (self-contained, no dependency on schema-messaging-core) -->
+    <!-- Jakarta Validation annotations on the records (read by victools at schema-generation time). -->
     <dependency>
-      <groupId>org.springframework.amqp</groupId>
-      <artifactId>spring-amqp</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-autoconfigure</artifactId>
+      <groupId>jakarta.validation</groupId>
+      <artifactId>jakarta.validation-api</artifactId>
     </dependency>
 
     <dependency>
@@ -42,65 +41,47 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Test-only: lets the value-object round-trip tests (de)serialize the records' Instant
+         fields as ISO-8601. Kept at test scope so the compile classpath stays pure. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
     <plugins>
-      <!-- T-3.2: Generate OrderCreated POJO from order-created.json (Draft 2020-12).
-           Wire format: raw JSON bytes, no envelope (spec §6). -->
-      <plugin>
-        <groupId>org.jsonschema2pojo</groupId>
-        <artifactId>jsonschema2pojo-maven-plugin</artifactId>
-        <version>${jsonschema2pojo-maven-plugin.version}</version>
-        <configuration>
-          <sourceDirectory>${project.basedir}/src/main/resources/schemas</sourceDirectory>
-          <targetPackage>com.example.contracts.orders</targetPackage>
-          <annotationStyle>jackson2</annotationStyle>
-          <sourceType>jsonschema</sourceType>
-          <generateBuilders>true</generateBuilders>
-          <includeHashcodeAndEquals>true</includeHashcodeAndEquals>
-          <includeToString>true</includeToString>
-          <useTitleAsClassname>true</useTitleAsClassname>
-          <dateTimeType>java.lang.String</dateTimeType>
-          <initializeCollections>false</initializeCollections>
-        </configuration>
-        <executions>
-          <execution>
-            <goals>
-              <goal>generate</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-
-      <!-- T-3.4 / T-4.1: Register OrderCreated. The COMPATIBILITY rule for this
-           JSON Schema artifact is FORWARD (not BACKWARD): Apicurio's JSON Schema checker
-           classifies adding any property as OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED, which
-           BACKWARD rejects but FORWARD accepts. The rule is attached via REST/bootstrap.
+      <!-- Seed the three order artifacts from their generated schemas (spec code-first D4).
+           The FORWARD compatibility rule + v1 reset are attached via the data-driven bootstrap.
            Run: ./mvnw -pl order-contracts apicurio-registry:register
-           Override URL: -Dapicurio.registry.url=http://host:8080
-           v2 (promoCode, notes, input1, userName) are FORWARD-compatible additions. -->
+           Override URL: -Dapicurio.registry.url=http://host:8080 -->
       <plugin>
         <groupId>io.apicurio</groupId>
         <artifactId>apicurio-registry-maven-plugin</artifactId>
-        <version>${apicurio-registry-maven-plugin.version}</version>
+        <!-- version + registryUrl inherited from the parent pluginManagement (spec code-first D4).
+             This POM supplies only the per-artifact coordinates; the parent's compat-check profile
+             reuses this same <artifacts> list for the dry-run merge gate. -->
         <configuration>
-          <registryUrl>${apicurio.registry.url}</registryUrl>
           <artifacts>
-            <!-- v1: required fields only — registered first to establish the baseline version. -->
             <artifact>
               <groupId>events.orders</groupId>
               <artifactId>OrderCreated</artifactId>
-              <file>${project.basedir}/src/test/resources/schemas/order-created-v1.json</file>
+              <file>${project.basedir}/src/main/resources/schemas/order-created.schema.json</file>
               <artifactType>JSON</artifactType>
               <ifExists>FIND_OR_CREATE_VERSION</ifExists>
             </artifact>
-            <!-- latest: src/main schema adds optional promoCode/notes/input1/userName,
-                 each a FORWARD-compatible property addition. -->
             <artifact>
               <groupId>events.orders</groupId>
-              <artifactId>OrderCreated</artifactId>
-              <file>${project.basedir}/src/main/resources/schemas/order-created.json</file>
+              <artifactId>OrderShipped</artifactId>
+              <file>${project.basedir}/src/main/resources/schemas/order-shipped.schema.json</file>
+              <artifactType>JSON</artifactType>
+              <ifExists>FIND_OR_CREATE_VERSION</ifExists>
+            </artifact>
+            <artifact>
+              <groupId>events.orders</groupId>
+              <artifactId>OrderCancelled</artifactId>
+              <file>${project.basedir}/src/main/resources/schemas/order-cancelled.schema.json</file>
               <artifactType>JSON</artifactType>
               <ifExists>FIND_OR_CREATE_VERSION</ifExists>
             </artifact>
@@ -109,79 +90,4 @@
       </plugin>
     </plugins>
   </build>
-
-  <profiles>
-    <!-- T-4.5 CI merge gate: checks the current schema is compatible (FORWARD for this
-         JSON artifact) with what is registered. Requires a running registry. Run during CI
-         after docker compose up:
-         ./mvnw -pl order-contracts verify -Pcompat-check
-         Or explicitly: ./mvnw -pl order-contracts apicurio-registry:test -Pcompat-check -->
-    <profile>
-      <id>compat-check</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>io.apicurio</groupId>
-            <artifactId>apicurio-registry-maven-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>compat-gate</id>
-                <phase>verify</phase>
-                <goals><goal>register</goal></goals>
-                <configuration>
-                  <registryUrl>${apicurio.registry.url}</registryUrl>
-                  <dryRun>true</dryRun>
-                  <artifacts>
-                    <artifact>
-                      <groupId>events.orders</groupId>
-                      <artifactId>OrderCreated</artifactId>
-                      <file>${project.basedir}/src/main/resources/schemas/order-created.json</file>
-                      <artifactType>JSON</artifactType>
-                    </artifact>
-                  </artifacts>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-
-    <!-- T-4.3 / T-4.6 incompatible demo: runs the dry-run register with a schema that
-         changes quantity from integer to string — a type change of an existing property,
-         incompatible under every compatibility level (FORWARD, BACKWARD, FULL).
-         This MUST fail with a clear compatibility rejection message.
-         Demo: ./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
-         (requires a prior version already registered with the FORWARD rule) -->
-    <profile>
-      <id>incompatible-demo</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>io.apicurio</groupId>
-            <artifactId>apicurio-registry-maven-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>incompatible-compat-check</id>
-                <phase>verify</phase>
-                <goals><goal>register</goal></goals>
-                <configuration>
-                  <registryUrl>${apicurio.registry.url}</registryUrl>
-                  <dryRun>true</dryRun>
-                  <artifacts>
-                    <artifact>
-                      <groupId>events.orders</groupId>
-                      <artifactId>OrderCreated</artifactId>
-                      <file>${project.basedir}/src/test/resources/schemas/order-created-incompatible.json</file>
-                      <artifactType>JSON</artifactType>
-                    </artifact>
-                  </artifacts>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-  </profiles>
 </project>

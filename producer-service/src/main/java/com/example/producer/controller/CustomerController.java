@@ -1,7 +1,11 @@
 package com.example.producer.controller;
 
+import com.example.contracts.customers.Address;
+import com.example.contracts.customers.CustomerAddressAdded;
 import com.example.contracts.customers.CustomerRegistered;
-import com.example.contracts.customers.amqp.EventExchanges;
+import com.example.contracts.customers.CustomerTier;
+import com.example.contracts.customers.CustomerTierChanged;
+import com.example.messaging.core.amqp.EventExchanges;
 import com.example.messaging.core.publisher.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,8 +20,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * T-2.5: Demo REST endpoint — maps a JSON body to CustomerRegistered and publishes via EventPublisher.
- * Returns 201 on success, 400 on schema validation failure (spec §5).
+ * T-3.4: one demo REST endpoint per customer event — maps the request DTO to the code-first record
+ * and publishes via {@link EventPublisher}. There are no manual field checks:
+ * {@code SchemaAwareMessageConverter} is the single validation authority (a schema violation throws
+ * {@code SchemaValidationException} → 400, and no message is emitted). Returns 201 on success.
  */
 @RestController
 @RequestMapping("/api/customers")
@@ -31,24 +37,42 @@ public class CustomerController {
         this.eventPublisher = eventPublisher;
     }
 
-    /**
-     * Register a new customer — validates against the JSON Schema before publishing.
-     *
-     * @param request incoming registration payload
-     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public void registerCustomer(@RequestBody RegisterCustomerRequest request) {
-        CustomerRegistered event = new CustomerRegistered();
-        event.setCustomerId(UUID.randomUUID().toString());
-        event.setEmail(request.email());
-        event.setFirstName(request.firstName());
-        event.setLastName(request.lastName());
-        event.setPhoneNumber(request.phoneNumber());
-        event.setRegisteredAt(Instant.now().toString());
-
+        CustomerRegistered event = new CustomerRegistered(
+                UUID.randomUUID(),
+                request.email(),
+                request.firstName(),
+                request.lastName(),
+                request.phoneNumber(),
+                Instant.now());
         eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
-        log.info("Published CustomerRegistered customerId={}", event.getCustomerId());
+        log.info("Published CustomerRegistered customerId={}", event.customerId());
+    }
+
+    @PostMapping("/address")
+    @ResponseStatus(HttpStatus.CREATED)
+    public void addAddress(@RequestBody AddAddressRequest request) {
+        CustomerAddressAdded event = new CustomerAddressAdded(
+                request.customerId(),
+                request.address(),
+                Instant.now());
+        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        log.info("Published CustomerAddressAdded customerId={}", event.customerId());
+    }
+
+    @PostMapping("/tier")
+    @ResponseStatus(HttpStatus.CREATED)
+    public void changeTier(@RequestBody ChangeTierRequest request) {
+        CustomerTierChanged event = new CustomerTierChanged(
+                request.customerId(),
+                request.previousTier(),
+                request.newTier(),
+                Instant.now());
+        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        log.info("Published CustomerTierChanged customerId={} newTier={}",
+                event.customerId(), event.newTier());
     }
 
     public record RegisterCustomerRequest(
@@ -56,4 +80,13 @@ public class CustomerController {
             String firstName,
             String lastName,
             String phoneNumber) {}
+
+    public record AddAddressRequest(
+            UUID customerId,
+            Address address) {}
+
+    public record ChangeTierRequest(
+            UUID customerId,
+            CustomerTier previousTier,
+            CustomerTier newTier) {}
 }

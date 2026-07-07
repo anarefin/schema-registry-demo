@@ -23,7 +23,8 @@ import java.util.stream.Collectors;
 
 /**
  * JSON Schema serialization strategy (spec §6).
- * Validates payload via networknt json-schema-validator (Draft 2020-12),
+ * Validates payload via networknt json-schema-validator (Draft-07 — matching the generated
+ * schemas, which target Draft-07 so Apicurio 3.2.0's compatibility checker can gate them),
  * then serializes / deserializes with Jackson.
  *
  * <p>Compiled {@link JsonSchema} objects are cached by globalId — parsing the schema
@@ -98,7 +99,7 @@ public class JsonSchemaStrategy implements SerializationStrategy {
         String coordinatesCtx = "globalId=" + resolvedSchema.globalId();
         try {
             JsonSchema jsonSchema = compiledSchemaCache.get(resolvedSchema.globalId(), id -> {
-                JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
+                JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
                 return factory.getSchema(new String(resolvedSchema.rawContent(), StandardCharsets.UTF_8));
             });
             JsonNode node = objectMapper.readTree(jsonBytes);

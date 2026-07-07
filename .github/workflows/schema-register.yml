@@ -3,23 +3,24 @@ name: Schema Registration
 # Post-merge WRITE path. After a contract change lands on main, register the new schema version
 # to the standing Apicurio registry. Runs on the SELF-HOSTED runner that shares a machine with the
 # registry (http://localhost:8080). `register` is idempotent (FIND_OR_CREATE_VERSION), so
-# registering both modules every time is safe and keeps the workflow simple.
+# registering every contract module every time is safe and keeps the workflow simple.
+#
+# Data-driven: the module list is DISCOVERED from every `*-contracts` directory that carries a
+# pom.xml, so adding a new domain needs no workflow edit.
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'order-contracts/**'
-      - 'customer-contracts/**'
-      - 'payment-contracts/**'
+      - '*-contracts/**'
 
 env:
   REGISTRY_URL: http://localhost:8080
 
 jobs:
   register:
-    name: Register schemas (orders + customers + payments)
+    name: Register schemas (all contract modules)
     runs-on: [self-hosted, apicurio-local]
 
     steps:
@@ -32,8 +33,15 @@ jobs:
           distribution: temurin
           java-version: '25'
 
+      - name: Discover contract modules
+        id: modules
+        run: |
+          PL=$(for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done | sort | paste -sd, -)
+          echo "pl=$PL" >> "$GITHUB_OUTPUT"
+          echo "Discovered contract modules: $PL"
+
       - name: Register schemas
         run: |
-          ./mvnw -pl order-contracts,customer-contracts,payment-contracts apicurio-registry:register \
+          ./mvnw -pl ${{ steps.modules.outputs.pl }} apicurio-registry:register \
             -Dapicurio.registry.url=${REGISTRY_URL} \
             --no-transfer-progress

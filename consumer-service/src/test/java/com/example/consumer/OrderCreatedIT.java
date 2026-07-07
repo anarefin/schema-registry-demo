@@ -24,7 +24,10 @@ import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,7 +65,8 @@ class OrderCreatedIT {
     @Autowired
     SchemaAwareMessageConverter converter;
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    @Autowired
+    ObjectMapper objectMapper;
 
     private static final long MOCK_GLOBAL_ID = 99L;
 
@@ -78,13 +82,9 @@ class OrderCreatedIT {
 
     // ---- TC-3.3: round-trip ------------------------------------------------
 
-    /**
-     * TC-3.3 (I): OrderCreated published via EventPublisher reaches the listener
-     * as a fully typed domain object with correct field values.
-     */
     @Test
     void tc33_roundTrip() {
-        OrderCreated event = buildEvent("ord-e2e", "cust-1", "prod-A", 3, 99.99, "USD");
+        OrderCreated event = buildEvent(3, new BigDecimal("99.99"), "USD");
 
         eventPublisher.publish("events.exchange", event);
 
@@ -93,23 +93,19 @@ class OrderCreatedIT {
                 verify(orderEventListener).onOrderCreated(captor.capture()));
 
         OrderCreated received = captor.getValue();
-        assertThat(received.getOrderId()).isEqualTo("ord-e2e");
-        assertThat(received.getCustomerId()).isEqualTo("cust-1");
-        assertThat(received.getProductId()).isEqualTo("prod-A");
-        assertThat(received.getQuantity()).isEqualTo(3);
-        assertThat(received.getTotalAmount()).isEqualTo(99.99);
-        assertThat(received.getCurrency()).isEqualTo("USD");
+        assertThat(received.orderId()).isEqualTo(event.orderId());
+        assertThat(received.customerId()).isEqualTo(event.customerId());
+        assertThat(received.productId()).isEqualTo(event.productId());
+        assertThat(received.quantity()).isEqualTo(3);
+        assertThat(received.totalAmount()).isEqualByComparingTo("99.99");
+        assertThat(received.currency()).isEqualTo("USD");
     }
 
     // ---- TC-3.4: content-type + X-Schema-* headers -------------------------
 
-    /**
-     * TC-3.4 (I): SchemaAwareMessageConverter produces content-type: application/json
-     * and all required X-Schema-* headers (globalId, groupId, artifactId, type, messageId).
-     */
     @Test
     void tc34_schemaHeaders() {
-        OrderCreated event = buildEvent("ord-hdr", "cust-2", "prod-B", 1, 29.99, "EUR");
+        OrderCreated event = buildEvent(1, new BigDecimal("29.99"), "EUR");
 
         Message rawMsg = converter.toMessage(event, new MessageProperties());
 
@@ -131,18 +127,11 @@ class OrderCreatedIT {
 
     // ---- TC-3.5: X-Schema-GlobalId present → fetchByGlobalId used -----------
 
-    /**
-     * TC-3.5 (I): consumer resolves schema via X-Schema-GlobalId fast path,
-     * bypassing coordinate lookup (spec §6 / SchemaAwareMessageConverter#resolveSchema).
-     * The cache may serve the schema without hitting the client at all; the key assertion
-     * is that fetchByCoordinates is NOT called (the globalId path skips coordinate resolution).
-     */
     @Test
     void tc35_globalIdResolution() throws Exception {
-        // Clear startup/pre-warm invocations so assertions only cover this test's calls.
         org.mockito.Mockito.clearInvocations(apicurioClient);
 
-        OrderCreated original = buildEvent("ord-gid", "cust-3", "prod-C", 5, 149.95, "GBP");
+        OrderCreated original = buildEvent(5, new BigDecimal("149.95"), "GBP");
         byte[] jsonBytes = objectMapper.writeValueAsBytes(original);
 
         MessageProperties props = new MessageProperties();
@@ -157,35 +146,27 @@ class OrderCreatedIT {
 
         assertThat(result).isInstanceOf(OrderCreated.class);
         OrderCreated parsed = (OrderCreated) result;
-        assertThat(parsed.getOrderId()).isEqualTo("ord-gid");
-        assertThat(parsed.getQuantity()).isEqualTo(5);
-        assertThat(parsed.getTotalAmount()).isEqualTo(149.95);
+        assertThat(parsed.orderId()).isEqualTo(original.orderId());
+        assertThat(parsed.quantity()).isEqualTo(5);
+        assertThat(parsed.totalAmount()).isEqualByComparingTo("149.95");
 
-        // Verify globalId fast-path: fetchByCoordinates was NOT called for this message.
-        // (The SchemaAwareMessageConverter#resolveSchema prefers globalId → coordinate lookup skipped.)
         org.mockito.Mockito.verify(apicurioClient, org.mockito.Mockito.never())
                 .fetchByCoordinates(any(SchemaCoordinates.class));
     }
 
     // ---- helpers -----------------------------------------------------------
 
-    private static OrderCreated buildEvent(String orderId, String customerId, String productId,
-                                            int quantity, double totalAmount, String currency) {
-        return new OrderCreated()
-                .withOrderId(orderId)
-                .withCustomerId(customerId)
-                .withProductId(productId)
-                .withQuantity(quantity)
-                .withTotalAmount(totalAmount)
-                .withCurrency(currency)
-                .withCreatedAt("2026-05-31T00:00:00Z");
+    private static OrderCreated buildEvent(int quantity, BigDecimal totalAmount, String currency) {
+        return new OrderCreated(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                quantity, totalAmount, currency, Instant.parse("2026-05-31T00:00:00Z"));
     }
 
     private static byte[] loadJsonSchema() throws Exception {
         try (var stream = Objects.requireNonNull(
                 OrderCreatedIT.class.getClassLoader()
-                        .getResourceAsStream("schemas/order-created.json"),
-                "order-created.json not on test classpath")) {
+                        .getResourceAsStream("schemas/order-created.schema.json"),
+                "order-created.schema.json not on test classpath")) {
             return stream.readAllBytes();
         }
     }

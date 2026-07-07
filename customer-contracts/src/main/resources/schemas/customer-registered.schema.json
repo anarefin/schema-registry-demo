@@ -1,0 +1,47 @@
+{
+  "$id" : "urn:example:schema:CustomerRegistered",
+  "$schema" : "http://json-schema.org/draft-07/schema#",
+  "description" : "Emitted when a new customer registers.",
+  "properties" : {
+    "customerId" : {
+      "description" : "Unique identifier of the customer.",
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "email" : {
+      "description" : "Customer email address.",
+      "format" : "email",
+      "type" : "string"
+    },
+    "firstName" : {
+      "description" : "Customer given name.",
+      "maxLength" : 100,
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "lastName" : {
+      "description" : "Customer family name.",
+      "maxLength" : 100,
+      "minLength" : 1,
+      "type" : "string"
+    },
+    "phoneNumber" : {
+      "description" : "Optional phone number in E.164 format.",
+      "pattern" : "^\\+?[1-9]\\d{1,14}$",
+      "type" : "string"
+    },
+    "registeredAt" : {
+      "description" : "Instant the customer registered (ISO-8601).",
+      "format" : "date-time",
+      "type" : "string"
+    }
+  },
+  "required" : [
+    "customerId",
+    "email",
+    "firstName",
+    "lastName"
+  ],
+  "title" : "CustomerRegistered",
+  "type" : "object"
+}

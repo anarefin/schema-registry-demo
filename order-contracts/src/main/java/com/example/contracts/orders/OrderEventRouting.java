@@ -1,20 +1,30 @@
 package com.example.contracts.orders;
 
 /**
- * AMQP routing constants for OrderCreated events (spec §9/§10.4).
- * Single source of truth for the routing key and queue/DLQ names — referenced by
- * producer-service (TypeMapping) and consumer-service (@RabbitListener).
+ * AMQP routing constants for the three order events (spec §9/§10.4, code-first D3).
+ *
+ * <p>Plain {@code String} constants only — no Spring dependency — so {@code @RabbitListener}
+ * and the poison demo can reference them as compile-time constants. The AMQP topology itself
+ * lives in {@code schema-messaging-core} and derives queue/DLQ names from the routing key
+ * ({@code rk} → main queue {@code rk.queue}, DLQ {@code rk.dlq}); these constants follow the
+ * same convention and are the single source of truth for the names.
  */
 public final class OrderEventRouting {
 
     private OrderEventRouting() {}
 
-    /** Routing key for events.exchange / events.dlx (dead-letter routing key) / retry-tier prefix. */
-    public static final String ROUTING_KEY = "orders.created";
+    // ---- orders.created ----
+    public static final String CREATED_ROUTING_KEY = "orders.created";
+    public static final String CREATED_QUEUE       = "orders.created.queue";
+    public static final String CREATED_DLQ         = "orders.created.dlq";
 
-    /** Main queue bound to events.exchange with {@link #ROUTING_KEY}. */
-    public static final String QUEUE_NAME = "orders.created.queue";
+    // ---- orders.shipped ----
+    public static final String SHIPPED_ROUTING_KEY = "orders.shipped";
+    public static final String SHIPPED_QUEUE       = "orders.shipped.queue";
+    public static final String SHIPPED_DLQ         = "orders.shipped.dlq";
 
-    /** Dead-letter queue bound to events.dlx with {@link #ROUTING_KEY}. */
-    public static final String DLQ_NAME = "orders.created.dlq";
+    // ---- orders.cancelled ----
+    public static final String CANCELLED_ROUTING_KEY = "orders.cancelled";
+    public static final String CANCELLED_QUEUE       = "orders.cancelled.queue";
+    public static final String CANCELLED_DLQ         = "orders.cancelled.dlq";
 }

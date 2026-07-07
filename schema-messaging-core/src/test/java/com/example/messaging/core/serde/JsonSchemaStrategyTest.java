@@ -23,7 +23,7 @@ class JsonSchemaStrategyTest {
 
     private static final String SCHEMA_JSON = """
             {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "$schema": "http://json-schema.org/draft-07/schema#",
               "type": "object",
               "properties": {
                 "name": { "type": "string" },

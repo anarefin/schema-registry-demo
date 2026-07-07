@@ -13,8 +13,8 @@ topology.
 | Spec §18 criterion | Demonstrated by |
 |---|---|
 | Cold `compose up` → all services healthy | `docker compose up`, healthchecks |
-| Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs |
-| Two artifacts with ≥2 versions, FORWARD compat rule on both | `apicurio-registry:register` (v1 + v2) |
+| Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs (all six events) |
+| Six artifacts with FORWARD compat rules | `apicurio-registry:register` + bootstrap workflow |
 | Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
 | Registry down → cached processing, new messages fail gracefully | `SchemaResolver` last-known-good |
@@ -43,8 +43,9 @@ No system Maven installation needed. The wrapper downloads Maven 3.9.11 automati
 ./mvnw clean install -DskipTests
 ```
 
-Compiles all five modules, runs code generation (jsonschema2pojo), and installs
-JARs into the local Maven repository. Skip tests for speed; run them later with `./mvnw verify`.
+Compiles all seven modules, generates JSON Schemas from the code-first records via
+`schema-gen-tools`, and installs JARs into the local Maven repository. Skip tests for speed;
+run them later with `./mvnw verify`.
 
 ### 2. Start infrastructure
 
@@ -71,23 +72,25 @@ JSON Schema checker, adding a property (even an optional/permissive one) is clas
 under FORWARD.
 
 ```bash
-# 1. Register all schemas (order + customer: v1 + v2; payment: v1)
-./mvnw -pl order-contracts,customer-contracts,payment-contracts apicurio-registry:register \
+# 1. Register all six schemas (three per domain — generated from code-first records)
+./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
 
-# 2. Attach the compatibility rules (register does not do this)
-curl -s -o /dev/null -X POST \
-  "http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
-  -H 'Content-Type: application/json' \
-  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
-curl -s -o /dev/null -X POST \
-  "http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
-  -H 'Content-Type: application/json' \
-  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
-curl -s -o /dev/null -X POST \
-  "http://localhost:8080/apis/registry/v3/groups/events.payments/artifacts/PaymentProcessed/rules" \
-  -H 'Content-Type: application/json' \
-  -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
+# 2. Attach FORWARD compatibility rules (register does not do this)
+#    Easiest: run the Schema Governance Bootstrap workflow, or POST each artifact:
+for pair in \
+  events.orders/OrderCreated \
+  events.orders/OrderShipped \
+  events.orders/OrderCancelled \
+  events.customers/CustomerRegistered \
+  events.customers/CustomerAddressAdded \
+  events.customers/CustomerTierChanged; do
+  group="${pair%/*}" artifact="${pair#*/}"
+  curl -s -o /dev/null -X POST \
+    "http://localhost:8080/apis/registry/v3/groups/${group}/artifacts/${artifact}/rules" \
+    -H 'Content-Type: application/json' \
+    -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
+done
 ```
 
 Step 2 can also be run via the **Schema Governance Bootstrap** GitHub workflow
@@ -107,16 +110,36 @@ Two separate terminals:
 
 ### 4. Demo: publish messages
 
+All six events have REST endpoints on the producer (:8081). Each maps a request DTO to the
+code-first record and publishes via `EventPublisher`; `SchemaAwareMessageConverter` validates
+before send.
+
 ```bash
-# Publish an order event (JSON Schema → events.orders)
+# --- Orders (events.orders) ---
 curl -s -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
-  -d '{"customerId":"cust-1","productId":"prod-42","quantity":2,"totalAmount":99.99,"currency":"USD"}'
+  -d '{"customerId":"11111111-1111-1111-1111-111111111111","productId":"22222222-2222-2222-2222-222222222222","quantity":2,"totalAmount":99.99,"currency":"USD"}'
 
-# Publish a customer event (JSON Schema → events.customers)
+curl -s -X POST http://localhost:8081/api/orders/ship \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"33333333-3333-3333-3333-333333333333","trackingNumber":"1Z999AA10123456784","carrier":"UPS"}'
+
+curl -s -X POST http://localhost:8081/api/orders/cancel \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"33333333-3333-3333-3333-333333333333","reason":"Customer request","refundAmount":49.99}'
+
+# --- Customers (events.customers) ---
 curl -s -X POST http://localhost:8081/api/customers \
   -H "Content-Type: application/json" \
   -d '{"email":"alice@example.com","firstName":"Alice","lastName":"Smith","phoneNumber":"+15551234567"}'
+
+curl -s -X POST http://localhost:8081/api/customers/address \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"44444444-4444-4444-4444-444444444444","address":{"line1":"221B Baker Street","city":"London","postalCode":"NW1 6XE","countryCode":"GB"}}'
+
+curl -s -X POST http://localhost:8081/api/customers/tier \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"44444444-4444-4444-4444-444444444444","previousTier":"BRONZE","newTier":"GOLD"}'
 ```
 
 Consumer logs confirm receipt and full deserialization. Check `X-Schema-*` headers in RabbitMQ
@@ -147,17 +170,13 @@ routing key, failed-at, retry-count).
 
 ### 7. Demo: schema evolution — accept and reject
 
-**Accepted:** add an optional property — FORWARD-compatible for both artifacts
-(`promoCode` etc. on `OrderCreated`, `promoCode`/`input1` on `CustomerRegistered`).
-Apicurio rejects JSON property additions under BACKWARD, which is why both artifacts
-use a FORWARD rule.
+**Accepted:** add an optional property to a record — FORWARD-compatible for all six artifacts.
+Regenerate the schema (`./mvnw -pl schema-gen-tools -am process-classes`), commit, then register.
 
 ```bash
-# Register v2 (optional promoCode etc. already present in order-created.json)
+# After adding an optional field to OrderCreated and regenerating the schema:
 ./mvnw -pl order-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
-
-# ≥2 versions visible in Apicurio UI → events.orders / OrderCreated
 ```
 
 **Rejected (incompatible):** changing an existing property's type (`quantity` integer → string)

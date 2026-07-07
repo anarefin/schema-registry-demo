@@ -8,23 +8,24 @@ name: Schema Compatibility Check
 #
 # Prereqs (see docs/self-hosted-runner-setup.md):
 #   - `docker compose up -d` is running on the runner host (registry healthy; the host cold-start
-#     step in README §2 has seeded all artifacts + their compatibility rules — FORWARD for
-#     OrderCreated, CustomerRegistered, and PaymentProcessed, all JSON Schema artifacts).
+#     step in README §2 has seeded all six artifacts + their FORWARD compatibility rules — all
+#     JSON Schema artifacts).
 #   - the runner is labelled `apicurio-local` and has JDK 25 + ~/.m2/toolchains.xml.
+#
+# Data-driven: the module list is DISCOVERED from every `*-contracts` directory that carries a
+# pom.xml, so adding a new domain (e.g. `shipping-contracts`) needs no workflow edit.
 
 on:
   pull_request:
     paths:
-      - 'order-contracts/**'
-      - 'customer-contracts/**'
-      - 'payment-contracts/**'
+      - '*-contracts/**'
 
 env:
   REGISTRY_URL: http://localhost:8080
 
 jobs:
   compat-check:
-    name: Compatibility check (orders + customers + payments)
+    name: Compatibility check (all contract modules)
     runs-on: [self-hosted, apicurio-local]
 
     steps:
@@ -38,8 +39,16 @@ jobs:
           distribution: temurin
           java-version: '25'
 
+      - name: Discover contract modules
+        id: modules
+        # Every top-level `*-contracts` dir with a pom.xml becomes a `-pl` entry (comma-joined).
+        run: |
+          PL=$(for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done | sort | paste -sd, -)
+          echo "pl=$PL" >> "$GITHUB_OUTPUT"
+          echo "Discovered contract modules: $PL"
+
       - name: Run compatibility check (dry-run, no writes)
         run: |
-          ./mvnw -pl order-contracts,customer-contracts,payment-contracts verify -Pcompat-check \
+          ./mvnw -pl ${{ steps.modules.outputs.pl }} verify -Pcompat-check \
             -Dapicurio.registry.url=${REGISTRY_URL} \
             --no-transfer-progress

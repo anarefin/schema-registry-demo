@@ -18,7 +18,8 @@
     <module>customer-contracts</module>
     <module>producer-service</module>
     <module>consumer-service</module>
-    <module>payment-contracts</module>
+    <!-- Build-only: generates every contract's JSON Schema from its Java record (sole victools home). -->
+    <module>schema-gen-tools</module>
   </modules>
 
   <!-- T-0.3: single source of versions. Module POMs inherit and never re-declare. -->
@@ -31,6 +32,9 @@
 
     <!-- Pinned spec §3 versions -->
     <apicurio.version>3.2.0</apicurio.version>
+    <!-- Default registry URL for the apicurio plugin (register / compat-check / incompatible-demo).
+         Override on the CLI: -Dapicurio.registry.url=http://host:8080 -->
+    <apicurio.registry.url>http://localhost:8080</apicurio.registry.url>
     <networknt-json-schema-validator.version>1.5.6</networknt-json-schema-validator.version>
     <caffeine.version>3.1.8</caffeine.version>
     <testcontainers.version>1.20.4</testcontainers.version>
@@ -41,10 +45,9 @@
     <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
     <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
     <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
-    <jsonschema2pojo-maven-plugin.version>1.2.2</jsonschema2pojo-maven-plugin.version>
     <apicurio-registry-maven-plugin.version>3.2.0</apicurio-registry-maven-plugin.version>
 
-    <!-- Code-first schema generation (payment-contracts) -->
+    <!-- Code-first schema generation (schema-gen-tools) -->
     <victools.version>4.38.0</victools.version>
     <jakarta.validation-api.version>3.1.1</jakarta.validation-api.version>
     <exec-maven-plugin.version>3.5.0</exec-maven-plugin.version>
@@ -77,7 +80,7 @@
         <version>${apicurio.version}</version>
       </dependency>
 
-      <!-- victools jsonschema-generator + modules (code-first, payment-contracts) -->
+      <!-- victools jsonschema-generator + modules (code-first, schema-gen-tools) -->
       <dependency>
         <groupId>com.github.victools</groupId>
         <artifactId>jsonschema-generator</artifactId>
@@ -160,6 +163,19 @@
           <artifactId>exec-maven-plugin</artifactId>
           <version>${exec-maven-plugin.version}</version>
         </plugin>
+
+        <!-- Schema governance (spec code-first D4). The plugin version + shared registryUrl live
+             here once; each contract POM declares the plugin with only its per-artifact
+             coordinates (the <artifacts> list). The compat-check / incompatible-demo profiles
+             below reuse that same plugin declaration, so nothing is copy-pasted per domain. -->
+        <plugin>
+          <groupId>io.apicurio</groupId>
+          <artifactId>apicurio-registry-maven-plugin</artifactId>
+          <version>${apicurio-registry-maven-plugin.version}</version>
+          <configuration>
+            <registryUrl>${apicurio.registry.url}</registryUrl>
+          </configuration>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -199,4 +215,81 @@
       </plugin>
     </plugins>
   </build>
+
+  <!-- Schema-governance profiles (spec code-first D4). Defined once here and inherited by every
+       contract module. Each profile only adds a dry-run `register` execution on the apicurio
+       plugin; the artifact coordinates come from the contract POM:
+         - compat-check     reuses the module's plugin-level <artifacts> (the generated schemas),
+                            so the CI merge gate validates exactly what `register` would publish.
+         - incompatible-demo overrides that list with the single incompatible test resource the
+                            module names via the apicurio.incompatible.* properties.
+       Both require a running registry; override its URL with -Dapicurio.registry.url=. -->
+  <profiles>
+    <!-- CI merge gate: dry-run register every generated schema; an incompatible change fails the
+         goal and fails the merge. Requires a running registry:
+         ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check -->
+    <profile>
+      <id>compat-check</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.apicurio</groupId>
+            <artifactId>apicurio-registry-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>compat-gate</id>
+                <phase>verify</phase>
+                <goals><goal>register</goal></goals>
+                <configuration>
+                  <dryRun>true</dryRun>
+                  <!-- <artifacts> inherited from the module's plugin-level <configuration>. -->
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!-- Incompatible-change demo: dry-run register a schema that changes an existing property's
+         type — incompatible under every level. MUST fail with a clear compatibility rejection
+         (requires a prior registered version + FORWARD rule). The module supplies the one
+         incompatible resource via apicurio.incompatible.{group,artifact,file}:
+         ./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080 -->
+    <profile>
+      <id>incompatible-demo</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.apicurio</groupId>
+            <artifactId>apicurio-registry-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>incompatible-compat-check</id>
+                <phase>verify</phase>
+                <goals><goal>register</goal></goals>
+                <configuration>
+                  <dryRun>true</dryRun>
+                  <!-- Replace (not append to) any inherited plugin-level <artifacts>. -->
+                  <artifacts combine.self="override">
+                    <artifact>
+                      <groupId>${apicurio.incompatible.group}</groupId>
+                      <artifactId>${apicurio.incompatible.artifact}</artifactId>
+                      <file>${apicurio.incompatible.file}</file>
+                      <artifactType>JSON</artifactType>
+                      <!-- Force a new-version registration so the FORWARD rule actually adjudicates
+                           the change. Without this the goal defaults to ifExists=FAIL and dies with
+                           ArtifactAlreadyExistsException *before* the compatibility check runs,
+                           masking the real (compatibility) rejection this demo is meant to show. -->
+                      <ifExists>CREATE_VERSION</ifExists>
+                    </artifact>
+                  </artifacts>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

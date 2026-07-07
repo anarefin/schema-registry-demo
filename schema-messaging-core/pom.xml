@@ -55,6 +55,15 @@
       <artifactId>jackson-databind</artifactId>
     </dependency>
 
+    <!-- Jackson 2 JSR-310 datatype module: serializes java.time.Instant (event createdAt/
+         registeredAt fields) as ISO-8601 strings. Spring Boot 4.0's jackson starter ships
+         Jackson 3 (tools.jackson), so this Jackson 2 module is NOT otherwise on the classpath
+         and findAndRegisterModules() would skip java.time support without it. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+    </dependency>
+
     <!-- T-6.5: Health indicators (optional — only wired when actuator is on classpath) -->
     <dependency>
       <groupId>org.springframework.boot</groupId>

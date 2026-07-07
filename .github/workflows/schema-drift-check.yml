@@ -1,18 +1,24 @@
 name: Schema Drift Check
 
-# Offline gate: regenerates the JSON Schema from the Java Record and fails if the committed
-# artifact differs. Runs without a registry — pure local Maven build.
+# Offline gate: regenerates every JSON Schema from its Java Record (via the shared build-only
+# `schema-gen-tools` module) and fails if any committed artifact differs. Runs without a registry —
+# pure local Maven build.
 #
-# Catches: POJO annotation changes that weren't followed by a schema regeneration + commit.
+# Catches: record/annotation changes that weren't followed by a schema regeneration + commit.
+#
+# Data-driven: `schema-gen-tools` regenerates every target listed in GeneratedSchemas.ALL, writing
+# into each owning contract module's src/main/resources/schemas/. Adding a domain needs no edit
+# here — the diff globs every `*-contracts` schemas dir.
 
 on:
   pull_request:
     paths:
-      - 'payment-contracts/**'
+      - '*-contracts/**'
+      - 'schema-gen-tools/**'
 
 jobs:
   drift-check:
-    name: Drift check (payment-contracts)
+    name: Drift check (all contract modules)
     runs-on: ubuntu-latest
 
     steps:
@@ -26,8 +32,10 @@ jobs:
           java-version: '25'
           cache: maven
 
-      - name: Regenerate schema
-        run: ./mvnw -pl payment-contracts process-classes --no-transfer-progress
+      - name: Regenerate all schemas
+        # `-am` also-builds the contract modules the generator depends on; the exec-maven-plugin
+        # bound to process-classes writes every schema into its owning contract module.
+        run: ./mvnw -pl schema-gen-tools -am process-classes --no-transfer-progress
 
-      - name: Fail if schema differs from committed artifact
-        run: git diff --exit-code -- payment-contracts/src/main/resources/schemas/
+      - name: Fail if any schema differs from its committed artifact
+        run: git diff --exit-code -- '*-contracts/src/main/resources/schemas/'

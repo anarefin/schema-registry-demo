@@ -37,8 +37,9 @@ class ProducerValidationTest {
         mockMvc.perform(post("/api/orders")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"customerId":"c1","productId":"p1","quantity":1,
-                                 "totalAmount":9.99,"currency":"USD"}
+                                {"customerId":"11111111-1111-1111-1111-111111111111",
+                                 "productId":"22222222-2222-2222-2222-222222222222",
+                                 "quantity":1,"totalAmount":9.99,"currency":"USD"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Schema validation failed")));
