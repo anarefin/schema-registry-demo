@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>schema-registry-demo-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <!-- Domain-agnostic AMQP topology-building kit (spec contract-owned-amqp-topology D1/D5).
+       Reusable retry-ladder + naming-convention logic depended on only by order-contracts and
+       customer-contracts. Stays a pure leaf module: no dependency on schema-messaging-core or
+       either *-contracts module in either direction. -->
+  <artifactId>amqp-topology-kit</artifactId>
+  <packaging>jar</packaging>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.amqp</groupId>
+      <artifactId>spring-rabbit</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Keep this module a pure leaf: no dependency on core or either contracts module (spec
+           contract-owned-amqp-topology Principle 2). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>ban-core-and-contracts-modules</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>com.example:schema-messaging-core</exclude>
+                    <exclude>com.example:order-contracts</exclude>
+                    <exclude>com.example:customer-contracts</exclude>
+                  </excludes>
+                  <message>amqp-topology-kit must stay a pure leaf module (no dependency on core or any *-contracts module).</message>
+                </bannedDependencies>
+              </rules>
+              <fail>true</fail>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

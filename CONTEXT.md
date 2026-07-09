@@ -34,7 +34,7 @@ account identified by `customerId`.
 
 | Term | Meaning |
 |------|---------|
-| **Contract** | A Maven module (`*-contracts`) holding event records, generated JSON Schemas, and routing constants. Transport-agnostic — no Spring/AMQP on the classpath. |
+| **Contract** | A Maven module (`*-contracts`) holding event records, generated JSON Schemas, routing constants, and — since `spec/contract-owned-amqp-topology.md` — that domain's AMQP topology auto-configuration (exchanges, queues, DLQs, retry ladder). |
 | **Code-first / source of truth** | The Java **record** (with validation annotations) is authored by developers. The JSON Schema is **generated**, never hand-edited. |
 | **Generated schema** | The committed `*.schema.json` file under `src/main/resources/schemas/`, produced by `schema-gen-tools` from the record via victools. |
 | **Registry group / artifact** | Apicurio coordinates: `group` (e.g. `events.orders`) + `artifact-id` (e.g. `OrderCreated`). Each event maps to one artifact with a **FORWARD** compatibility rule. |
@@ -47,7 +47,9 @@ account identified by `customerId`.
 | Module | Role |
 |--------|------|
 | `schema-gen-tools` | Build-only schema generator (victools). Never on service classpath. |
-| `schema-messaging-core` | Domain-agnostic messaging library (converter, resolver, AMQP topology). |
+| `schema-messaging-core` | Domain-agnostic messaging library (converter, resolver, schema-resolution wiring). No AMQP topology — see `amqp-topology-kit`. |
+| `amqp-topology-kit` | Domain-agnostic AMQP topology-building library (naming conventions, retry-ladder factory). Depended on only by `order-contracts` / `customer-contracts`. |
 | `producer-service` / `consumer-service` | Spring Boot demo apps (:8081 / :8082). |
 
-See `docs/adr/0001-code-first-schema-generation.md` for the architectural decision record.
+See `docs/adr/0001-code-first-schema-generation.md` for the code-first schema decision, and
+`docs/adr/0002-contract-owned-amqp-topology.md` for the AMQP topology ownership reversal.

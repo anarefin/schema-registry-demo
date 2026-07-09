@@ -10,10 +10,13 @@
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
-  <!-- Code-first order contracts (spec code-first D2/D4). PURE contract jar: the annotated event
-       records are the source of truth, their JSON Schemas are generated (by schema-gen-tools) and
-       committed under resources/schemas/. No victools and no Spring/AMQP on the classpath — only
-       Jackson (records) + Jakarta Validation (annotations read at generation time). -->
+  <!-- Code-first order contracts (spec code-first D2/D4; topology ownership per spec
+       contract-owned-amqp-topology). The annotated event records are the source of truth, their
+       JSON Schemas are generated (by schema-gen-tools) and committed under resources/schemas/.
+       No victools on the classpath — only Jackson (records) + Jakarta Validation (annotations
+       read at generation time) + spring-rabbit/spring-boot-autoconfigure + amqp-topology-kit,
+       since this module self-activates its own domain-scoped AMQP topology
+       (OrderTopologyAutoConfiguration). -->
   <artifactId>order-contracts</artifactId>
   <packaging>jar</packaging>
 
@@ -34,6 +37,21 @@
     <dependency>
       <groupId>jakarta.validation</groupId>
       <artifactId>jakarta.validation-api</artifactId>
+    </dependency>
+
+    <!-- This domain owns its own AMQP topology (spec contract-owned-amqp-topology D2). -->
+    <dependency>
+      <groupId>org.springframework.amqp</groupId>
+      <artifactId>spring-rabbit</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>amqp-topology-kit</artifactId>
+      <version>${project.version}</version>
     </dependency>
 
     <dependency>
@@ -87,6 +105,32 @@
             </artifact>
           </artifacts>
         </configuration>
+      </plugin>
+
+      <!-- No contracts <-> core dependency in either direction (spec contract-owned-amqp-topology
+           Principle 2). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>ban-core-module</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>com.example:schema-messaging-core</exclude>
+                  </excludes>
+                  <message>order-contracts must not depend on schema-messaging-core (contracts and core must not depend on each other).</message>
+                </bannedDependencies>
+              </rules>
+              <fail>true</fail>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

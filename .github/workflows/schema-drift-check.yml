@@ -38,4 +38,4 @@ jobs:
         run: ./mvnw -pl schema-gen-tools -am process-classes --no-transfer-progress
 
       - name: Fail if any schema differs from its committed artifact
-        run: git diff --exit-code -- '*-contracts/src/main/resources/schemas/'
+        run: git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'

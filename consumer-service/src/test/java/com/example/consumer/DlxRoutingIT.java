@@ -2,7 +2,6 @@ package com.example.consumer;
 
 import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
-import com.example.messaging.core.amqp.EventExchanges;
 import com.example.consumer.listener.CustomerEventListener;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.exception.SchemaNotFoundException;
@@ -106,7 +105,7 @@ class DlxRoutingIT {
      */
     @Test
     void tc52_53_57_deserializationPoisonRoutesToDlqWithHeaders() {
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
+        sendRaw(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
                 "{INVALID_JSON".getBytes(StandardCharsets.UTF_8));
 
         Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ);
@@ -139,7 +138,7 @@ class DlxRoutingIT {
         when(apicurioClient.fetchByCoordinates(any()))
                 .thenThrow(new SchemaNotFoundException("coordinates"));
 
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
+        sendRaw(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
                 "{}".getBytes(StandardCharsets.UTF_8));
 
         Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ, 15);
@@ -162,7 +161,7 @@ class DlxRoutingIT {
         }).when(customerEventListener).onCustomerRegistered(any());
 
         byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-        sendRaw(EventExchanges.EVENTS_EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY, validJson);
+        sendRaw(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY, validJson);
 
         // 4 calls = initial delivery + 3 retries via TTL queues
         await().atMost(10, TimeUnit.SECONDS)

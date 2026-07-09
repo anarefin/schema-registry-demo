@@ -27,4 +27,13 @@ public final class CustomerEventRouting {
     public static final String TIER_CHANGED_ROUTING_KEY = "customers.tier-changed";
     public static final String TIER_CHANGED_QUEUE       = "customers.tier-changed.queue";
     public static final String TIER_CHANGED_DLQ         = "customers.tier-changed.dlq";
+
+    // ---- domain-scoped exchanges (spec contract-owned-amqp-topology D2) ----
+    public static final String EXCHANGE       = "events.customers.exchange";
+    public static final String DLX            = "events.customers.dlx";
+    public static final String RETRY_EXCHANGE = "events.customers.retry.exchange";
+
+    public static final String BEAN_EXCHANGE       = "customersExchange";
+    public static final String BEAN_DLX            = "customersDlx";
+    public static final String BEAN_RETRY_EXCHANGE = "customersRetryExchange";
 }

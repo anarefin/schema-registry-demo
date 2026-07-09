@@ -3,9 +3,9 @@ package com.example.producer.controller;
 import com.example.contracts.customers.Address;
 import com.example.contracts.customers.CustomerAddressAdded;
 import com.example.contracts.customers.CustomerRegistered;
+import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerTier;
 import com.example.contracts.customers.CustomerTierChanged;
-import com.example.messaging.core.amqp.EventExchanges;
 import com.example.messaging.core.publisher.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,7 +47,7 @@ public class CustomerController {
                 request.lastName(),
                 request.phoneNumber(),
                 Instant.now());
-        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        eventPublisher.publish(CustomerEventRouting.EXCHANGE, event);
         log.info("Published CustomerRegistered customerId={}", event.customerId());
     }
 
@@ -58,7 +58,7 @@ public class CustomerController {
                 request.customerId(),
                 request.address(),
                 Instant.now());
-        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        eventPublisher.publish(CustomerEventRouting.EXCHANGE, event);
         log.info("Published CustomerAddressAdded customerId={}", event.customerId());
     }
 
@@ -70,7 +70,7 @@ public class CustomerController {
                 request.previousTier(),
                 request.newTier(),
                 Instant.now());
-        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        eventPublisher.publish(CustomerEventRouting.EXCHANGE, event);
         log.info("Published CustomerTierChanged customerId={} newTier={}",
                 event.customerId(), event.newTier());
     }

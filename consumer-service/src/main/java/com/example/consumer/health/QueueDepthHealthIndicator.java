@@ -1,6 +1,6 @@
 package com.example.consumer.health;
 
-import com.example.messaging.core.amqp.EventTopologyAutoConfiguration;
+import com.example.amqp.topology.TopologyNaming;
 import com.example.messaging.core.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.slf4j.Logger;
@@ -42,8 +42,8 @@ public class QueueDepthHealthIndicator implements HealthIndicator {
 
             for (TypeMapping mapping : typeMappingRegistry.all()) {
                 String rk = mapping.routingKey();
-                int dlqDepth = queueDepth(rk + EventTopologyAutoConfiguration.DLQ_SUFFIX, details);
-                queueDepth(rk + EventTopologyAutoConfiguration.QUEUE_SUFFIX, details);
+                int dlqDepth = queueDepth(TopologyNaming.dlqName(rk), details);
+                queueDepth(TopologyNaming.queueName(rk), details);
                 if (dlqDepth > 0) {
                     dlqEmpty = false;
                 }

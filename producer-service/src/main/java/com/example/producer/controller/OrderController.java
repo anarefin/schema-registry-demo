@@ -4,7 +4,6 @@ import com.example.contracts.orders.OrderCancelled;
 import com.example.contracts.orders.OrderCreated;
 import com.example.contracts.orders.OrderEventRouting;
 import com.example.contracts.orders.OrderShipped;
-import com.example.messaging.core.amqp.EventExchanges;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.publisher.EventPublisher;
 import org.slf4j.Logger;
@@ -55,7 +54,7 @@ public class OrderController {
                 request.totalAmount(),
                 request.currency(),
                 Instant.now());
-        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        eventPublisher.publish(OrderEventRouting.EXCHANGE, event);
         log.info("Published OrderCreated orderId={}", event.orderId());
     }
 
@@ -67,7 +66,7 @@ public class OrderController {
                 request.trackingNumber(),
                 request.carrier(),
                 Instant.now());
-        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        eventPublisher.publish(OrderEventRouting.EXCHANGE, event);
         log.info("Published OrderShipped orderId={}", event.orderId());
     }
 
@@ -79,14 +78,14 @@ public class OrderController {
                 request.reason(),
                 request.refundAmount(),
                 Instant.now());
-        eventPublisher.publish(EventExchanges.EVENTS_EXCHANGE, event);
+        eventPublisher.publish(OrderEventRouting.EXCHANGE, event);
         log.info("Published OrderCancelled orderId={}", event.orderId());
     }
 
     /**
-     * Bypass-validation poison demo — publishes a malformed payload directly to events.exchange with
-     * valid X-Schema-* headers but garbage bytes. The consumer fails schema validation (unparseable
-     * JSON) → DLQ. FOR DEMO/TEST USE ONLY.
+     * Bypass-validation poison demo — publishes a malformed payload directly to
+     * {@link OrderEventRouting#EXCHANGE} with valid X-Schema-* headers but garbage bytes. The
+     * consumer fails schema validation (unparseable JSON) → DLQ. FOR DEMO/TEST USE ONLY.
      *
      * <p>curl -X POST http://localhost:8081/api/orders/poison
      */
@@ -99,7 +98,7 @@ public class OrderController {
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
         props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
         byte[] garbage = "{NOT_VALID_JSON".getBytes(StandardCharsets.UTF_8);
-        rabbitTemplate.send(EventExchanges.EVENTS_EXCHANGE, OrderEventRouting.CREATED_ROUTING_KEY,
+        rabbitTemplate.send(OrderEventRouting.EXCHANGE, OrderEventRouting.CREATED_ROUTING_KEY,
                 new Message(garbage, props));
         log.warn("Published poison message to orders.created (bypass-validation demo)");
     }

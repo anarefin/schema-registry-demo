@@ -69,9 +69,10 @@ public class EventConsumerSupport {
         String routingKey = props.getReceivedRoutingKey() != null
                 ? props.getReceivedRoutingKey() : "unknown";
         int retryCount = SchemaMessageHeaders.getRetryCount(props);
+        Throwable root = rootCause(cause);
 
         props.setHeader(SchemaMessageHeaders.FAILURE_REASON, decision.name());
-        props.setHeader(SchemaMessageHeaders.FAILURE_MESSAGE, truncate(cause.getMessage(), 512));
+        props.setHeader(SchemaMessageHeaders.FAILURE_MESSAGE, truncate(root.getMessage(), 512));
         props.setHeader(SchemaMessageHeaders.FAILURE_STACK_TRACE, truncate(stackTrace(cause), MAX_STACK_TRACE_BYTES));
         props.setHeader(SchemaMessageHeaders.FAILURE_ROUTING_KEY, routingKey);
         props.setHeader(SchemaMessageHeaders.FAILURE_FAILED_AT, Instant.now().toString());
@@ -79,14 +80,27 @@ public class EventConsumerSupport {
 
         if (decision == RoutingDecision.DLQ_DIRECT) {
             log.error("Permanent failure [{}] routing=DLQ_DIRECT retries={}: {}",
-                    cause.getClass().getSimpleName(), retryCount, cause.getMessage(), cause);
+                    root.getClass().getSimpleName(), retryCount, root.getMessage(), cause);
         } else {
             log.warn("Transient failure [{}] routing=RETRY retries={}: {}",
-                    cause.getClass().getSimpleName(), retryCount, cause.getMessage());
+                    root.getClass().getSimpleName(), retryCount, root.getMessage());
         }
     }
 
     // ---- private ----------------------------------------------------------
+
+    /**
+     * Walks to the deepest cause so DLQ headers/logs surface the actual failure (e.g.
+     * {@code SchemaValidationException}) rather than Spring AMQP's generic wrapper
+     * ({@code ListenerExecutionFailedException: "Failed to convert message"}).
+     */
+    private static Throwable rootCause(Throwable t) {
+        Throwable current = t;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
 
     private static String stackTrace(Throwable t) {
         StringWriter sw = new StringWriter();

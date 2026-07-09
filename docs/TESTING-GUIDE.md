@@ -43,8 +43,9 @@ Six event types flow through this system, three per domain:
 ./mvnw clean install -DskipTests
 ```
 
-Builds all six modules (`schema-messaging-core`, `order-contracts`, `customer-contracts`,
-`producer-service`, `consumer-service`, plus the build-only `schema-gen-tools`) and, as part of
+Builds all six runtime/library modules (`schema-messaging-core`, `amqp-topology-kit`,
+`order-contracts`, `customer-contracts`, `producer-service`, `consumer-service`, plus the
+build-only `schema-gen-tools`, seven total) and, as part of
 `schema-gen-tools`' `process-classes` phase, regenerates all six JSON Schemas from the code-first
 records. Expect `BUILD SUCCESS`.
 
@@ -70,7 +71,7 @@ This is exactly what `.github/workflows/schema-drift-check.yml` runs on every PR
 
 ```bash
 ./mvnw -pl schema-gen-tools -am process-classes
-git diff --exit-code -- '*-contracts/src/main/resources/schemas/'
+git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
 ```
 
 Expect no diff (exit code `0`) — the committed `.schema.json` files are byte-identical to what
@@ -84,11 +85,11 @@ regenerated.
 # on OrderCreated.quantity() in order-contracts, then:
 ./mvnw -pl schema-gen-tools -am process-classes
 git diff -- '*-contracts/src/main/resources/schemas/order-created.schema.json'   # see the diff
-git diff --exit-code -- '*-contracts/src/main/resources/schemas/'                # now exits 1
+git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # now exits 1
 
 git checkout -- order-contracts/src/main/java/com/example/contracts/orders/OrderCreated.java
 ./mvnw -pl schema-gen-tools -am process-classes   # regenerate back to the committed baseline
-git diff --exit-code -- '*-contracts/src/main/resources/schemas/'                # back to exit 0
+git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # back to exit 0
 ```
 
 **What you verified:** schema generation is deterministic, and any drift between a Java record and
@@ -359,7 +360,8 @@ orders.created.queue  →  orders.created.retry.5s  →  orders.created.retry.30
 (Retry queue names have **no** `.queue` suffix — they're named directly `<routingKey>.retry.<tier>`.)
 Exact TTLs, so you know how long to wait at each hop: **tier 0 = 5000ms (5s)**, **tier 1 = 30000ms
 (30s)**, **tier 2 = 300000ms (5m)** (`events.retry.tier0.ms`/`tier1.ms`/`tier2.ms`). Each retry queue
-dead-letters back into `events.exchange` with the *original* routing key on TTL expiry, landing the
+dead-letters back into that event's domain exchange (e.g. `events.orders.exchange` for order
+events) with the *original* routing key on TTL expiry, landing the
 message back on the main queue for redelivery; `X-Retry-Count` increments by one on each hop (`0`→
 `1`→`2`→`3`). Once `X-Retry-Count` reaches 3 (the length of the TTL array), the next failure is
 forced to `DLQ_DIRECT` regardless of classification, and only then are the `X-Failure-*` headers

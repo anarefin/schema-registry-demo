@@ -18,6 +18,11 @@ import org.springframework.amqp.rabbit.retry.MessageRecoverer;
  *       with routing key {@code <original-routing-key>.retry.<tier>} (TTL queue for that tier).</li>
  *   <li>Transient failure with {@code X-Retry-Count} ≥ maxRetries → dlxExchange.</li>
  * </ul>
+ *
+ * <p>The DLX/retry exchange names are no longer fixed configuration — each domain owns its own
+ * exchanges (spec: contract-owned-amqp-topology.md), so this recoverer derives them per message
+ * from the message's actual received exchange (correct even for messages that already traversed
+ * the retry ladder, since retry queues dead-letter back to the main exchange before re-delivery).
  */
 public class DlxMessageRecoverer implements MessageRecoverer {
 
@@ -25,20 +30,14 @@ public class DlxMessageRecoverer implements MessageRecoverer {
 
     private final EventConsumerSupport consumerSupport;
     private final RabbitTemplate rabbitTemplate;
-    private final String dlxExchange;
-    private final String retryExchange;
     private final long[] retryDelaysMs;
 
     public DlxMessageRecoverer(
             EventConsumerSupport consumerSupport,
             RabbitTemplate rabbitTemplate,
-            String dlxExchange,
-            String retryExchange,
             long[] retryDelaysMs) {
         this.consumerSupport = consumerSupport;
         this.rabbitTemplate = rabbitTemplate;
-        this.dlxExchange = dlxExchange;
-        this.retryExchange = retryExchange;
         this.retryDelaysMs = retryDelaysMs;
     }
 
@@ -51,6 +50,9 @@ public class DlxMessageRecoverer implements MessageRecoverer {
         int retryCount = SchemaMessageHeaders.getRetryCount(props);
         String originalRoutingKey = props.getReceivedRoutingKey() != null
                 ? props.getReceivedRoutingKey() : "unknown";
+        String receivedExchange = props.getReceivedExchange();
+        String dlxExchange = receivedExchange.replaceFirst("\\.exchange$", ".dlx");
+        String retryExchange = receivedExchange.replaceFirst("\\.exchange$", ".retry.exchange");
 
         if (decision == RoutingDecision.DLQ_DIRECT || retryCount >= retryDelaysMs.length) {
             consumerSupport.populateFailureHeaders(message, ex, RoutingDecision.DLQ_DIRECT);

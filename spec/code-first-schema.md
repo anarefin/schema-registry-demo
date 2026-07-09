@@ -17,15 +17,23 @@ Companion to `spec/pojo-to-schema.md` (the generic workflow contract).
 
 ## Guiding Principles
 
+> **Principles 4 and 5 are superseded** by `spec/contract-owned-amqp-topology.md`, which
+> deliberately reverses the transport-agnostic / centralized-topology stance below: each
+> `*-contracts` module now owns its own domain-scoped AMQP topology (`spring-rabbit` +
+> `spring-boot-autoconfigure` on its classpath), and the reusable topology-building logic lives in
+> a new sibling module, `amqp-topology-kit`, not in `schema-messaging-core`. Retained here as
+> historical record; see the superseding spec for the current design.
+
 1. Developers author events as **Java Records** with validation annotations; the record is the
    source of truth.
 2. JSON Schema is **generated**, committed alongside the record, and never manually edited.
 3. Generation is **deterministic** (byte-stable) and lives in exactly one build-only module.
-4. The contract jars stay **pure** — no schema-generation dependency (victools) and **no
-   Spring/AMQP** on their classpath. A contract is transport-agnostic data + schema.
-5. **Reusable plumbing lives in `schema-messaging-core`, not in the contracts.** AMQP topology is a
+4. ~~The contract jars stay **pure** — no schema-generation dependency (victools) and **no
+   Spring/AMQP** on their classpath. A contract is transport-agnostic data + schema.~~
+   **Superseded** — see note above.
+5. ~~**Reusable plumbing lives in `schema-messaging-core`, not in the contracts.** AMQP topology is a
    transport concern; it is generated once in core and driven by contract metadata, never
-   hand-authored per domain.
+   hand-authored per domain.~~ **Superseded** — see note above.
 6. CI is the only publisher; every schema passes **drift** + **compatibility** gates first.
 7. The published schema is **self-documenting** (per-field descriptions from annotations).
 
@@ -120,6 +128,11 @@ in both POMs. Keep one adapted `*-incompatible.schema.json` test resource per do
 `jakarta.validation-api` compile only.
 
 ### D3 — Runtime wiring (all six events; topology owned by core)
+
+> **Superseded** by `spec/contract-owned-amqp-topology.md` D1–D4: topology ownership moved from
+> `schema-messaging-core` to each `*-contracts` module (via the new `amqp-topology-kit`), reversing
+> the "contracts carry no AMQP/Spring code" stance described below. Retained here as historical
+> record of the pre-reversal design.
 
 - **Contracts stay pure — plain routing constants only.** Each `*EventRouting` class holds
   `public static final String` constants (`ROUTING_KEY`, `QUEUE_NAME`, `DLQ_NAME`) per event,

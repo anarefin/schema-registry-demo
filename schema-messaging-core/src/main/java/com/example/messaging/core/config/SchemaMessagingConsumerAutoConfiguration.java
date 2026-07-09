@@ -27,18 +27,13 @@ import org.springframework.context.annotation.Bean;
  *       schema-aware converter and DLX routing advice.</li>
  * </ul>
  *
- * <p>Exchange names default to {@code events.dlx} / {@code events.retry.exchange} matching
- * the constants in both contract modules' {@code EventExchanges} — override via properties
- * {@code events.dlx} / {@code events.retry.exchange} if needed.
+ * <p>Each domain now owns its own DLX/retry exchange (spec: contract-owned-amqp-topology.md),
+ * declared by that domain's {@code *-contracts} module. There is no single global DLX/retry
+ * exchange to configure here — {@code DlxMessageRecoverer} derives the correct per-domain
+ * exchange from each message's received exchange instead.
  */
 @AutoConfiguration(after = SchemaMessagingAutoConfiguration.class)
 public class SchemaMessagingConsumerAutoConfiguration {
-
-    @Value("${events.dlx:events.dlx}")
-    private String dlxExchange;
-
-    @Value("${events.retry.exchange:events.retry.exchange}")
-    private String retryExchange;
 
     @Value("${events.retry.tier0.ms:5000}")   private long tier0Ms;
     @Value("${events.retry.tier1.ms:30000}")  private long tier1Ms;
@@ -56,7 +51,7 @@ public class SchemaMessagingConsumerAutoConfiguration {
             EventConsumerSupport consumerSupport,
             RabbitTemplate rabbitTemplate) {
         long[] delays = {tier0Ms, tier1Ms, tier2Ms};
-        return new DlxMessageRecoverer(consumerSupport, rabbitTemplate, dlxExchange, retryExchange, delays);
+        return new DlxMessageRecoverer(consumerSupport, rabbitTemplate, delays);
     }
 
     @Bean

@@ -27,4 +27,13 @@ public final class OrderEventRouting {
     public static final String CANCELLED_ROUTING_KEY = "orders.cancelled";
     public static final String CANCELLED_QUEUE       = "orders.cancelled.queue";
     public static final String CANCELLED_DLQ         = "orders.cancelled.dlq";
+
+    // ---- domain-scoped exchanges (spec contract-owned-amqp-topology D2) ----
+    public static final String EXCHANGE       = "events.orders.exchange";
+    public static final String DLX            = "events.orders.dlx";
+    public static final String RETRY_EXCHANGE = "events.orders.retry.exchange";
+
+    public static final String BEAN_EXCHANGE       = "ordersExchange";
+    public static final String BEAN_DLX            = "ordersDlx";
+    public static final String BEAN_RETRY_EXCHANGE = "ordersRetryExchange";
 }

@@ -14,6 +14,7 @@
 
   <modules>
     <module>schema-messaging-core</module>
+    <module>amqp-topology-kit</module>
     <module>order-contracts</module>
     <module>customer-contracts</module>
     <module>producer-service</module>

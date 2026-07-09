@@ -2,15 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project status: code-first migration complete (Phases R0–5)
+## Project status: code-first migration + contract-owned AMQP topology complete
 
-All phases in `spec/code-first-schema.md` are done. Planning documents live in `docs/`:
+All phases in `spec/code-first-schema.md` and `spec/contract-owned-amqp-topology.md` are done.
+Planning documents live in `docs/`:
 
 - `docs/POC-Implementation-Plan.md` — original POC phase plan (architecture, wire format,
   topology, failure model, acceptance criteria).
 - `docs/TODO.md` — checkbox execution breakdown with done-checks.
-- `spec/code-first-schema.md` — code-first contract specification (current source of truth).
-- `CONTEXT.md` — glossary; `docs/adr/0001-code-first-schema-generation.md` — ADR.
+- `spec/code-first-schema.md` — code-first contract specification. Its Guiding Principles 4/5 and
+  design section D3 (topology ownership) are **superseded** by `spec/contract-owned-amqp-topology.md`
+  — read historically for those sections; D1/D2/D4/D5/D6 (schema generation, governance, CI) still
+  apply.
+- `spec/contract-owned-amqp-topology.md` — current source of truth for AMQP topology ownership
+  (each `*-contracts` module owns its domain's exchanges/queues/DLQs/retry ladder).
+- `CONTEXT.md` — glossary; `docs/adr/0001-code-first-schema-generation.md` and
+  `docs/adr/0002-contract-owned-amqp-topology.md` — ADRs.
 
 ## What this is
 
@@ -34,7 +41,7 @@ The build uses the **committed Maven Wrapper** (`./mvnw`) — always prefer it o
 
 # Schema drift (offline — no registry)
 ./mvnw -pl schema-gen-tools -am process-classes
-git diff --exit-code -- '*-contracts/src/main/resources/schemas/'
+git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
 
 # Schema governance (official apicurio-registry-maven-plugin; requires a running registry)
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
@@ -85,20 +92,31 @@ Run a single test class/method with the standard Surefire/Failsafe selectors, e.
 
 ## Architecture (the big picture)
 
-Seven Maven modules (parent root = this directory):
+Eight Maven modules (parent root = this directory):
 
 - **`schema-messaging-core`** — domain-agnostic library (`jar`, no Spring Boot repackage).
-  All reusable plumbing lives here: converter, resolver, AMQP topology (`EventTopologyAutoConfiguration`
-  iterates `TypeMappingRegistry`).
+  All reusable plumbing lives here: converter, resolver, schema-resolution wiring. Owns **no**
+  AMQP topology — that now lives per-domain in the contracts modules (see `amqp-topology-kit`
+  below) — and is machine-forbidden from depending on either a `*-contracts` module or
+  `amqp-topology-kit`.
+- **`amqp-topology-kit`** — domain-agnostic AMQP topology-building library (naming conventions +
+  retry-ladder factory, `com.example.amqp.topology.*`). A pure leaf module: banned from depending
+  on core or either `*-contracts` module. Depended on only by `order-contracts` /
+  `customer-contracts`.
 - **`schema-gen-tools`** — build-only schema generator (victools). Depends on contract modules;
   writes generated `*.schema.json` into sibling modules at `process-classes`. **Never** on service
   runtime classpath.
 - **`order-contracts`** — three code-first order event records + generated schemas
-  (`com.example.contracts.orders.*`). Depends only on Jackson + jakarta.validation-api.
-- **`customer-contracts`** — three code-first customer event records + generated schemas
-  (`com.example.contracts.customers.*`). Same pure classpath.
+  (`com.example.contracts.orders.*`), plus that domain's AMQP topology auto-configuration
+  (`topology.OrderTopologyAutoConfiguration`, self-activating via
+  `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`). Depends on
+  Jackson, jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and
+  `amqp-topology-kit`.
+- **`customer-contracts`** — mirror of `order-contracts` for the three customer events
+  (`com.example.contracts.customers.*`, `topology.CustomerTopologyAutoConfiguration`).
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
-  both contracts modules.
+  both contracts modules. Their domain AMQP topology (exchanges/queues/DLQs/retry ladder) is
+  wired automatically by the contracts' auto-configurations — no per-service topology glue.
 
 ### Schema-aware message flow
 
@@ -123,9 +141,16 @@ Supporting pieces in core:
   `TypeMapping` bean (Java type ↔ coordinates ↔ type ↔ routing) in producer/consumer config.
 - **`EventPublisher`** / **`EventConsumerSupport`** wrap `RabbitTemplate` / `@RabbitListener`
   and own the failure-routing decision.
-- **AMQP topology** — `EventExchanges`, `RetryTopologyFactory`, and `EventTopologyAutoConfiguration`
-  in `schema-messaging-core` declare shared exchanges once and per-mapping queues/DLQs/retry
-  ladders from `TypeMapping.routingKey()`. Contracts carry routing constants only.
+- **AMQP topology** — owned per-domain, not by core (spec: `contract-owned-amqp-topology.md`).
+  Each `*-contracts` module ships a `@AutoConfiguration` (`OrderTopologyAutoConfiguration` /
+  `CustomerTopologyAutoConfiguration`) that declares its own domain-scoped `TopicExchange`s
+  (`events.orders.{exchange,dlx,retry.exchange}` / `events.customers.{exchange,dlx,retry.exchange}`)
+  and, for each of its routing keys, the main queue/binding, DLQ/binding, and 3 retry
+  queues/bindings — built via `amqp-topology-kit`'s `EventTopologyFactory.declarablesForEvent(...)`
+  and `TopologyNaming`. `DlxMessageRecoverer` (still one shared bean in core, used by every
+  domain's listeners) derives the DLX/retry exchange per message from
+  `MessageProperties.getReceivedExchange()` rather than a fixed exchange name, so it needs no
+  contracts dependency.
 
 ### Wire format (strict — spec §6)
 
@@ -135,8 +160,8 @@ Schema identity travels entirely in `X-Schema-*` headers, plus
 
 ### Failure model (spec §9/§11)
 
-Consumer declares the topology idempotently on startup: `events.exchange`, `events.dlx`,
-`events.retry.exchange` + queues/bindings. **Transient** failures (registry unavailable,
+Each domain's contracts module declares its topology idempotently on startup: its own
+`events.{orders,customers}.exchange`, `.dlx`, `.retry.exchange` + queues/bindings. **Transient** failures (registry unavailable,
 schema-not-found, downstream errors) go through the retry exchange with a TTL ladder
 (5s/30s/5m, max 3) before the DLQ. **Permanent** failures (validation, deserialization, type
 mismatch) go **straight to the DLQ, no retry**. DLQ messages carry the full `X-Failure-*`

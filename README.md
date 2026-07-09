@@ -227,7 +227,7 @@ sequenceDiagram
     A-->>R: schema bytes
     R-->>P: ResolvedSchema (cached)
     P->>P: validate + serialize (raw JSON bytes)
-    P->>MQ: publish to events.exchange<br/>X-Schema-GlobalId / X-Schema-Type / X-Correlation-Id
+    P->>MQ: publish to that event's domain exchange (e.g. events.orders.exchange)<br/>X-Schema-GlobalId / X-Schema-Type / X-Correlation-Id
     P-->>C: 201 Created
 ```
 

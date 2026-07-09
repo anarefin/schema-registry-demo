@@ -104,8 +104,9 @@
                   <excludes>
                     <exclude>com.example:order-contracts</exclude>
                     <exclude>com.example:customer-contracts</exclude>
+                    <exclude>com.example:amqp-topology-kit</exclude>
                   </excludes>
-                  <message>schema-messaging-core must not depend on any *-contracts module (it is domain-agnostic).</message>
+                  <message>schema-messaging-core must not depend on any *-contracts module or amqp-topology-kit (it is domain-agnostic).</message>
                 </bannedDependencies>
               </rules>
               <fail>true</fail>
