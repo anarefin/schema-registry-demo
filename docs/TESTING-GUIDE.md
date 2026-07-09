@@ -1,652 +1,579 @@
 # Step-by-Step Testing Guide — Schema Registry Demo
 
-## Context
-Phases 0–6 are fully implemented. This guide walks through every testing layer in dependency order:
-build verification → unit tests → integration tests → manual end-to-end → failure topology →
-schema governance → health checks. Seed data (curl payloads) is included for every manual scenario.
+## 0. Purpose & how to use this guide
 
----
+`README.md` is the 15-minute quick start: build, start infra, register schemas, run the demo
+curls. This guide goes deeper — it walks **every feature** of the POC one at a time, states the
+exact expected output/assertion for each step, and covers scenarios the README intentionally
+skips for brevity (the retry ladder, health-indicator failure modes, schema pinning fail-fast,
+and a structural walkthrough of the four CI workflows).
 
-## Prerequisites
+Work through the sections in order — later sections (schema pinning, evolution, CI) assume the
+infrastructure and services from earlier sections are already up. All commands assume you're
+running from the repo root with `./mvnw` (the Maven Wrapper — never a system `mvn`), on the
+current working tree of this branch (some code-first files are still uncommitted; that's expected
+mid-migration and does not block any step below).
 
-Before starting, verify you have:
-- **Java 25** JDK installed and a matching entry in `~/.m2/toolchains.xml`
-- **Docker Desktop** running (needs ~4 GB RAM headroom for 5 containers)
-- **Working directory:** `/Users/ahmadnaqibularefin/Projects/schema-registry-demo`
+Six event types flow through this system, three per domain:
 
-Verify toolchain entry exists:
-```bash
-grep -A4 "jdk" ~/.m2/toolchains.xml   # must show version 25
-```
-
----
-
-## Background: Apicurio Registry Primer
-
-> Skip this if you already know what a schema registry is. Come back to it if something in a
-> later step doesn't make sense.
-
-**What is it?** Think of Apicurio Registry as **Git, but for message schemas**. Just like Git
-stores every version of your code and lets you compare or roll back, Apicurio stores every
-version of your message contracts and enforces that new versions don't break existing readers.
-
-### The three-level hierarchy
-
-Apicurio organises schemas in three levels: Group → Artifact → Version.
-
-```
-Group  (events.orders)
-  └── Artifact  (OrderCreated)
-        ├── Version 1  → globalId: N   ← original schema, immutable forever
-        └── Version 2  → globalId: M   ← + optional promo_code field
-```
-
-| Concept | Value in this project | Plain-English meaning |
-|---------|----------------------|----------------------|
-| **Group** | `events.orders` / `events.customers` | Namespace — a folder for related schemas |
-| **Artifact** | `OrderCreated` / `CustomerRegistered` | The schema itself |
-| **Version** | `1`, `2`, … | An immutable snapshot; once stored it never changes |
-| **Global ID** | e.g. `1`, `7`, `12` | A registry-wide unique number assigned to each version |
-| **Compatibility rule** | `BACKWARD` | Policy stored in Apicurio; checked on every new registration |
-
-### What "BACKWARD" means (one rule, one sentence)
-
-> A **consumer** using the new schema can still read messages that were **produced** with the
-> old schema.
-
-In practice:
-- **Allowed** — add an optional field (old messages simply don't have it; the consumer treats it as absent)
-- **Rejected** — remove a field, rename a field, or add a *required* field (old messages would fail the new contract)
-
-### How are schemas registered on a cold start?
-
-On a cold start Apicurio has no schemas and no rules. Registration is a **host-Maven step** (the
-contracts modules carry the `apicurio-registry-maven-plugin`), run once Apicurio is healthy:
-1. `./mvnw … apicurio-registry:register` registers v1 and v2 of both schemas
-2. A `curl` POST attaches the `BACKWARD` rule to each artifact as a **standing policy** (the
-   `register` goal does not do this) — see Step 1 below
-
-Once attached, Apicurio checks every future registration against that policy automatically —
-whether it comes from your laptop, from CI, or from a deployment pipeline.
-
----
-
-## Step 1 — Start Infrastructure
-
-```bash
-docker compose up -d
-```
-
-Wait for all services to become healthy (~60 s on first run, image pulls may add time):
-
-```bash
-docker compose ps   # all STATUS columns should show "healthy"
-```
-
-**Services and their UIs:**
-
-| Service | Port | UI / Check |
+| Domain | Events | Routing keys |
 |---|---|---|
-| Apicurio Registry API | 8080 | `curl http://localhost:8080/apis/registry/v3/system/info` |
-| Apicurio Registry UI | 8888 | http://localhost:8888 |
-| RabbitMQ | 5672 | — |
-| RabbitMQ Management | 15672 | http://localhost:15672 (guest/guest) |
-| Postgres | 5432 | — (backing store for Apicurio) |
-
-Once the registry is healthy, register both schemas and attach their BACKWARD rules from the host
-(the contracts modules carry the `apicurio-registry-maven-plugin` — no separate container needed):
-```bash
-# 1. Register both schemas (v1 + v2)
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
-
-# 2. Attach the BACKWARD compatibility rule (register does not do this)
-for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
-  curl -s -o /dev/null -X POST \
-    "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
-    -H 'Content-Type: application/json' \
-    -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
-done
-```
-
-Verify schemas are registered via API:
-```bash
-curl -s http://localhost:8080/apis/registry/v3/groups/events.orders/artifacts | jq '.count'
-curl -s http://localhost:8080/apis/registry/v3/groups/events.customers/artifacts | jq '.count'
-# Both should return at least 1 (likely 2 after evolution registration)
-```
-
-**Exploring the Apicurio UI (http://localhost:8888):**
-
-This is the easiest way to understand what the registry has stored. Follow these clicks:
-
-1. Open http://localhost:8888 → click **"Explore"** in the left nav
-2. You see two groups: **`events.orders`** and **`events.customers`**
-3. Click **`events.orders`** → click **`OrderCreated`**
-   - You see **2 versions** listed with their Global IDs
-   - Click **Version 1**: shows the original `.proto` content (fields 1–7, no `promo_code`)
-   - Click **Version 2**: shows the evolved content (same fields + optional `promo_code` field 8)
-   - Click the **"Rules"** tab: shows the `BACKWARD` compatibility rule attached to this artifact
-4. Note the **Global ID** number next to each version. This exact number is what the producer
-   stamps in the `X-Schema-GlobalId` header on every message it sends. The consumer reads that
-   header to fetch the schema in a single call — no coordinate lookup needed.
-5. Repeat for **`events.customers`** → **`CustomerRegistered`** to see the JSON Schema versions
-   - Version 1: original schema (no `promoCode` property)
-   - Version 2: adds optional `promoCode` (not in `required` array — BACKWARD-compatible)
+| `events.orders` | `OrderCreated`, `OrderShipped`, `OrderCancelled` | `orders.created`, `orders.shipped`, `orders.cancelled` |
+| `events.customers` | `CustomerRegistered`, `CustomerAddressAdded`, `CustomerTierChanged` | `customers.registered`, `customers.address-added`, `customers.tier-changed` |
 
 ---
 
-## Step 2 — Full Build
+## 1. Prerequisites
+
+| Tool | Requirement |
+|---|---|
+| JDK | 25, with a `~/.m2/toolchains.xml` entry (`vendor=oracle`, `id=25-oracle`) |
+| Docker | Compose v2 (`docker compose`, not the legacy `docker-compose`) |
+| Maven | None needed system-wide — always use the committed wrapper `./mvnw` |
+
+```bash
+./mvnw -v   # confirm the wrapper resolves Maven 3.9.11 and picks up the Java 25 toolchain
+```
+
+---
+
+## 2. Build & unit tests
 
 ```bash
 ./mvnw clean install -DskipTests
 ```
 
-This compiles all 5 modules, generates Protobuf classes (order-contracts) and JSON Schema POJOs
-(customer-contracts), and packages the Spring Boot fat jars. Expect ~90 s on a cold M-series Mac.
-
-Fix any compilation failures before proceeding.
-
----
-
-## Step 3 — Unit Tests (fast, no Docker needed)
+Builds all six runtime/library modules (`schema-messaging-core`, `amqp-topology-kit`,
+`order-contracts`, `customer-contracts`, `producer-service`, `consumer-service`, plus the
+build-only `schema-gen-tools`, seven total) and, as part of
+`schema-gen-tools`' `process-classes` phase, regenerates all six JSON Schemas from the code-first
+records. Expect `BUILD SUCCESS`.
 
 ```bash
 ./mvnw test
 ```
 
-Expected: **all tests green, zero failures.** Key suites:
-- `schema-messaging-core` — 23+ tests (cache, converter, routing taxonomy, etc.)
-- `order-contracts` — Protobuf round-trip + evolution tests
-- `customer-contracts` — JSON round-trip + evolution tests
-- `producer-service` — ProducerValidationTest (REST 400 on invalid payload)
+Runs only Surefire (`*Test.java`) — fast, mock-based, no Docker. Expect `BUILD SUCCESS` with test
+counts across `schema-messaging-core`, `order-contracts`, `customer-contracts`, and
+`producer-service`.
 
-Run a single targeted test to verify a specific scenario:
-```bash
-./mvnw -pl schema-messaging-core test -Dtest=SchemaResolverTest#cacheHit
-./mvnw -pl schema-messaging-core test -Dtest=EventConsumerSupportTest
-./mvnw -pl schema-messaging-core test -Dtest=SchemaAwareMessageConverterTest
-```
+**What you verified:** the code-first records compile, schemas regenerate without error, and all
+mock-based unit tests pass. The `*Test.java` (Surefire) / `*IT.java` (Failsafe) split is
+load-bearing — don't put a Testcontainers test under `*Test.java` or it'll silently run twice (once
+here, once in §5) or not at all.
 
 ---
 
-## Step 4 — Integration Tests (Testcontainers — needs Docker)
+## 3. Schema generation & drift gate (offline — no registry needed)
+
+This is exactly what `.github/workflows/schema-drift-check.yml` runs on every PR touching
+`*-contracts/**` or `schema-gen-tools/**`, and you can run it locally with no infrastructure:
+
+```bash
+./mvnw -pl order-contracts,customer-contracts -am process-classes
+git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
+```
+
+Expect no diff (exit code `0`) — the committed `.schema.json` files are byte-identical to what
+`schema-gen-tools` (victools, Draft-07, alphabetically-sorted keys, fixed pretty-printer) just
+regenerated.
+
+**Now deliberately cause drift** to see the gate catch a real mismatch:
+
+```bash
+# Add a comment/description-only edit to a record, e.g. tweak the @JsonPropertyDescription
+# on OrderCreated.quantity() in order-contracts, then:
+./mvnw -pl order-contracts -am process-classes
+git diff -- '*-contracts/src/main/resources/schemas/order-created.schema.json'   # see the diff
+git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # now exits 1
+
+git checkout -- order-contracts/src/main/java/com/example/contracts/orders/OrderCreated.java
+./mvnw -pl order-contracts -am process-classes   # regenerate back to the committed baseline
+git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # back to exit 0
+```
+
+**What you verified:** schema generation is deterministic, and any drift between a Java record and
+its committed schema is mechanically detectable without touching the registry.
+
+---
+
+## 4. Integration tests (Testcontainers)
 
 ```bash
 ./mvnw verify
 ```
 
-This starts real RabbitMQ containers (via Testcontainers) per test class. The Apicurio client is
-mocked so no running registry is needed. Expect ~3–5 min.
+Runs Failsafe (`*IT.java`) on top of everything in §2 — spins up real RabbitMQ (Testcontainers);
+`ApicurioClient` is mocked in these tests so no live registry is required. Expect `BUILD SUCCESS`.
+What each class proves, so you know what "verify passed" already covered before you do anything
+manually in §9–§14:
 
-**5 integration test classes in consumer-service:**
-
-| Class | What it proves |
+| Test class | Proves |
 |---|---|
-| `OrderCreatedIT` | Protobuf round-trip E2E, all X-Schema-* headers correct, globalId fast path |
-| `CustomerRegisteredIT` | JSON Schema round-trip E2E, backward-compat field tolerance |
-| `DlxRoutingIT` | All 5 failure modes → correct DLQ/retry routing, X-Failure-* headers |
-| `SchemaVersionPinningIT` | Pinned schema version appears in X-Schema-Version header |
-| `StartupSchemaValidatorIT` | auto-register=OFF + dead registry → fail-fast on startup |
+| `OrderCreatedIT` | Producer → real RabbitMQ → consumer round trip for `OrderCreated`; asserts `content-type: application/json` and all `X-Schema-*` headers land on the delivered message; asserts `X-Schema-GlobalId` lets the consumer skip the coordinate lookup (`fetchByGlobalId` used, not `fetchByCoordinates`). |
+| `CustomerRegisteredIT` | Same round trip for `CustomerRegistered`; also verifies an extra unknown JSON field on the wire still deserializes (Jackson `FAIL_ON_UNKNOWN_PROPERTIES=false`). |
+| `DlxRoutingIT` | The full retry-ladder + DLQ classification matrix: schema-not-found → retried through short test TTLs then DLQ; deserialization ("poison") → immediate DLQ, `X-Retry-Count=0`; any permanent exception → immediate DLQ; a downstream `RuntimeException` → retried 3× then DLQ; every retry hop increments `X-Retry-Count` with the correct tier suffix; all `X-Failure-*` headers present once a message lands on a DLQ. |
+| `SchemaVersionPinningIT` | With `schema.orders.pinned-version=1`, the outbound `X-Schema-Version` header is exactly `1`, not "latest". |
+| `StartupSchemaValidatorIT` | With `apicurio.auto-register=OFF` and an unregistered pinned version, the Spring context **fails to start** (`IllegalStateException`). |
 
-Run a single integration test class:
-```bash
-./mvnw -pl consumer-service verify -Dit.test=DlxRoutingIT
-```
+Run a single IT: `./mvnw -pl consumer-service verify -Dit.test=DlxRoutingIT`.
 
 ---
 
-## Step 5 — Start the Services (Manual E2E)
+## 5. Start infrastructure
 
-Open **two terminal tabs**. Infrastructure from Step 1 must still be running.
-
-**Terminal 1 — Consumer:**
 ```bash
-./mvnw -pl consumer-service spring-boot:run
+docker compose up
 ```
-Wait for: `Started ConsumerApplication` and `Pre-warmed N schemas from Apicurio registry`.
 
-**Terminal 2 — Producer:**
+Wait for all four containers to report healthy:
+
 ```bash
-./mvnw -pl producer-service spring-boot:run
+docker compose ps
 ```
-Wait for: `Started ProducerApplication`.
 
-Service ports: producer = **8081**, consumer = **8082**.
+| Service | Port(s) | Health check |
+|---|---|---|
+| `postgres` | 5432 | `pg_isready` |
+| `apicurio` | 8080 (Registry API) | `GET /apis/registry/v3/system/info` (60s start period, 30 retries — Postgres-backed storage takes a moment to initialize) |
+| `apicurio-ui` | 8888 → container 8080 | `GET /` |
+| `rabbitmq` | 5672 (AMQP), 15672 (management UI) | `rabbitmq-diagnostics ping` |
+
+> **Doc note:** `docker-compose.yml`'s inline comment says "BACKWARD for OrderCreated, FORWARD for
+> CustomerRegistered" — this is stale. All six artifacts actually use **FORWARD** (see §6 for why).
+
+**What you verified:** cold `compose up` reaches an all-healthy state with no manual intervention
+beyond waiting on health checks.
 
 ---
 
-## Step 6 — Happy Path: Publish Events
+## 6. Register schemas & attach compatibility rules
 
-### 6a. Publish an Order (Protobuf)
+Schema registration is a **host-Maven step**, not a compose service — both contract modules already
+carry the `apicurio-registry-maven-plugin`.
 
 ```bash
-curl -s -X POST http://localhost:8081/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customerId": "cust-001",
-    "productId": "prod-456",
-    "quantity": 2,
-    "totalAmount": 49.99,
-    "currency": "USD"
-  }' | jq .
+./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
+       -Dapicurio.registry.url=http://localhost:8080
 ```
 
-**Expected:** HTTP 201 response JSON with the orderId.
-
-**What to observe:**
-- Producer logs: `INFO … Published OrderCreated orderId=<id>` (with X-Message-Id and X-Correlation-Id)
-- Consumer logs: `INFO … Received OrderCreated orderId=<id>`
-- RabbitMQ UI → Queues → `orders.created.queue` — message count briefly spikes then drops to 0
-
-### 6b. Publish a Customer (JSON Schema)
+Then attach the **FORWARD** compatibility rule to all six artifacts (register does not do this
+itself):
 
 ```bash
-curl -s -X POST http://localhost:8081/api/customers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "alice@example.com",
-    "firstName": "Alice",
-    "lastName": "Smith",
-    "phoneNumber": "+12025550123"
-  }' | jq .
-```
-
-**Expected:** HTTP 201, consumer logs `Received CustomerRegistered customerId=<id>`.
-
-### 6c. Publish multiple to see throughput
-
-```bash
-for i in {1..5}; do
-  curl -s -X POST http://localhost:8081/api/orders \
-    -H "Content-Type: application/json" \
-    -d "{\"customerId\":\"cust-00$i\",\"productId\":\"prod-$i\",\"quantity\":$i,\"totalAmount\":$((i*10)).00,\"currency\":\"USD\"}" \
-    | jq -r '.orderId'
+for pair in \
+  events.orders/OrderCreated \
+  events.orders/OrderShipped \
+  events.orders/OrderCancelled \
+  events.customers/CustomerRegistered \
+  events.customers/CustomerAddressAdded \
+  events.customers/CustomerTierChanged; do
+  group="${pair%/*}" artifact="${pair#*/}"
+  curl -s -o /dev/null -X POST \
+    "http://localhost:8080/apis/registry/v3/groups/${group}/artifacts/${artifact}/rules" \
+    -H 'Content-Type: application/json' \
+    -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 done
 ```
 
----
+Why FORWARD and not BACKWARD: in Apicurio's JSON Schema checker, adding a property — even an
+optional one — is classified `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`, which BACKWARD rejects and
+only FORWARD accepts. This is the correct level for a schema-evolution strategy built around
+additive optional fields.
 
-## Step 7 — Validation Failure (Producer Returns 400)
+Both steps can also be run as one shot via the **Schema Governance Bootstrap** workflow
+(`.github/workflows/schema-governance-bootstrap.yml`, `workflow_dispatch` — see §17).
 
-### 7a. Invalid Order (missing required field)
+**Verify in the Apicurio UI** (http://localhost:8888):
+- Groups `events.orders` and `events.customers` each show three artifacts.
+- Each artifact's **Rules** tab shows `COMPATIBILITY = FORWARD`.
 
-The `quantity` field must be positive; `currency` is required. Send an incomplete payload:
-
-```bash
-curl -s -X POST http://localhost:8081/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customerId": "cust-bad"
-  }' | jq .
-```
-
-**Expected:** HTTP 400 with body `{"error":"Schema validation failed: …"}`.
-**Key:** No message is emitted to RabbitMQ — the producer validates before publishing.
-
-### 7b. Invalid Customer (missing required `email`)
-
-```bash
-curl -s -X POST http://localhost:8081/api/customers \
-  -H "Content-Type: application/json" \
-  -d '{
-    "firstName": "Bob",
-    "lastName": "Jones"
-  }' | jq .
-```
-
-**Expected:** HTTP 400. Consumer receives nothing. DLQs remain empty.
+**What you verified:** all six code-first schemas are registered under their correct group/artifact
+coordinates, and the FORWARD rule that gates future evolution (§15–§16) is active.
 
 ---
 
-## Step 8 — Poison Message / DLQ Demo
+## 7. Start producer & consumer services
 
-### 8a. Send a poison message (invalid protobuf bytes, valid headers)
-
-```bash
-curl -s -X POST http://localhost:8081/api/orders/poison \
-  -H "Content-Type: application/json" \
-  | jq .
-```
-
-**Expected:** HTTP 202 (accepted for sending). This bypasses schema validation on the producer side
-and emits garbage protobuf bytes with valid X-Schema-* headers.
-
-**What to observe:**
-1. Consumer logs: `ERROR … DeserializationException` — permanent failure → DLQ_DIRECT (no retry)
-2. RabbitMQ UI → `orders.created.dlq` — message count = 1
-3. In RabbitMQ UI → Get Messages on `orders.created.dlq`, headers should contain:
-   - `X-Failure-Reason: PERMANENT`
-   - `X-Failure-Message: … DeserializationException …`
-   - `X-Failure-Retry-Count: 0` (not retried at all)
-   - `X-Failure-Stack-Trace` (truncated to 4 KB)
-   - `X-Failure-Original-Routing-Key: orders.created`
-
-### 8b. Verify retry TTL ladder (transient failure simulation)
-
-The retry ladder (5 s → 30 s → 5 min → DLQ) is tested automatically in `DlxRoutingIT` with
-compressed TTLs (200 ms / 400 ms / 600 ms). To see it live, temporarily stop the Apicurio
-container while a message is in-flight:
+Two terminals:
 
 ```bash
-docker compose stop apicurio-registry
-# Then publish an order
-curl -s -X POST http://localhost:8081/api/orders -H "Content-Type: application/json" \
-  -d '{"customerId":"cust-retry","productId":"prod-r","quantity":1,"totalAmount":9.99,"currency":"USD"}'
-# Observe: consumer retries 3 times (5s, 30s, 5m TTLs) then message lands in DLQ
-docker compose start apicurio-registry
+# Terminal 1 — producer (port 8081)
+./mvnw -pl producer-service spring-boot:run
+
+# Terminal 2 — consumer (port 8082)
+./mvnw -pl consumer-service spring-boot:run
 ```
+
+Verify health on both:
+
+```bash
+curl -s localhost:8081/actuator/health | jq
+curl -s localhost:8082/actuator/health | jq
+```
+
+With `show-details: always` and `show-components: always`, expect a `components.registry` entry
+(from `RegistryHealthIndicator`, bean name `registryHealthIndicator`) with `status: UP` and
+`details: { preWarmCompleted: true, preWarmErrors: 0 }`. The consumer additionally shows a
+`components.queueDepth` entry (from `QueueDepthHealthIndicator`) with `status: UP` (no DLQ has
+messages yet).
+
+**What you verified:** both services start cleanly against a live registry and RabbitMQ, and their
+own custom health indicators are wired and reporting correctly before you send any traffic.
 
 ---
 
-## Step 9 — Schema Governance: Compatibility Gate
+## 8. Happy path — publish all six events
 
-> **What is Apicurio actually checking?**
->
-> When you register (or test) a new schema version, Apicurio compares it against the
-> previously stored versions using the artifact's `BACKWARD` compatibility rule. The question
-> it answers is:
->
-> *"Can a consumer that was built against the new schema still correctly read a message that
-> was produced with the old schema?"*
->
-> For **Protobuf**: safe to add optional fields at the end (field numbers are preserved, old
-> messages simply have the new field absent). Unsafe: change a field's type or number, remove
-> a field.
->
-> For **JSON Schema**: safe to add new properties that are not listed in `required` (old
-> messages without that property still validate). Unsafe: add a new required field, remove an
-> existing required field, or change a type.
+Each curl maps a request DTO to the code-first record; `SchemaAwareMessageConverter` validates
+against the resolved schema before the message is sent. Every call should return `201 Created`.
 
-### 9a. Test that the registered schemas are BACKWARD-compatible
+```bash
+# --- Orders (events.orders) ---
+curl -si -X POST http://localhost:8081/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"11111111-1111-1111-1111-111111111111","productId":"22222222-2222-2222-2222-222222222222","quantity":2,"totalAmount":99.99,"currency":"USD"}'
+
+curl -si -X POST http://localhost:8081/api/orders/ship \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"33333333-3333-3333-3333-333333333333","trackingNumber":"1Z999AA10123456784","carrier":"UPS"}'
+
+curl -si -X POST http://localhost:8081/api/orders/cancel \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"33333333-3333-3333-3333-333333333333","reason":"Customer request","refundAmount":49.99}'
+
+# --- Customers (events.customers) ---
+curl -si -X POST http://localhost:8081/api/customers \
+  -H "Content-Type: application/json" \
+  -d '{"email":"alice@example.com","firstName":"Alice","lastName":"Smith","phoneNumber":"+15551234567"}'
+
+curl -si -X POST http://localhost:8081/api/customers/address \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"44444444-4444-4444-4444-444444444444","address":{"line1":"221B Baker Street","city":"London","postalCode":"NW1 6XE","countryCode":"GB"}}'
+
+curl -si -X POST http://localhost:8081/api/customers/tier \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"44444444-4444-4444-4444-444444444444","previousTier":"BRONZE","newTier":"GOLD"}'
+```
+
+For each: confirm `201 Created`, then confirm a matching `INFO` log line in the consumer terminal
+(`OrderEventListener`/`CustomerEventListener` log every field of the typed record it deserialized).
+
+**Inspect the wire format** in the RabbitMQ management UI (http://localhost:15672, `guest`/`guest`)
+→ Queues → e.g. `orders.created.queue` → Get messages (with "Requeue" unchecked if you want to
+consume it, or leave the consumer running and just watch the queue's message-rate graph blip). The
+message properties should show:
+
+| Header | Example value |
+|---|---|
+| `X-Schema-GlobalId` | a registry-assigned long |
+| `X-Schema-GroupId` | `events.orders` |
+| `X-Schema-ArtifactId` | `OrderCreated` |
+| `X-Schema-Version` | e.g. `1` |
+| `X-Schema-Type` | `JSON` |
+| `X-Correlation-Id` | a UUID |
+| content-type | `application/json` |
+
+Body is the **raw JSON only** — no envelope wrapper.
+
+**What you verified:** all six event types round-trip end to end with the correct schema identity
+headers and no envelope, matching the wire-format spec.
+
+---
+
+## 9. Validation failure (producer-side, 400)
+
+The publisher validates against the resolved JSON Schema **before** sending. A payload missing
+required fields never reaches RabbitMQ:
+
+```bash
+curl -si -X POST http://localhost:8081/api/customers \
+  -H "Content-Type: application/json" \
+  -d '{"email":"bad@example.com"}'
+```
+
+Expect `400 Bad Request` with a body starting `Schema validation failed: ...` (from
+`GlobalExceptionHandler` catching `SchemaValidationException`). Confirm in the management UI that
+`customers.registered.queue`'s message count did **not** increase.
+
+**What you verified:** schema validation is enforced on the producer side, and validation failure
+is a hard stop — no partial/invalid message is ever published.
+
+---
+
+## 10. Poison message → DLQ (permanent failure, no retry)
+
+```bash
+curl -si -X POST http://localhost:8081/api/orders/poison
+```
+
+`OrderController` bypasses `EventPublisher` entirely here: it sends raw bytes `"{NOT_VALID_JSON"`
+directly via `RabbitTemplate`, with **valid** `X-Schema-GroupId`/`ArtifactId`/`Type` headers on
+routing key `orders.created`. Expect `202 Accepted`.
+
+The consumer fails to parse the JSON before it can even validate → `DeserializationException`,
+which is in the permanent-exception set → routed straight to `orders.created.dlq`, **no retry
+hop**. In the management UI, browse `orders.created.dlq` and inspect the message headers:
+
+| Header | Expected value |
+|---|---|
+| `X-Failure-Reason` | `DLQ_DIRECT` |
+| `X-Failure-Message` | the deserialization error, truncated to 512 bytes |
+| `X-Failure-StackTrace` | truncated to 4096 bytes (`...[truncated]` suffix if cut) |
+| `X-Failure-Original-Routing-Key` | `orders.created` |
+| `X-Failure-Failed-At` | an ISO-8601 instant |
+| `X-Failure-Retry-Count` | `0` |
+
+**What you verified:** a permanent failure (unparseable payload) never enters the retry ladder and
+lands on the correct DLQ with the full failure-header set populated.
+
+---
+
+## 11. Transient failure → retry ladder → DLQ
+
+Not covered in the README — this walks a message through all three retry tiers before it finally
+DLQs. `SchemaNotFoundException` and `RegistryUnavailableException` are **not** in the permanent set,
+so they classify as `RETRY`.
+
+The simplest reproducible trigger: publish to a routing key whose consumer type mapping exists but
+whose schema coordinates the registry has never seen (forces `SchemaNotFoundException` on lookup),
+or briefly stop the registry after clearing any warm cache entry for that coordinate:
+
+```bash
+docker compose stop apicurio
+# with the registry down and nothing cached yet for a coordinate, any resolve attempt raises
+# RegistryUnavailableException (SchemaResolver only serves stale-from-cache if something is
+# already cached — a cold miss throws instead)
+curl -si -X POST http://localhost:8081/api/orders   # this call likely now itself fails to publish
+```
+
+The more reliable way to observe the **consumer-side** retry ladder specifically (rather than a
+producer-side publish failure) is to run `DlxRoutingIT` (§4) and read its assertions, or watch a
+message you know will resolve on the producer side but fail on the consumer side after a registry
+outage window. Either way, once a transient failure is triggered, watch the message hop through
+these exact queues in the management UI:
+
+```
+orders.created.queue  →  orders.created.retry.5s  →  orders.created.retry.30s  →  orders.created.retry.5m  →  orders.created.dlq
+```
+
+(Retry queue names have **no** `.queue` suffix — they're named directly `<routingKey>.retry.<tier>`.)
+Exact TTLs, so you know how long to wait at each hop: **tier 0 = 5000ms (5s)**, **tier 1 = 30000ms
+(30s)**, **tier 2 = 300000ms (5m)** (`events.retry.tier0.ms`/`tier1.ms`/`tier2.ms`). Each retry queue
+dead-letters back into that event's domain exchange (e.g. `events.orders.exchange` for order
+events) with the *original* routing key on TTL expiry, landing the
+message back on the main queue for redelivery; `X-Retry-Count` increments by one on each hop (`0`→
+`1`→`2`→`3`). Once `X-Retry-Count` reaches 3 (the length of the TTL array), the next failure is
+forced to `DLQ_DIRECT` regardless of classification, and only then are the `X-Failure-*` headers
+populated (they are **not** set on the intermediate retry hops — only on final DLQ arrival).
+
+Bring the registry back up when done:
+
+```bash
+docker compose start apicurio
+```
+
+**What you verified:** transient failures are retried on an exponential-ish TTL ladder rather than
+DLQ'd immediately, retry exhaustion still lands on the DLQ, and the queue-hop sequence matches the
+declared topology exactly.
+
+---
+
+## 12. Schema version pinning
+
+```bash
+SCHEMA_ORDERS_PINNED_VERSION=1 ./mvnw -pl producer-service spring-boot:run
+```
+
+Publish an order (§8's first curl) and inspect the message in `orders.created.queue`: expect
+`X-Schema-Version: 1` regardless of whether a later version has since been registered. Restart
+without the env var and republish — `X-Schema-Version` should track the registry's latest.
+
+**What you verified:** a producer can pin to an exact schema version independent of what's
+currently latest in the registry.
+
+---
+
+## 13. Fail-fast on unregistered pinned schema
+
+```bash
+APICURIO_AUTO_REGISTER=OFF SCHEMA_ORDERS_PINNED_VERSION=999 \
+  ./mvnw -pl producer-service spring-boot:run
+```
+
+Version `999` doesn't exist. Expect the Spring context to **refuse to start** — `StartupSchemaValidator`
+throws `IllegalStateException` during startup rather than deferring the failure to the first publish
+attempt (mirrors `StartupSchemaValidatorIT`, §4).
+
+**What you verified:** with auto-register disabled, a missing pinned schema is a hard startup
+failure, not a runtime surprise on the first request.
+
+---
+
+## 14. Schema evolution — accepted change
+
+Add an optional field to `OrderCreated` (e.g. a nullable `notes` string with `@JsonPropertyDescription`,
+no `@NotNull`), then:
+
+```bash
+./mvnw -pl order-contracts -am process-classes     # regenerate order-created.schema.json
+git diff -- order-contracts/src/main/resources/schemas/order-created.schema.json   # see the new optional property
+
+./mvnw -pl order-contracts apicurio-registry:register \
+       -Dapicurio.registry.url=http://localhost:8080
+```
+
+Expect success — an additive optional property is FORWARD-compatible. Revert the record and schema
+afterward (`git checkout --`) unless you intend to keep the change.
+
+**What you verified:** the code-first workflow supports safe, additive schema evolution end to end —
+edit the record, regenerate, register — with no manual schema authoring.
+
+---
+
+## 15. Schema evolution — rejected change
+
+```bash
+./mvnw -pl order-contracts verify -Pincompatible-demo \
+       -Dapicurio.registry.url=http://localhost:8080
+```
+
+This profile dry-run-registers a schema where `quantity` has changed type (integer → string) — a
+change that violates every compatibility level, not just FORWARD. Expect `BUILD FAILURE` with
+Apicurio's rejection message in the Maven output (a 409-style compatibility violation, not a
+generic HTTP error).
+
+Same gate for customers:
+
+```bash
+./mvnw -pl customer-contracts verify -Pincompatible-demo \
+       -Dapicurio.registry.url=http://localhost:8080
+```
+
+**What you verified:** a genuinely breaking change is rejected before it ever reaches a shared
+branch, for both domains.
+
+---
+
+## 16. Compatibility gate — the same check CI runs
 
 ```bash
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
-  -Dapicurio.registry.url=http://localhost:8080
+       -Dapicurio.registry.url=http://localhost:8080
 ```
 
-**Expected:** Both goals succeed (exit 0) — current schemas are compatible.
+This is a **dry-run** register of exactly what `apicurio-registry:register` would publish (no
+writes) — it's the identical Maven invocation `.github/workflows/schema-compat-check.yml` runs on
+every PR touching `*-contracts/**`. With the working tree unchanged since §6, expect `BUILD SUCCESS`
+(current schemas are compatible with themselves).
 
-**Note:** `compat-check` runs in **dryRun mode** — it asks Apicurio "would this schema pass?",
-but never stores anything. The version count in the UI stays the same before and after.
-
-### 9b. Attempt to register an INCOMPATIBLE schema (should fail)
-
-The `order-contracts` POM has an `incompatible-demo` profile that registers
-`order-created-incompatible.proto` (changes field 1 from `string` to `int64`):
-
-```bash
-./mvnw -pl order-contracts verify \
-  -Pincompatible-demo \
-  -Dapicurio.registry.url=http://localhost:8080
-```
-
-**Expected:** Maven goal FAILS with `INCOMPATIBLE` from Apicurio. This is the CI merge gate in
-action — an incompatible schema change would block the PR.
-
-**What you'll see in the Maven output:** a message like `RuleViolationException: INCOMPATIBLE`.
-This error comes directly from Apicurio's compatibility API — Maven is just surfacing it. The
-incompatible schema is **never stored**; the UI version count remains unchanged.
-
-Same for JSON Schema (adds new required field `accountType` — old messages don't have it, so old data fails the new schema):
-```bash
-./mvnw -pl customer-contracts verify \
-  -Pincompatible-demo \
-  -Dapicurio.registry.url=http://localhost:8080
-```
-
-### 9c. Schema versioning lifecycle walkthrough (how to add a v3 yourself)
-
-This is a hands-on exercise that ties together everything you've learned. It takes about
-5 minutes and shows the full loop from code change → registry → running producer.
-
-**Step 1** — Add a new optional field to the Protobuf schema:
-```proto
-// order-contracts/src/main/resources/schemas/order-created.proto
-// Fields 8 (promo_code) and 9 (notes) already exist — add the next free field number:
-optional string gift_message = 10;
-```
-
-**Step 2** — Check compatibility *before* registering (dryRun, safe to run):
-```bash
-./mvnw -pl order-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
-```
-This should **pass** — adding an optional field is BACKWARD-compatible.
-
-**Step 3** — Register the new version:
-```bash
-./mvnw -pl order-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
-```
-Apicurio creates **Version 3** and assigns it a new Global ID.
-
-**Step 4** — Verify in the UI:
-Open http://localhost:8888 → `events.orders` → `OrderCreated` → you now see **3 versions**.
-Version 3 shows your new `gift_message` field. The Global ID for version 3 is different from versions 1 and 2.
-
-**Step 5** — Restart the producer (picks up the new "latest" schema):
-```bash
-# Ctrl+C the running producer, then:
-./mvnw -pl producer-service spring-boot:run
-```
-After restart, new messages will carry `X-Schema-GlobalId: <version-3-id>` and
-`X-Schema-Version: 3` in their headers.
-
-**Step 6** — Confirm backward compatibility is preserved:
-The consumer still processes v1 and v2 messages correctly — old messages simply don't have
-the `gift_message` field and it defaults to absent/empty.
-
-> **Key insight:** You never had to touch the consumer to add this field. That's the point of
-> BACKWARD compatibility — producers can evolve independently as long as they follow the rules.
-
-> **Automate this in CI:** The `compat-check` in Step 9a and the `register` command in Step
-> 9c are exactly what the GitHub Actions workflows automate. See **Step 14** for how to wire
-> them up so the PR gate and post-merge registration run automatically without any manual steps.
+**What you verified:** the exact merge-gate command CI uses passes locally against your registered
+baseline, before you ever open a PR.
 
 ---
 
-## Step 10 — Schema Version Pinning
+## 17. CI governance workflows (structural walkthrough)
 
-Edit `producer-service/src/main/resources/application.yml` locally (or pass as env var):
-```yaml
-schema:
-  orders:
-    pinned-version: "1"
-```
+All four workflows discover contract modules dynamically (`for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done`), so adding a seventh domain module needs no workflow edit. Read each file in `.github/workflows/` alongside this table:
 
-Restart the producer and publish an order. Observe in consumer logs that `X-Schema-Version: 1`
-(not "latest"). To reset, remove or set `pinned-version: "latest"`.
+| Workflow | Trigger | Runner | What it runs | Pass/fail condition |
+|---|---|---|---|---|
+| `schema-compat-check.yml` | `pull_request`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` (needs the standing registry at `localhost:8080`) | `./mvnw -pl <discovered> verify -Pcompat-check -Dapicurio.registry.url=...` | Fails if the dry-run registration is rejected as incompatible — same command as §16 |
+| `schema-drift-check.yml` | `pull_request`, paths `*-contracts/**`, `schema-gen-tools/**` | `ubuntu-latest` (no registry needed) | regenerate via `schema-gen-tools`, then `git diff --exit-code` on `*-contracts/**/schemas/` | Fails on any byte drift — same command as §3 |
+| `schema-governance-bootstrap.yml` | `workflow_dispatch` only (manual, optional `registry_url` input) | `[self-hosted, apicurio-local]` | re-registers all six artifacts, then POSTs `{"ruleType":"COMPATIBILITY","config":"FORWARD"}` to each of the six `/rules` endpoints (treats `200`/`204`/`409` as success), then re-`GET`s each artifact's rules to confirm | Fails if any rule-attach call returns an unexpected HTTP status — this is §6's manual steps, automated |
+| `schema-register.yml` | `push` to `main`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` | `apicurio-registry:register` (idempotent `FIND_OR_CREATE_VERSION`) | Fails only on a genuine Maven/plugin error — this is a post-merge publish step, not a gate |
+
+Because `schema-compat-check.yml`, `schema-governance-bootstrap.yml`, and `schema-register.yml` all
+require the `[self-hosted, apicurio-local]` runner label (they assume a standing registry reachable
+at `http://localhost:8080` on the runner host), you can't exercise them via a plain `act`/fork PR
+without that runner configured — but `schema-drift-check.yml` needs nothing beyond `ubuntu-latest`
+and can be exercised locally exactly as in §3.
+
+**What you verified:** you understand which of the four workflows is a hard merge gate
+(`schema-compat-check`), which is informational-but-still-gating (`schema-drift-check`), and which
+two are operational/one-shot (`schema-governance-bootstrap`, `schema-register`) rather than PR gates.
 
 ---
 
-## Step 11 — Health checks
+## 18. Health-indicator failure scenarios
+
+**Registry down:**
 
 ```bash
-curl -s http://localhost:8081/actuator/health | jq .
-curl -s http://localhost:8082/actuator/health | jq .
+docker compose stop apicurio
+curl -s localhost:8081/actuator/health | jq '.components.registry'
 ```
 
-Producer should show `{"status":"UP"}` with `registry` and `rabbit` components.
-Consumer should show `{"status":"UP"}` with `registry`, `rabbit`, and `queueDepth` components.
-
-**Note:** If you ran Step 8 (poison message demo) before this step, the consumer's `queueDepth`
-component will report `DOWN` — that is correct, intentional behaviour: the indicator signals DOWN
-whenever a DLQ is non-empty. To reset before re-checking health, purge the DLQ via the RabbitMQ
-Management UI (http://localhost:15672) → Queues → `orders.created.dlq` → Purge Messages.
-
----
-
-## Step 12 — Schema Evolution: Register v2 and Test Backward Compatibility
-
-Both schemas have a v2 registered by the host-Maven step in Step 1 (Protobuf v2 adds optional
-`promo_code`; JSON v2 adds optional `promoCode`). To observe backward compatibility:
+Expect `status: DOWN` — `RegistryHealthIndicator` probes a deliberately-nonexistent artifact
+(`__health__`/`__probe__`); a `SchemaNotFoundException` there means UP (registry responded), but any
+other failure (connection refused) means DOWN. Bring it back:
 
 ```bash
-# Publish a v1 order (no promo_code) — consumer reads it fine, promo_code is empty/absent
-curl -s -X POST http://localhost:8081/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"customerId":"cust-evo","productId":"prod-evo","quantity":1,"totalAmount":19.99,"currency":"EUR"}'
-
-# Check Apicurio UI for both versions (http://localhost:8888) under events.orders / OrderCreated
+docker compose start apicurio
 ```
 
-The registry shows 2 versions of each artifact. Consumers reading v1 messages with v2 code
-silently ignore the new optional field.
-
----
-
-## Step 13 — Teardown
+**DLQ has messages:**
 
 ```bash
-# Stop services (Ctrl+C in each terminal)
-
-# Stop infrastructure
-docker compose down
-
-# To also remove volumes (wipes Postgres data — schemas must be re-registered next time)
-docker compose down -v
+curl -s -X POST http://localhost:8081/api/orders/poison   # from §10, lands a message on orders.created.dlq
+curl -s localhost:8082/actuator/health | jq '.components.queueDepth'
 ```
+
+Expect `status: DOWN` — `QueueDepthHealthIndicator` is DOWN whenever *any* DLQ has more than zero
+messages (main-queue depth alone is informational, not a health signal). Drain the DLQ (management
+UI → purge, or manually ack the message) and re-check to see it return to `UP`.
+
+**What you verified:** both custom health indicators correctly surface operational problems
+(registry unreachable, poison messages piling up) through the standard actuator surface, not just
+generic liveness.
 
 ---
 
-## Step 14 — GitHub Actions Schema Governance
-
-This step documents the CI/CD automation that replaces manual schema registration. The
-workflows live in `.github/workflows/` and complement the local dev workflow — they don't
-replace it.
-
-> **Deep dives:** [`docs/self-hosted-runner-setup.md`](./self-hosted-runner-setup.md) is the
-> runner/registry install runbook (do that first); [`docs/github_ci_steps.md`](./github_ci_steps.md)
-> walks through wiring up and testing the workflows on GitHub. This step is the testing-guide
-> summary.
-
-### The runner model (self-hosted, standing local registry)
-
-These workflows run on a **self-hosted runner** that shares a machine with the standing
-local Apicurio registry, reachable at `http://localhost:8080`:
-
-```
-Your machine (always-on)
-├─ docker compose ──► apicurio :8080 ── postgres (pgdata volume, persistent)
-│                         └─ host `./mvnw register` + rule curls seed both artifacts after `up`
-└─ self-hosted GitHub runner (label: apicurio-local) ──reaches──► http://localhost:8080
-```
-
-**Why self-hosted, not GitHub-hosted?** The registry runs as containers on your machine,
-which is behind NAT and unreachable from GitHub's cloud runners. A self-hosted runner on the
-same machine reaches the registry over `localhost`. All three workflows target
-`runs-on: [self-hosted, apicurio-local]` — there is **no `DEV_REGISTRY_URL` secret**; the URL
-is hardcoded to `http://localhost:8080` in each workflow's `env`.
-
-### The three workflows at a glance
-
-| Workflow file | Trigger | Access | What it does |
-|---|---|---|---|
-| `schema-compat-check.yml` | PR touching `order-contracts/**` or `customer-contracts/**` | **read-only** (dry-run) | Runs `verify -Pcompat-check` for **both** modules against the registry's real history. Blocks merge if INCOMPATIBLE. Writes nothing. |
-| `schema-register.yml` | Push to `main` for the same paths | **write** | Runs `apicurio-registry:register` for both modules. Idempotent (`FIND_OR_CREATE_VERSION`) — a new version is created only if the schema bytes changed. |
-| `schema-governance-bootstrap.yml` | Manual (`workflow_dispatch`) | **write** | Attaches the `BACKWARD` rule to each artifact via the REST API. Run once per new registry. |
-
-> **Key property:** PRs only *read* (dry-run); only merges (and the manual bootstrap) *write*.
-> Opening or updating a PR can never mutate the standing registry.
-
-> **Note — both modules run every time.** Unlike a multi-domain matrix with path filters, these
-> workflows simply run `-pl order-contracts,customer-contracts` together. `compat-check` is a safe
-> no-op for an unchanged module, and `register` is idempotent, so running both is correct and keeps
-> the workflows simple. Adding a `payment-contracts` domain means appending it to the `-pl` list in
-> both workflows and re-running the bootstrap (extended to the new artifact).
-
-### One-time bootstrap (attach BACKWARD rules)
-
-The host-Maven cold-start step (Step 1) attaches the rules via `curl`. The bootstrap workflow is
-the manual/explicit equivalent for a fresh registry that wasn't seeded that way:
-
-1. GitHub repo → **Actions** → **Schema Governance Bootstrap** → **Run workflow**
-2. Leave the URL input blank to use the standing local registry (`http://localhost:8080`),
-   or enter a specific URL
-3. The workflow attaches the rule and then verifies it by GETting the rules endpoint
-
-The bootstrap is **idempotent** — HTTP 409 (rule already exists) is treated as success.
-Unlike the cold-start `curl` step, this workflow fails loudly on any other HTTP error.
-
-### Local dev vs CI — the full flow
-
-```
-Developer laptop (docker-compose)
-  1. docker compose up -d  ← then `./mvnw register` + rule curls bootstrap the standing local registry
-  2. Edit .proto / .json
-  3. ./mvnw -pl <module> verify -Pcompat-check \
-       -Dapicurio.registry.url=http://localhost:8080  ← optional early check
-
-GitHub Actions (self-hosted runner, same registry at localhost:8080)
-  4. Push branch + open PR
-  5. schema-compat-check.yml runs  ← automated dry-run, blocks merge if incompatible
-  6. PR approved + merged to main
-  7. schema-register.yml runs      ← automated, registers the new version
-```
-
-**Availability = your machine.** PR checks and registration run only when the machine, Docker
-Desktop, and the runner service are all up. If the machine is off, jobs **queue** until it's
-back — they don't fail.
-
-> **Security:** keep the repo **private** while a self-hosted runner is registered — a
-> self-hosted runner on a public repo lets a fork PR run arbitrary code on your machine. See
-> `self-hosted-runner-setup.md` §3.
-
-### Verify the CI loop end to end
+## 19. Teardown
 
 ```bash
-# Confirm the runner is registered and idle, and inspect recent runs:
-gh run list -L 5
-
-# Re-run the compat-check for an open PR (read-only, safe):
-gh run rerun <run-id>
-
-# Watch a run to completion:
-gh run view <run-id>
+docker compose down       # stop containers, keep the pgdata volume (registered schemas persist)
+docker compose down -v    # also remove the pgdata volume — next `compose up` starts from an empty registry
 ```
 
-A **compatible** PR (e.g. adding `optional string notes = 9;` to the proto) passes the
-compat-check; an **incompatible** one (e.g. `string order_id` → `int64 order_id`) fails it with
-a `RuleViolationException: INCOMPATIBLE` and — under branch protection — blocks the merge.
+Stop both Spring Boot services with `Ctrl-C` in their terminals.
 
 ---
 
-## Verification Checklist
+## 20. Quick reference
 
-| Scenario | Pass Criterion |
-|---|---|
-| `./mvnw test` | Zero failures, all 48+ unit tests green |
-| `./mvnw verify` | All 5 IT classes green (OrderCreatedIT, CustomerRegisteredIT, DlxRoutingIT, etc.) |
-| POST /api/orders (valid) | HTTP 201, consumer logs receipt, queue depth returns to 0 |
-| POST /api/orders (invalid) | HTTP 400, no message emitted |
-| POST /api/orders/poison | HTTP 202, message lands in `orders.created.dlq` immediately (X-Failure-Retry-Count: 0) |
-| `verify -Pcompat-check` (compatible) | Maven goal succeeds |
-| `verify -Pincompatible-demo` | Maven goal FAILS with INCOMPATIBLE error |
-| `/actuator/health` | status UP with registry component |
-| `schema-compat-check.yml` (PR with compatible change) | GHA job passes, merge allowed |
-| `schema-compat-check.yml` (PR with incompatible change) | GHA job fails, merge blocked |
-| `schema-register.yml` (merge to main) | New version appears in Apicurio UI; version count +1 |
-| Bootstrap workflow | Rules endpoint returns `BACKWARD` for both domain artifacts |
+**UIs / endpoints:**
 
----
+| UI / endpoint | URL | Credentials |
+|---|---|---|
+| Apicurio Registry UI | http://localhost:8888 | none |
+| Apicurio Registry API | http://localhost:8080 | none |
+| RabbitMQ management | http://localhost:15672 | `guest` / `guest` |
+| Producer health | http://localhost:8081/actuator/health | none |
+| Consumer health | http://localhost:8082/actuator/health | none |
 
-## Quick Reference — Seed Data
+**Seed data used throughout this guide** (copy-paste, no need to re-derive UUIDs):
 
-### Valid Order
 ```json
-{"customerId":"cust-001","productId":"prod-456","quantity":2,"totalAmount":49.99,"currency":"USD"}
+{"customerId":"11111111-1111-1111-1111-111111111111","productId":"22222222-2222-2222-2222-222222222222","quantity":2,"totalAmount":99.99,"currency":"USD"}
+{"orderId":"33333333-3333-3333-3333-333333333333","trackingNumber":"1Z999AA10123456784","carrier":"UPS"}
+{"orderId":"33333333-3333-3333-3333-333333333333","reason":"Customer request","refundAmount":49.99}
+{"email":"alice@example.com","firstName":"Alice","lastName":"Smith","phoneNumber":"+15551234567"}
+{"customerId":"44444444-4444-4444-4444-444444444444","address":{"line1":"221B Baker Street","city":"London","postalCode":"NW1 6XE","countryCode":"GB"}}
+{"customerId":"44444444-4444-4444-4444-444444444444","previousTier":"BRONZE","newTier":"GOLD"}
 ```
 
-### Valid Customer
-```json
-{"email":"alice@example.com","firstName":"Alice","lastName":"Smith","phoneNumber":"+12025550123"}
-```
+**Command reference:**
 
-### Invalid Order (triggers 400)
-```json
-{"customerId":"cust-bad"}
-```
-
-### Invalid Customer (triggers 400 — missing email)
-```json
-{"firstName":"Bob","lastName":"Jones"}
+```bash
+./mvnw clean install -DskipTests                          # build everything
+./mvnw test                                                # unit tests only
+./mvnw verify                                              # unit + Testcontainers IT
+./mvnw -pl order-contracts,customer-contracts -am process-classes  # regenerate schemas
+./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
+./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
+./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
+./mvnw -pl producer-service spring-boot:run                # port 8081
+./mvnw -pl consumer-service spring-boot:run                # port 8082
+docker compose up / down / down -v
 ```

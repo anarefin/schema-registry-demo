@@ -40,17 +40,17 @@ class SchemaAwareMessageConverterTest {
     private static final SchemaCoordinates COORDS =
             new SchemaCoordinates("events.orders", "OrderCreated", "1");
     private static final ResolvedSchema SCHEMA =
-            new ResolvedSchema(42L, SchemaType.PROTOBUF, "proto-schema".getBytes());
+            new ResolvedSchema(42L, SchemaType.JSON, "{}".getBytes());
 
     // A minimal stand-in for a domain object
     record Order(String id) {}
 
     @BeforeEach
     void setUp() {
-        when(strategy.schemaType()).thenReturn(SchemaType.PROTOBUF);
-        lenient().when(strategy.contentType()).thenReturn(SchemaType.PROTOBUF.contentType());
+        when(strategy.schemaType()).thenReturn(SchemaType.JSON);
+        lenient().when(strategy.contentType()).thenReturn(SchemaType.JSON.contentType());
 
-        TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.PROTOBUF, "orders.created");
+        TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.created");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
 
         converter = new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy));
@@ -63,7 +63,7 @@ class SchemaAwareMessageConverterTest {
 
         when(schemaResolver.resolveByCoordinates(COORDS)).thenReturn(SCHEMA);
         when(strategy.serialize(order, SCHEMA)).thenReturn(PAYLOAD_BYTES);
-        when(schemaResolver.resolveByGlobalId(42L, SchemaType.PROTOBUF)).thenReturn(SCHEMA);
+        when(schemaResolver.resolveByGlobalId(42L, SchemaType.JSON)).thenReturn(SCHEMA);
         when(strategy.deserialize(PAYLOAD_BYTES, Order.class, SCHEMA)).thenReturn(order);
 
         Message msg = converter.toMessage(order, new MessageProperties());
@@ -86,14 +86,16 @@ class SchemaAwareMessageConverterTest {
         assertThat((Object) props.getHeader(SchemaMessageHeaders.GROUP_ID)).isEqualTo("events.orders");
         assertThat((Object) props.getHeader(SchemaMessageHeaders.ARTIFACT_ID)).isEqualTo("OrderCreated");
         assertThat((Object) props.getHeader(SchemaMessageHeaders.VERSION)).isEqualTo("1");
-        assertThat((Object) props.getHeader(SchemaMessageHeaders.TYPE)).isEqualTo("PROTOBUF");
-        assertThat(props.getContentType()).isEqualTo("application/x-protobuf");
-        assertThat((Object) props.getHeader(SchemaMessageHeaders.MESSAGE_ID)).isNotNull();
+        assertThat((Object) props.getHeader(SchemaMessageHeaders.TYPE)).isEqualTo("JSON");
+        assertThat(props.getContentType()).isEqualTo("application/json");
+        assertThat((Object) props.getHeader(SchemaMessageHeaders.CORRELATION_ID)).isNotNull();
     }
 
     /**
-     * TC-1.11: X-Schema-Type header says JSON but TypeMapping is PROTOBUF → IncompatibleSchemaTypeException.
-     * The mismatch is caught before schema resolution (no stub needed for resolveByGlobalId).
+     * TC-1.11: X-Schema-Type header says PROTOBUF (e.g. a stale producer) but the TypeMapping
+     * is JSON → IncompatibleSchemaTypeException. The raw header string is compared, so even
+     * types this library no longer supports surface as a crisp mismatch. The check runs
+     * before schema resolution (no stub needed for resolveByGlobalId).
      */
     @Test
     void fromMessage_schemaTipeMismatch_throwsIncompatible() {
@@ -101,7 +103,7 @@ class SchemaAwareMessageConverterTest {
         props.setHeader(SchemaMessageHeaders.GLOBAL_ID, 42L);
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
-        props.setHeader(SchemaMessageHeaders.TYPE, "JSON"); // mismatch — TypeMapping says PROTOBUF
+        props.setHeader(SchemaMessageHeaders.TYPE, "PROTOBUF"); // mismatch — TypeMapping says JSON
 
         Message msg = new Message(PAYLOAD_BYTES, props);
 
@@ -128,9 +130,9 @@ class SchemaAwareMessageConverterTest {
         props.setHeader(SchemaMessageHeaders.GLOBAL_ID, 42L);
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
-        props.setHeader(SchemaMessageHeaders.TYPE, "PROTOBUF");
+        props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
 
-        when(schemaResolver.resolveByGlobalId(42L, SchemaType.PROTOBUF)).thenReturn(SCHEMA);
+        when(schemaResolver.resolveByGlobalId(42L, SchemaType.JSON)).thenReturn(SCHEMA);
         when(strategy.deserialize(any(), any(), any()))
                 .thenThrow(new com.example.messaging.core.exception.DeserializationException("Order", new RuntimeException("bad bytes")));
 
@@ -149,9 +151,9 @@ class SchemaAwareMessageConverterTest {
         TypeMapping jsonMapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.json");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(jsonMapping));
 
-        // Only PROTOBUF strategy provided — JSON mapping has no matching strategy
+        // No strategy provided — JSON mapping has no matching strategy
         assertThatThrownBy(() ->
-                new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy)))
+                new SchemaAwareMessageConverter(registry, schemaResolver, List.of()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("SchemaType.JSON");
     }

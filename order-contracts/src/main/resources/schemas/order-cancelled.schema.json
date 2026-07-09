@@ -1,0 +1,32 @@
+{
+  "$id" : "urn:example:schema:OrderCancelled",
+  "$schema" : "http://json-schema.org/draft-07/schema#",
+  "description" : "Emitted when an order is cancelled.",
+  "properties" : {
+    "cancelledAt" : {
+      "description" : "Instant the order was cancelled (ISO-8601).",
+      "format" : "date-time",
+      "type" : "string"
+    },
+    "orderId" : {
+      "description" : "Unique identifier of the cancelled order.",
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "reason" : {
+      "description" : "Human-readable reason the order was cancelled.",
+      "type" : "string"
+    },
+    "refundAmount" : {
+      "description" : "Amount refunded to the customer, if any; must be non-negative.",
+      "minimum" : 0.00,
+      "type" : "number"
+    }
+  },
+  "required" : [
+    "orderId",
+    "reason"
+  ],
+  "title" : "OrderCancelled",
+  "type" : "object"
+}

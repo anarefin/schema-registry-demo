@@ -27,7 +27,9 @@ class ProducerValidationTest {
     @Test
     void tc59_orderValidationFailureReturns400() throws Exception {
         OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
-        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
 
         doThrow(new SchemaValidationException("events.orders:OrderCreated", "field missing"))
                 .when(eventPublisher).publish(any(), any());
@@ -35,8 +37,9 @@ class ProducerValidationTest {
         mockMvc.perform(post("/api/orders")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"customerId":"c1","productId":"p1","quantity":1,
-                                 "totalAmount":9.99,"currency":"USD"}
+                                {"customerId":"11111111-1111-1111-1111-111111111111",
+                                 "productId":"22222222-2222-2222-2222-222222222222",
+                                 "quantity":1,"totalAmount":9.99,"currency":"USD"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Schema validation failed")));
@@ -45,7 +48,9 @@ class ProducerValidationTest {
     @Test
     void tc59_customerValidationFailureReturns400() throws Exception {
         CustomerController controller = new CustomerController(eventPublisher);
-        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
 
         doThrow(new SchemaValidationException("events.customers:CustomerRegistered", "email invalid"))
                 .when(eventPublisher).publish(any(), any());

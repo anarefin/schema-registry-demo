@@ -1,5 +1,6 @@
 /**
- * Order Protobuf contracts (generated classes land here in Phase 3).
- * Placeholder so the module compiles in the Phase 0 skeleton (T-0.6).
+ * Order event contracts (code-first). Each event is an annotated Java record — the single source
+ * of truth — from which the committed JSON Schema under {@code resources/schemas/} is generated.
+ * Also holds the plain-String AMQP routing constants ({@link com.example.contracts.orders.OrderEventRouting}).
  */
 package com.example.contracts.orders;

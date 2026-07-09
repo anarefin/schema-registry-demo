@@ -1,6 +1,8 @@
 package com.example.consumer.health;
 
-import com.example.consumer.config.AmqpConfiguration;
+import com.example.amqp.topology.TopologyNaming;
+import com.example.messaging.core.mapping.TypeMapping;
+import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -12,10 +14,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Reports RabbitMQ queue and DLQ message counts (T-6.5, AC-6.1).
+ * Reports RabbitMQ queue and DLQ message counts (AC-6.1). Iterates the {@link TypeMappingRegistry}
+ * and derives each event's queue ({@code rk.queue}) and DLQ ({@code rk.dlq}) from its routing key,
+ * so adding an event needs no edit here.
  *
- * <p>Status is WARNING when either DLQ contains messages (signals processing failures).
- * Main-queue depth is reported as info; never triggers DOWN on its own.
+ * <p>Status is DOWN when any DLQ contains messages (signals processing failures). Main-queue depth
+ * is reported as info; it never triggers DOWN on its own.
  */
 @Component
 public class QueueDepthHealthIndicator implements HealthIndicator {
@@ -23,21 +27,28 @@ public class QueueDepthHealthIndicator implements HealthIndicator {
     private static final Logger log = LoggerFactory.getLogger(QueueDepthHealthIndicator.class);
 
     private final RabbitAdmin rabbitAdmin;
+    private final TypeMappingRegistry typeMappingRegistry;
 
-    public QueueDepthHealthIndicator(RabbitAdmin rabbitAdmin) {
+    public QueueDepthHealthIndicator(RabbitAdmin rabbitAdmin, TypeMappingRegistry typeMappingRegistry) {
         this.rabbitAdmin = rabbitAdmin;
+        this.typeMappingRegistry = typeMappingRegistry;
     }
 
     @Override
     public Health health() {
         try {
             Map<String, Object> details = new LinkedHashMap<>();
-            int customersDlqDepth = queueDepth(AmqpConfiguration.CUSTOMERS_DLQ, details);
-            int ordersDlqDepth    = queueDepth(AmqpConfiguration.ORDERS_DLQ, details);
-            queueDepth(AmqpConfiguration.CUSTOMERS_REGISTERED_QUEUE, details);
-            queueDepth(AmqpConfiguration.ORDERS_CREATED_QUEUE, details);
+            boolean dlqEmpty = true;
 
-            boolean dlqEmpty = customersDlqDepth == 0 && ordersDlqDepth == 0;
+            for (TypeMapping mapping : typeMappingRegistry.all()) {
+                String rk = mapping.routingKey();
+                int dlqDepth = queueDepth(TopologyNaming.dlqName(rk), details);
+                queueDepth(TopologyNaming.queueName(rk), details);
+                if (dlqDepth > 0) {
+                    dlqEmpty = false;
+                }
+            }
+
             return (dlqEmpty ? Health.up() : Health.down())
                     .withDetails(details).build();
         } catch (Exception e) {

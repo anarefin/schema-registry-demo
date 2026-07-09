@@ -1,7 +1,7 @@
 package com.example.consumer;
 
+import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
-import com.example.consumer.config.AmqpConfiguration;
 import com.example.consumer.listener.CustomerEventListener;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.exception.SchemaNotFoundException;
@@ -47,7 +47,6 @@ import static org.mockito.Mockito.when;
  * TC-5.5 I  — downstream RuntimeException → retried 3×, then DLQ
  * TC-5.6 I  — retry increments X-Retry-Count, correct tier
  * TC-5.7 I  — all X-Failure-* DLQ headers present
- * TC-5.8 I  — duplicate X-Message-Id processed once (idempotency)
  *
  * <p>Uses short TTL tiers (200/400/600 ms) for speed.
  * RabbitMQ = real Testcontainer; ApicurioClient = mock.
@@ -94,7 +93,7 @@ class DlxRoutingIT {
         when(apicurioClient.latestVersion(any(), any())).thenReturn(schema);
 
         // Drain DLQ so each test starts with an empty queue
-        drainQueue(AmqpConfiguration.CUSTOMERS_DLQ);
+        drainQueue(CustomerEventRouting.REGISTERED_DLQ);
     }
 
     // ---- TC-5.2 / TC-5.3 / TC-5.7 ----------------------------------------
@@ -106,10 +105,10 @@ class DlxRoutingIT {
      */
     @Test
     void tc52_53_57_deserializationPoisonRoutesToDlqWithHeaders() {
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY,
-                "{INVALID_JSON".getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString());
+        sendRaw(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
+                "{INVALID_JSON".getBytes(StandardCharsets.UTF_8));
 
-        Message dlqMsg = awaitDlq(AmqpConfiguration.CUSTOMERS_DLQ);
+        Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ);
 
         // TC-5.2 / TC-5.3: permanent → DLQ, retry count = 0
         assertThat(SchemaMessageHeaders.getRetryCount(dlqMsg.getMessageProperties())).isEqualTo(0);
@@ -121,7 +120,7 @@ class DlxRoutingIT {
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_MESSAGE)).isNotBlank();
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_STACK_TRACE)).isNotBlank();
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_ROUTING_KEY))
-                .isEqualTo(AmqpConfiguration.CUSTOMERS_ROUTING_KEY);
+                .isEqualTo(CustomerEventRouting.REGISTERED_ROUTING_KEY);
         assertThat(headerStr(p, SchemaMessageHeaders.FAILURE_FAILED_AT)).isNotBlank();
         assertThat(SchemaMessageHeaders.getRetryCount(p)).isEqualTo(0);
     }
@@ -139,10 +138,10 @@ class DlxRoutingIT {
         when(apicurioClient.fetchByCoordinates(any()))
                 .thenThrow(new SchemaNotFoundException("coordinates"));
 
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY,
-                "{}".getBytes(StandardCharsets.UTF_8), UUID.randomUUID().toString());
+        sendRaw(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
+                "{}".getBytes(StandardCharsets.UTF_8));
 
-        Message dlqMsg = awaitDlq(AmqpConfiguration.CUSTOMERS_DLQ, 15);
+        Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ, 15);
         assertThat(dlqMsg.getMessageProperties()
                 .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
     }
@@ -159,65 +158,30 @@ class DlxRoutingIT {
         doAnswer(inv -> {
             callCount.incrementAndGet();
             throw new RuntimeException("simulated downstream error");
-        }).when(customerEventListener).onCustomerRegistered(any(), any());
+        }).when(customerEventListener).onCustomerRegistered(any());
 
         byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY,
-                validJson, UUID.randomUUID().toString());
+        sendRaw(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY, validJson);
 
         // 4 calls = initial delivery + 3 retries via TTL queues
         await().atMost(10, TimeUnit.SECONDS)
                .untilAsserted(() -> assertThat(callCount.get()).isGreaterThanOrEqualTo(4));
 
         // TC-5.6: X-Retry-Count=3 in DLQ message
-        Message dlqMsg = awaitDlq(AmqpConfiguration.CUSTOMERS_DLQ);
+        Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ);
         assertThat(dlqMsg.getMessageProperties()
                 .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
     }
 
-    // ---- TC-5.8 ------------------------------------------------------------
-
-    /**
-     * TC-5.8: same X-Message-Id delivered twice → idempotency guard prevents double-processing.
-     *
-     * <p>Both messages arrive at the listener (spy invoked 2×) but only the first triggers
-     * actual processing — the second returns early in the real method. The test verifies
-     * that exactly 2 deliveries arrived and the DLQ is empty (no routing error from either).
-     */
-    @Test
-    void tc58_duplicateMessageIdProcessedOnce() throws Exception {
-        String messageId = UUID.randomUUID().toString();
-        byte[] validJson = objectMapper.writeValueAsBytes(validCustomer());
-
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY, validJson, messageId);
-
-        // Wait for the first delivery to be processed
-        await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
-                Mockito.verify(customerEventListener, Mockito.atLeastOnce())
-                       .onCustomerRegistered(any(), any()));
-
-        // Send the duplicate (same X-Message-Id)
-        sendRaw("events.exchange", AmqpConfiguration.CUSTOMERS_ROUTING_KEY, validJson, messageId);
-
-        // Give the duplicate time to arrive and be handled (returns early via idempotency)
-        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() ->
-                Mockito.verify(customerEventListener, Mockito.times(2))
-                       .onCustomerRegistered(any(), any()));
-
-        // No DLQ message: neither delivery caused a failure routing
-        assertThat(rabbitTemplate.receive(AmqpConfiguration.CUSTOMERS_DLQ, 300)).isNull();
-    }
-
     // ---- helpers -----------------------------------------------------------
 
-    private void sendRaw(String exchange, String routingKey, byte[] body, String messageId) {
+    private void sendRaw(String exchange, String routingKey, byte[] body) {
         MessageProperties props = new MessageProperties();
         props.setContentType(SchemaType.JSON.contentType());
         props.setHeader(SchemaMessageHeaders.GLOBAL_ID, MOCK_GLOBAL_ID);
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.customers");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "CustomerRegistered");
         props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
-        props.setHeader(SchemaMessageHeaders.MESSAGE_ID, messageId);
         rabbitTemplate.send(exchange, routingKey, new Message(body, props));
     }
 
@@ -237,19 +201,14 @@ class DlxRoutingIT {
     }
 
     private static CustomerRegistered validCustomer() {
-        CustomerRegistered c = new CustomerRegistered();
-        c.setCustomerId(UUID.randomUUID().toString());
-        c.setEmail("test@example.com");
-        c.setFirstName("Test");
-        c.setLastName("User");
-        c.setRegisteredAt("2026-05-31T00:00:00Z");
-        return c;
+        return new CustomerRegistered(UUID.randomUUID(), "test@example.com", "Test", "User", null,
+                java.time.Instant.parse("2026-05-31T00:00:00Z"));
     }
 
     private static byte[] loadSchemaBytes() throws Exception {
         try (var stream = DlxRoutingIT.class.getClassLoader()
-                .getResourceAsStream("schemas/customer-registered.json")) {
-            return Objects.requireNonNull(stream, "customer-registered.json not on classpath")
+                .getResourceAsStream("schemas/customer-registered.schema.json")) {
+            return Objects.requireNonNull(stream, "customer-registered.schema.json not on classpath")
                     .readAllBytes();
         }
     }

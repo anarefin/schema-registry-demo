@@ -1,0 +1,53 @@
+{
+  "$id" : "urn:example:schema:OrderCreated",
+  "$schema" : "http://json-schema.org/draft-07/schema#",
+  "description" : "Emitted when a customer places a new order.",
+  "properties" : {
+    "createdAt" : {
+      "description" : "Instant the order was created (ISO-8601).",
+      "format" : "date-time",
+      "type" : "string"
+    },
+    "currency" : {
+      "description" : "ISO-4217 three-letter currency code, e.g. USD.",
+      "maxLength" : 3,
+      "minLength" : 3,
+      "type" : "string"
+    },
+    "customerId" : {
+      "description" : "Identifier of the customer who placed the order.",
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "orderId" : {
+      "description" : "Unique identifier of the order.",
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "productId" : {
+      "description" : "Identifier of the ordered product.",
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "quantity" : {
+      "description" : "Number of units ordered; must be at least 1.",
+      "minimum" : 1,
+      "type" : "integer"
+    },
+    "totalAmount" : {
+      "description" : "Order total in the given currency; must be greater than 0.01.",
+      "exclusiveMinimum" : 0.01,
+      "type" : "number"
+    }
+  },
+  "required" : [
+    "currency",
+    "customerId",
+    "orderId",
+    "productId",
+    "quantity",
+    "totalAmount"
+  ],
+  "title" : "OrderCreated",
+  "type" : "object"
+}

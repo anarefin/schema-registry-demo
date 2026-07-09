@@ -1,0 +1,41 @@
+name: Schema Drift Check
+
+# Offline gate: regenerates every JSON Schema from its Java Record (each contracts module owns its
+# own generation via the shared build-only `schema-gen-tools` jar, ADR-0003) and fails if any
+# committed artifact differs. Runs without a registry — pure local Maven build.
+#
+# Catches: record/annotation changes that weren't followed by a schema regeneration + commit.
+#
+# Data-driven only insofar as the diff globs every `*-contracts` schemas dir; the modules whose
+# process-classes phase gets run must be listed explicitly below (each owns its own exec-maven-plugin
+# execution — adding a new contracts module means adding it to the -pl list here too).
+
+on:
+  pull_request:
+    paths:
+      - '*-contracts/**'
+      - 'schema-gen-tools/**'
+
+jobs:
+  drift-check:
+    name: Drift check (all contract modules)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Regenerate all schemas
+        # Each contracts module's own process-classes phase invokes schema-gen-tools against its
+        # own records (ADR-0003); -am also builds schema-gen-tools itself first.
+        run: ./mvnw -pl order-contracts,customer-contracts -am process-classes --no-transfer-progress
+
+      - name: Fail if any schema differs from its committed artifact
+        run: git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'

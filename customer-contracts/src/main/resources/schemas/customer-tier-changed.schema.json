@@ -1,0 +1,41 @@
+{
+  "$id" : "urn:example:schema:CustomerTierChanged",
+  "$schema" : "http://json-schema.org/draft-07/schema#",
+  "description" : "Emitted when a customer's loyalty tier changes.",
+  "properties" : {
+    "customerId" : {
+      "description" : "Unique identifier of the customer.",
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "effectiveAt" : {
+      "description" : "Instant the tier change took effect (ISO-8601).",
+      "format" : "date-time",
+      "type" : "string"
+    },
+    "newTier" : {
+      "description" : "New loyalty tier.",
+      "enum" : [
+        "BRONZE",
+        "SILVER",
+        "GOLD"
+      ],
+      "type" : "string"
+    },
+    "previousTier" : {
+      "description" : "Previous loyalty tier, if any.",
+      "enum" : [
+        "BRONZE",
+        "SILVER",
+        "GOLD"
+      ],
+      "type" : "string"
+    }
+  },
+  "required" : [
+    "customerId",
+    "newTier"
+  ],
+  "title" : "CustomerTierChanged",
+  "type" : "object"
+}

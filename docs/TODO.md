@@ -1,5 +1,10 @@
 # Detailed Execution Task List — Apicurio + RabbitMQ Schema Registry POC
 
+> **Refactor note (June 2026):** the POC was refactored after completion to be **JSON
+> Schema-only** — `OrderCreated` is now a JSON Schema artifact (FORWARD rule, generated POJO
+> via jsonschema2pojo); all Protobuf tooling was removed. Protobuf tasks/criteria below are
+> kept as the historical record of the original build.
+
 ## Context
 
 `schema-registry-demo/` is the Maven parent root for this POC. This file is the **expanded
@@ -193,7 +198,8 @@ registry → consumer via Testcontainers.
     chosen pattern (spec §10.3/§10.4 "pick one") — apply identically in Phase 3.**
 - [x] **T-2.4 — Register schema**  *(✅ apicurio-registry-maven-plugin configured; run ./mvnw -pl customer-contracts apicurio-registry:register against live registry)*
   - `apicurio-registry-maven-plugin:register` → artifact `CustomerRegistered` in group
-    `events.customers`, JSON type, **BACKWARD** rule.
+    `events.customers`, JSON type, **FORWARD** rule (Apicurio rejects JSON property additions
+    under BACKWARD as `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`; only FORWARD accepts them).
   - Done-check (**TC-2.2 I**): REST API query confirms the artifact exists.
 - [x] **T-2.5 — Producer path**  *(✅ CustomerController POST /api/customers; AmqpConfiguration; spring-web + spring-amqp deps)*
   - `producer-service`: map a demo JSON body → `CustomerRegistered` → publish via `EventPublisher`.
@@ -206,8 +212,8 @@ registry → consumer via Testcontainers.
 - [x] **TC-2.3 I** Testcontainers `*IT` round-trip producer→consumer same logical object.  *(✅ CustomerRegisteredIT.tc23_roundTrip)*
 - [x] **TC-2.4 I** message carries `content-type: application/json` + all `X-Schema-*` headers.  *(✅ CustomerRegisteredIT.tc24_schemaHeaders)*
 - [x] **TC-2.5 I** extra optional field still deserializes (Jackson tolerance).  *(✅ CustomerRegisteredIT.tc25_extraFieldToleratedByJackson)*
-- [x] AC-2.1 `CustomerRegistered` visible in UI under `events.customers` with BACKWARD rule attached.
-  *(✅ REST confirms: groupId=events.customers artifactId=CustomerRegistered artifactType=JSON; COMPATIBILITY rule config=BACKWARD)*
+- [x] AC-2.1 `CustomerRegistered` visible in UI under `events.customers` with FORWARD rule attached.
+  *(✅ REST confirms: groupId=events.customers artifactId=CustomerRegistered artifactType=JSON; COMPATIBILITY rule config=FORWARD — switched from BACKWARD because JSON property additions only validate under FORWARD)*
 - [x] AC-2.2 JSON round-trip passes via Testcontainers.  *(✅ CustomerRegisteredIT.tc23_roundTrip)*
 - [x] AC-2.3 `register` proven against live 3.2.0 registry.  *(✅ GlobalId=1; `./mvnw -pl customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080`)*
 
@@ -255,10 +261,10 @@ flows producer → registry → consumer.
 
 ## Phase 4 — Schema Evolution & Compatibility
 
-**Depends on:** Phases 2 & 3. **Exit:** BACKWARD governance proven; accept + reject paths
-demonstrated in CI.
+**Depends on:** Phases 2 & 3. **Exit:** compatibility governance proven (BACKWARD for the
+Protobuf artifact, FORWARD for the JSON artifact); accept + reject paths demonstrated in CI.
 
-- [x] **T-4.1** Confirm BACKWARD rule attached to both artifacts (set at registration).  *(✅ `<rules><rule><ruleType>COMPATIBILITY</ruleType><config>BACKWARD</config></rule></rules>` added to both contracts POMs; applied on next `apicurio-registry:register` run)*
+- [x] **T-4.1** Confirm the compatibility rule is attached to both artifacts.  *(✅ `BACKWARD` on `OrderCreated`, `FORWARD` on `CustomerRegistered` — attached via REST/bootstrap, not embedded in the POMs. JSON uses FORWARD because Apicurio rejects property additions under BACKWARD as `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`.)*
 - [x] **T-4.2** Scenario 1 (compatible): add optional `promo_code` to `OrderCreated`, register v2;
   producer pinned v1 → v1 consumers read; switch producer to v2 → v1 consumers still read.
   - Done-check (**TC-4.1 I** v2 registers, ≥2 versions; **TC-4.2 I** v1 consumer reads v2 payload).
@@ -266,8 +272,8 @@ demonstrated in CI.
 - [x] **T-4.3** Scenario 2 (incompatible): remove required field / reuse field number / change type
   → registration **rejected**. Done-check (**TC-4.3 I** `apicurio-registry-maven-plugin:test`
   fails with clear message).  *(✅ `order-created-incompatible.proto` (int64 order_id on field 1) in `src/test/resources/schemas/`; demo: `./mvnw -pl order-contracts apicurio-registry:test -Pincompatible-demo`)*
-- [x] **T-4.4** Scenario 3 (JSON): add optional prop to `CustomerRegistered` v2 (accepted);
-  incompatible change rejected. Done-check (**TC-4.4 I**).  *(✅ `promoCode` optional property added to customer-registered.json; incompatible schema drops `email`; TC-4.4 3/3 green — `CustomerRegisteredEvolutionTest`)*
+- [x] **T-4.4** Scenario 3 (JSON): add optional prop to `CustomerRegistered` (accepted under
+  FORWARD); incompatible change rejected. Done-check (**TC-4.4 I**).  *(✅ optional `promoCode` (v2) and `input1` (v3) added to customer-registered.json — FORWARD-compatible; incompatible schema adds a required `accountType` (FORWARD-incompatible); TC-4.4 3/3 green — `CustomerRegisteredEvolutionTest`)*
 - [x] **T-4.5** Wire `apicurio-registry-maven-plugin:test` as the **CI merge gate** — incompatible
   change fails the goal and fails the merge.  *(✅ `compat-check` Maven profile in both contracts POMs; CI gate: `./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check`)*
 - [x] **T-4.6** Demo branch with an incompatible change; capture failing-CI output + Apicurio
@@ -276,7 +282,7 @@ demonstrated in CI.
   Done-check (**TC-4.6 I** pinned producer reads exact version; header reflects pin).
   *(✅ `schema.{orders,customers}.pinned-version` in both `application.yml`; TC-4.6 2/2 green — `SchemaVersionPinningIT`)*
 
-**Acceptance:** ✅ AC-4.1 (code) BACKWARD rule declared in both POMs; ≥2 versions appear in UI after `apicurio-registry:register` run (requires `docker compose up`) ·
+**Acceptance:** ✅ AC-4.1 compatibility rules attached via REST/bootstrap (BACKWARD on `OrderCreated`, FORWARD on `CustomerRegistered`); ≥2 versions appear in UI after `apicurio-registry:register` run (requires `docker compose up`) ·
 ✅ AC-4.2 (code) incompatible-demo profile + schemas in place; rejection confirmed by running `./mvnw -pl order-contracts apicurio-registry:test -Pincompatible-demo` against live registry ·
 ✅ AC-4.3 failing-CI scripts ready; screenshot capture deferred to Phase 6 README ·
 ✅ TC-4.2 3/3 · TC-4.4 3/3 · TC-4.6 2/2 all green. **Phase 4 code complete.**
@@ -323,8 +329,9 @@ correct DLQ with all headers (TC-5.7) · ✅ AC-5.3 idempotency working (TC-5.8)
   `depends_on` its success (default). Document dev auto-register path as the alternative.
   Done-check (**TC-6.2 M**): cold `compose up` registers schemas before services, all-healthy.
   *(✅ originally a `schema-registrar` one-shot compose service; later retired in favour of the
-  host-Maven cold-start step — `./mvnw … apicurio-registry:register` + BACKWARD rule curls,
-  documented in README §2 — since the contracts modules already carry the plugin)*
+  host-Maven cold-start step — `./mvnw … apicurio-registry:register` + compatibility-rule curls
+  (BACKWARD for orders, FORWARD for customers), documented in README §2 — since the contracts
+  modules already carry the plugin)*
 - [x] **T-6.3** Sequence diagrams: produce, consume, evolution-rejected, validation-failed.
   *(✅ four Mermaid `sequenceDiagram` blocks in README.md)*
 - [x] **T-6.4** "What this POC proves" — map each deliverable to spec §1 goals.
@@ -349,7 +356,7 @@ correct DLQ with all headers (TC-5.7) · ✅ AC-5.3 idempotency working (TC-5.8)
 |---|---|---|
 | 1. Cold `compose up` healthy | 0 / 6 | AC-0.2, TC-6.2 |
 | 2. Orders + customers received & deserialized | 2 + 3 | TC-2.3, TC-3.3 |
-| 3. Two artifacts, ≥2 versions, BACKWARD | 4 | AC-4.1, TC-4.1 |
+| 3. Two artifacts, ≥2 versions, compat rule (BACKWARD orders / FORWARD customers) | 4 | AC-4.1, TC-4.1 |
 | 4. Incompatible v3 fails clearly | 4 | AC-4.2, TC-4.3 |
 | 5. Malformed → correct DLQ, all headers | 5 | AC-5.2, TC-5.7 |
 | 6. README walkthrough on fresh clone | 6 | AC-6.1, TC-6.1 |

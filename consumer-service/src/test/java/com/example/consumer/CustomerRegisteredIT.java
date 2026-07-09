@@ -1,5 +1,6 @@
 package com.example.consumer;
 
+import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
 import com.example.consumer.listener.CustomerEventListener;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
@@ -24,7 +25,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,36 +79,28 @@ class CustomerRegisteredIT {
 
     // ---- TC-2.3: round-trip ------------------------------------------------
 
-    /**
-     * TC-2.3 (I): CustomerRegistered published via EventPublisher reaches the listener
-     * as a fully typed domain object with correct field values.
-     */
     @Test
     void tc23_roundTrip() {
-        CustomerRegistered event = buildEvent("e2e-id", "round@trip.com", "Round", "Trip");
+        CustomerRegistered event = buildEvent("round@trip.com", "Round", "Trip");
 
-        eventPublisher.publish("events.exchange", event);
+        eventPublisher.publish(CustomerEventRouting.EXCHANGE, event);
 
         ArgumentCaptor<CustomerRegistered> captor = ArgumentCaptor.forClass(CustomerRegistered.class);
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
-                verify(customerEventListener).onCustomerRegistered(captor.capture(), any()));
+                verify(customerEventListener).onCustomerRegistered(captor.capture()));
 
         CustomerRegistered received = captor.getValue();
-        assertThat(received.getCustomerId()).isEqualTo("e2e-id");
-        assertThat(received.getEmail()).isEqualTo("round@trip.com");
-        assertThat(received.getFirstName()).isEqualTo("Round");
-        assertThat(received.getLastName()).isEqualTo("Trip");
+        assertThat(received.customerId()).isEqualTo(event.customerId());
+        assertThat(received.email()).isEqualTo("round@trip.com");
+        assertThat(received.firstName()).isEqualTo("Round");
+        assertThat(received.lastName()).isEqualTo("Trip");
     }
 
     // ---- TC-2.4: content-type + X-Schema-* headers -------------------------
 
-    /**
-     * TC-2.4 (I): SchemaAwareMessageConverter produces content-type: application/json
-     * and all required X-Schema-* headers (globalId, groupId, artifactId, type, messageId).
-     */
     @Test
     void tc24_schemaHeaders() {
-        CustomerRegistered event = buildEvent("hdr-id", "hdr@test.com", "Hdr", "Test");
+        CustomerRegistered event = buildEvent("hdr@test.com", "Hdr", "Test");
 
         Message rawMsg = converter.toMessage(event, new MessageProperties());
 
@@ -121,27 +116,24 @@ class CustomerRegisteredIT {
                 .isEqualTo("JSON");
         assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.VERSION))
                 .isNotBlank();
-        assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.MESSAGE_ID))
+        assertThat(rawMsg.getMessageProperties().<String>getHeader(SchemaMessageHeaders.CORRELATION_ID))
                 .isNotBlank();
     }
 
     // ---- TC-2.5: Jackson tolerance for extra fields ------------------------
 
-    /**
-     * TC-2.5 (I): a message body with an unknown extra field (e.g. from a v2 producer)
-     * deserializes cleanly at a v1 consumer — Jackson tolerates unknown properties.
-     */
     @Test
     void tc25_extraFieldToleratedByJackson() {
+        UUID id = UUID.randomUUID();
         String jsonWithExtra = """
                 {
-                  "customerId": "extra-id",
+                  "customerId": "%s",
                   "email": "extra@test.com",
                   "firstName": "Extra",
                   "lastName": "Field",
                   "promoCode": "SUMMER2026"
                 }
-                """;
+                """.formatted(id);
         byte[] bytes = jsonWithExtra.getBytes(StandardCharsets.UTF_8);
 
         MessageProperties props = new MessageProperties();
@@ -156,26 +148,22 @@ class CustomerRegisteredIT {
 
         assertThat(result).isInstanceOf(CustomerRegistered.class);
         CustomerRegistered cr = (CustomerRegistered) result;
-        assertThat(cr.getCustomerId()).isEqualTo("extra-id");
-        assertThat(cr.getEmail()).isEqualTo("extra@test.com");
+        assertThat(cr.customerId()).isEqualTo(id);
+        assertThat(cr.email()).isEqualTo("extra@test.com");
     }
 
     // ---- helpers -----------------------------------------------------------
 
-    private static CustomerRegistered buildEvent(String id, String email, String first, String last) {
-        CustomerRegistered e = new CustomerRegistered();
-        e.setCustomerId(id);
-        e.setEmail(email);
-        e.setFirstName(first);
-        e.setLastName(last);
-        return e;
+    private static CustomerRegistered buildEvent(String email, String first, String last) {
+        return new CustomerRegistered(UUID.randomUUID(), email, first, last, null,
+                Instant.parse("2026-05-31T00:00:00Z"));
     }
 
     private static byte[] loadSchema() throws Exception {
         try (var stream = Objects.requireNonNull(
                 CustomerRegisteredIT.class.getClassLoader()
-                        .getResourceAsStream("schemas/customer-registered.json"),
-                "customer-registered.json not on test classpath")) {
+                        .getResourceAsStream("schemas/customer-registered.schema.json"),
+                "customer-registered.schema.json not on test classpath")) {
             return stream.readAllBytes();
         }
     }

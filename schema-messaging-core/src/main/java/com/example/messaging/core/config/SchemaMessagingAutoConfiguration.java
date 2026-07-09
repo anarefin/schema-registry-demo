@@ -1,7 +1,6 @@
 package com.example.messaging.core.config;
 
 import com.example.messaging.core.consumer.EventConsumerSupport;
-import com.example.messaging.core.consumer.IdempotencyFilter;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.health.RegistryHealthIndicator;
 import com.example.messaging.core.mapping.TypeMapping;
@@ -12,10 +11,11 @@ import com.example.messaging.core.registry.ApicurioCacheProperties;
 import com.example.messaging.core.registry.CachePreWarmer;
 import com.example.messaging.core.registry.SchemaResolver;
 import com.example.messaging.core.serde.JsonSchemaStrategy;
-import com.example.messaging.core.serde.ProtobufStrategy;
 import com.example.messaging.core.serde.SerializationStrategy;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import io.apicurio.registry.client.common.RegistryClientOptions;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.MessageConverter;
@@ -78,23 +78,28 @@ public class SchemaMessagingAutoConfiguration {
         return new TypeMappingRegistry(mappings);
     }
 
-    @Bean
-    @ConditionalOnMissingBean
-    public ProtobufStrategy protobufStrategy() {
-        return new ProtobufStrategy();
-    }
-
     /**
      * Fallback Jackson 2 ObjectMapper. Spring Boot 4.0's JacksonAutoConfiguration only
      * auto-configures Jackson 3 (tools.jackson); this project uses Jackson 2 (com.fasterxml).
      * Services that import spring-boot-starter-web (which pulls spring-boot-starter-jackson
      * for Jackson 3) will not have a Jackson 2 ObjectMapper unless this bean is provided.
+     *
+     * <p>{@code findAndRegisterModules()} picks up jackson-datatype-jsr310 (declared as a direct
+     * dependency of schema-messaging-core; Spring Boot 4.0's jackson starter ships Jackson 3, not
+     * this Jackson 2 module) so the code-first records' {@code java.time.Instant} fields serialize as
+     * ISO-8601 strings — matching the generated schema's {@code "type":"string","format":"date-time"}
+     * — rather than numeric timestamps. Null optionals (e.g. {@code refundAmount}, {@code phoneNumber})
+     * are omitted so they don't fail the {@code type} check for an absent field.
      */
     @Bean
     @ConditionalOnMissingBean(ObjectMapper.class)
     public ObjectMapper objectMapper() {
-        return new ObjectMapper()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        return mapper;
     }
 
     @Bean
@@ -125,12 +130,6 @@ public class SchemaMessagingAutoConfiguration {
     @ConditionalOnMissingBean
     public EventConsumerSupport eventConsumerSupport() {
         return new EventConsumerSupport();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean
-    public IdempotencyFilter idempotencyFilter() {
-        return new IdempotencyFilter();
     }
 
     @Bean

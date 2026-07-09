@@ -71,10 +71,11 @@ services:
       retries: 20
 
   # Schema registration is a host-Maven step (not a compose service): once Apicurio is healthy,
-  # register both contracts and attach their BACKWARD rules from the host —
+  # register both contracts and attach their compatibility rules from the host —
   #   ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
   #          -Dapicurio.registry.url=http://localhost:8080
-  # then POST the COMPATIBILITY/BACKWARD rules (see README §2) or run the
+  # then POST the COMPATIBILITY rules — BACKWARD for OrderCreated, FORWARD for CustomerRegistered
+  # (JSON property additions only validate under FORWARD; see README §2) — or run the
   # "Schema Governance Bootstrap" GitHub workflow. The contracts modules already carry the
   # apicurio-registry-maven-plugin, so no separate Maven container is needed.
 

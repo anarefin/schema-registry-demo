@@ -1,0 +1,63 @@
+{
+  "$id" : "urn:example:schema:CustomerAddressAdded",
+  "$schema" : "http://json-schema.org/draft-07/schema#",
+  "description" : "Emitted when a customer adds a postal address.",
+  "properties" : {
+    "addedAt" : {
+      "description" : "Instant the address was added (ISO-8601).",
+      "format" : "date-time",
+      "type" : "string"
+    },
+    "address" : {
+      "allOf" : [
+        {
+          "type" : "object",
+          "properties" : {
+            "city" : {
+              "type" : "string",
+              "description" : "City or locality."
+            },
+            "countryCode" : {
+              "type" : "string",
+              "description" : "ISO-3166-1 alpha-2 country code, e.g. US.",
+              "minLength" : 2,
+              "maxLength" : 2
+            },
+            "line1" : {
+              "type" : "string",
+              "description" : "First line of the street address."
+            },
+            "line2" : {
+              "type" : "string",
+              "description" : "Optional second line of the street address."
+            },
+            "postalCode" : {
+              "type" : "string",
+              "description" : "Postal or ZIP code."
+            }
+          },
+          "required" : [
+            "city",
+            "line1",
+            "postalCode"
+          ],
+          "description" : "A customer postal address."
+        },
+        {
+          "description" : "The address that was added."
+        }
+      ]
+    },
+    "customerId" : {
+      "description" : "Unique identifier of the customer.",
+      "format" : "uuid",
+      "type" : "string"
+    }
+  },
+  "required" : [
+    "address",
+    "customerId"
+  ],
+  "title" : "CustomerAddressAdded",
+  "type" : "object"
+}

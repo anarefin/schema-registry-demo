@@ -10,19 +10,49 @@
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
-  <!-- T-3.7: Protobuf contracts jar. Depends only on protobuf-java (spec §10.3). -->
+  <!-- Code-first order contracts (spec code-first D2/D4; topology ownership per spec
+       contract-owned-amqp-topology; generation ownership per ADR-0003). The annotated event
+       records are the source of truth; this module generates its own JSON Schemas at its own
+       process-classes phase (via the schema-gen-tools exec-maven-plugin execution below) and
+       commits them under resources/schemas/. No victools on the compile classpath — only Jackson
+       (records) + Jakarta Validation (annotations read at generation time) +
+       spring-rabbit/spring-boot-autoconfigure + amqp-topology-kit, since this module
+       self-activates its own domain-scoped AMQP topology (OrderTopologyAutoConfiguration). -->
   <artifactId>order-contracts</artifactId>
   <packaging>jar</packaging>
 
   <properties>
-    <!-- Override on CLI: ./mvnw apicurio-registry:register -Dapicurio.registry.url=http://host:8080 -->
-    <apicurio.registry.url>http://localhost:8080</apicurio.registry.url>
+    <!-- The one incompatible-change resource for this domain, consumed by the parent's
+         incompatible-demo profile (spec code-first D4). apicurio.registry.url is inherited. -->
+    <apicurio.incompatible.group>events.orders</apicurio.incompatible.group>
+    <apicurio.incompatible.artifact>OrderCreated</apicurio.incompatible.artifact>
+    <apicurio.incompatible.file>${project.basedir}/src/test/resources/schemas/order-created-incompatible.schema.json</apicurio.incompatible.file>
   </properties>
 
   <dependencies>
     <dependency>
-      <groupId>com.google.protobuf</groupId>
-      <artifactId>protobuf-java</artifactId>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <!-- Jakarta Validation annotations on the records (read by victools at schema-generation time). -->
+    <dependency>
+      <groupId>jakarta.validation</groupId>
+      <artifactId>jakarta.validation-api</artifactId>
+    </dependency>
+
+    <!-- This domain owns its own AMQP topology (spec contract-owned-amqp-topology D2). -->
+    <dependency>
+      <groupId>org.springframework.amqp</groupId>
+      <artifactId>spring-rabbit</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>amqp-topology-kit</artifactId>
+      <version>${project.version}</version>
     </dependency>
 
     <dependency>
@@ -30,141 +60,123 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Test-only: lets the value-object round-trip tests (de)serialize the records' Instant
+         fields as ISO-8601. Kept at test scope so the compile classpath stays pure. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Test-only: backs OrderContractsSchemaDeterminismTest, which calls SchemaGenerator.generate
+         directly to assert the committed schemas match a fresh generation (ADR-0003). This is the
+         reverse of the old schema-gen-tools -> order-contracts direction and creates no cycle. -->
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>schema-gen-tools</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
-    <!-- os-maven-plugin provides ${os.detected.classifier} needed by protoc artifact resolution. -->
-    <extensions>
-      <extension>
-        <groupId>kr.motd.maven</groupId>
-        <artifactId>os-maven-plugin</artifactId>
-        <version>${os-maven-plugin.version}</version>
-      </extension>
-    </extensions>
-
     <plugins>
-      <!-- T-3.2: Generate OrderCreated class from order-created.proto.
-           Wire format: pure protobuf bytes, no magic byte, no length prefix (spec §6). -->
+      <!-- Generate this domain's JSON Schemas from its own annotated records at its own
+           process-classes phase (ADR-0003). schema-gen-tools is a plugin-level dependency only
+           (not a project dependency), so it stays dependency-free with respect to this module
+           while still building first in the reactor.
+           Run standalone via: ./mvnw -pl order-contracts process-classes -->
       <plugin>
-        <groupId>org.xolstice.maven.plugins</groupId>
-        <artifactId>protobuf-maven-plugin</artifactId>
-        <version>${protobuf-maven-plugin.version}</version>
-        <configuration>
-          <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-          <protoSourceRoot>${project.basedir}/src/main/resources/schemas</protoSourceRoot>
-        </configuration>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <dependencies>
+          <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>schema-gen-tools</artifactId>
+            <version>${project.version}</version>
+          </dependency>
+        </dependencies>
         <executions>
           <execution>
+            <id>generate-schemas</id>
+            <phase>process-classes</phase>
             <goals>
-              <goal>compile</goal>
+              <goal>java</goal>
             </goals>
+            <configuration>
+              <mainClass>com.example.schemagen.SchemaGeneratorCli</mainClass>
+              <includePluginDependencies>true</includePluginDependencies>
+              <arguments>
+                <argument>com.example.contracts.orders.OrderCreated=${project.basedir}/src/main/resources/schemas/order-created.schema.json</argument>
+                <argument>com.example.contracts.orders.OrderShipped=${project.basedir}/src/main/resources/schemas/order-shipped.schema.json</argument>
+                <argument>com.example.contracts.orders.OrderCancelled=${project.basedir}/src/main/resources/schemas/order-cancelled.schema.json</argument>
+              </arguments>
+            </configuration>
           </execution>
         </executions>
       </plugin>
 
-      <!-- T-3.4 / T-4.1: Register OrderCreated and attach BACKWARD rule.
+      <!-- Seed the three order artifacts from their generated schemas (spec code-first D4).
+           The FORWARD compatibility rule + v1 reset are attached via the data-driven bootstrap.
            Run: ./mvnw -pl order-contracts apicurio-registry:register
-           Override URL: -Dapicurio.registry.url=http://host:8080
-           v2 (promo_code field 8) is a BACKWARD-compatible addition: old consumers ignore it. -->
+           Override URL: -Dapicurio.registry.url=http://host:8080 -->
       <plugin>
         <groupId>io.apicurio</groupId>
         <artifactId>apicurio-registry-maven-plugin</artifactId>
-        <version>${apicurio-registry-maven-plugin.version}</version>
+        <!-- version + registryUrl inherited from the parent pluginManagement (spec code-first D4).
+             This POM supplies only the per-artifact coordinates; the parent's compat-check profile
+             reuses this same <artifacts> list for the dry-run merge gate. -->
         <configuration>
-          <registryUrl>${apicurio.registry.url}</registryUrl>
           <artifacts>
-            <!-- v1: fields 1-7 only — registered first to establish the baseline version. -->
             <artifact>
               <groupId>events.orders</groupId>
               <artifactId>OrderCreated</artifactId>
-              <file>${project.basedir}/src/test/resources/schemas/order-created-v1.proto</file>
-              <artifactType>PROTOBUF</artifactType>
+              <file>${project.basedir}/src/main/resources/schemas/order-created.schema.json</file>
+              <artifactType>JSON</artifactType>
               <ifExists>FIND_OR_CREATE_VERSION</ifExists>
             </artifact>
-            <!-- v2: adds optional promo_code (field 8) — BACKWARD-compatible addition. -->
             <artifact>
               <groupId>events.orders</groupId>
-              <artifactId>OrderCreated</artifactId>
-              <file>${project.basedir}/src/main/resources/schemas/order-created.proto</file>
-              <artifactType>PROTOBUF</artifactType>
+              <artifactId>OrderShipped</artifactId>
+              <file>${project.basedir}/src/main/resources/schemas/order-shipped.schema.json</file>
+              <artifactType>JSON</artifactType>
+              <ifExists>FIND_OR_CREATE_VERSION</ifExists>
+            </artifact>
+            <artifact>
+              <groupId>events.orders</groupId>
+              <artifactId>OrderCancelled</artifactId>
+              <file>${project.basedir}/src/main/resources/schemas/order-cancelled.schema.json</file>
+              <artifactType>JSON</artifactType>
               <ifExists>FIND_OR_CREATE_VERSION</ifExists>
             </artifact>
           </artifacts>
         </configuration>
       </plugin>
+
+      <!-- No contracts <-> core dependency in either direction (spec contract-owned-amqp-topology
+           Principle 2). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>ban-core-module</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>com.example:schema-messaging-core</exclude>
+                  </excludes>
+                  <message>order-contracts must not depend on schema-messaging-core (contracts and core must not depend on each other).</message>
+                </bannedDependencies>
+              </rules>
+              <fail>true</fail>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
-
-  <profiles>
-    <!-- T-4.5 CI merge gate: checks the current schema is BACKWARD-compatible with what is
-         registered. Requires a running registry. Run during CI after docker compose up:
-         ./mvnw -pl order-contracts verify -Pcompat-check
-         Or explicitly: ./mvnw -pl order-contracts apicurio-registry:test -Pcompat-check -->
-    <profile>
-      <id>compat-check</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>io.apicurio</groupId>
-            <artifactId>apicurio-registry-maven-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>compat-gate</id>
-                <phase>verify</phase>
-                <goals><goal>register</goal></goals>
-                <configuration>
-                  <registryUrl>${apicurio.registry.url}</registryUrl>
-                  <dryRun>true</dryRun>
-                  <artifacts>
-                    <artifact>
-                      <groupId>events.orders</groupId>
-                      <artifactId>OrderCreated</artifactId>
-                      <file>${project.basedir}/src/main/resources/schemas/order-created.proto</file>
-                      <artifactType>PROTOBUF</artifactType>
-                    </artifact>
-                  </artifacts>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-
-    <!-- T-4.3 / T-4.6 incompatible demo: runs apicurio-registry:test with a schema that
-         changes order_id from string to int64 (wire-type incompatible).
-         This MUST fail with a clear compatibility rejection message.
-         Demo: ./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
-         (requires v1 or v2 already registered with BACKWARD rule) -->
-    <profile>
-      <id>incompatible-demo</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>io.apicurio</groupId>
-            <artifactId>apicurio-registry-maven-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>incompatible-compat-check</id>
-                <phase>verify</phase>
-                <goals><goal>register</goal></goals>
-                <configuration>
-                  <registryUrl>${apicurio.registry.url}</registryUrl>
-                  <dryRun>true</dryRun>
-                  <artifacts>
-                    <artifact>
-                      <groupId>events.orders</groupId>
-                      <artifactId>OrderCreated</artifactId>
-                      <file>${project.basedir}/src/test/resources/schemas/order-created-incompatible.proto</file>
-                      <artifactType>PROTOBUF</artifactType>
-                    </artifact>
-                  </artifacts>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-  </profiles>
 </project>

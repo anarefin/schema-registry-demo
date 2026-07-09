@@ -1,12 +1,21 @@
 name: Schema Governance Bootstrap
 
-# Run this ONCE per new registry environment to attach BACKWARD compatibility rules.
-# It is safe to re-run — Apicurio returns 409 if the rule already exists, which this
-# workflow treats as success.
+# Fresh v1 reset (spec code-first D4 / T-4.2). Run this ONCE per new registry environment to
+# (1) re-seed every contract artifact from its committed generated schema, and
+# (2) re-attach the FORWARD compatibility rule to each.
+#
+# All artifacts are JSON Schema and use FORWARD — in Apicurio's JSON Schema checker, adding an
+# optional property is classified as a "narrowing" and is only FORWARD-compatible, never BACKWARD
+# (see README §2 / the parent POM note).
+#
+# Data-driven: the artifact set lives in the ARTIFACTS list below (one `group/artifact` per line).
+# Adding a seventh event is a one-line change here — no new hardcoded step. It is safe to re-run:
+# `register` is idempotent (FIND_OR_CREATE_VERSION) and Apicurio returns 409 if a rule already
+# exists, which this workflow treats as success.
 #
 # Runs on the SELF-HOSTED runner so it can reach the standing local registry at
-# http://localhost:8080 (the default below). The host cold-start step (README §2) already
-# attaches these rules after `docker compose up`; this workflow is the manual/explicit equivalent.
+# http://localhost:8080 (the default below). The host cold-start step (README §2) already performs
+# this reset after `docker compose up`; this workflow is the manual/explicit equivalent.
 #
 # Usage: Actions → Schema Governance Bootstrap → Run workflow
 #        Optionally override the registry URL via the input.
@@ -19,51 +28,76 @@ on:
         required: false
         default: ''
 
+env:
+  # Resolve the registry URL once. Using env: (not inline in run:) means the ${{ }} interpolation
+  # sets a variable rather than being evaluated by the shell — this prevents command injection via
+  # the registry_url input.
+  REGISTRY_URL: ${{ github.event.inputs.registry_url || 'http://localhost:8080' }}
+  # The full artifact set, one `group/artifact` per line. This is the single source of truth the
+  # rule-attach and verify steps both loop over. Keep it in sync with GeneratedSchemas.ALL.
+  ARTIFACTS: |
+    events.orders/OrderCreated
+    events.orders/OrderShipped
+    events.orders/OrderCancelled
+    events.customers/CustomerRegistered
+    events.customers/CustomerAddressAdded
+    events.customers/CustomerTierChanged
+
 jobs:
   bootstrap:
-    name: Attach BACKWARD compatibility rules
+    name: Re-seed v1 + attach FORWARD rules
     runs-on: [self-hosted, apicurio-local]
 
     steps:
-      - name: Resolve registry URL
-        id: url
-        run: |
-          URL="${{ github.event.inputs.registry_url }}"
-          if [ -z "$URL" ]; then
-            URL="http://localhost:8080"
-          fi
-          echo "registry_url=$URL" >> "$GITHUB_OUTPUT"
+      - name: Checkout
+        uses: actions/checkout@v5
 
-      - name: Attach rule — orders.events / OrderCreated
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" \
-            -H 'Content-Type: application/json' \
-            -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}')
-          if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
-            echo "orders.events/OrderCreated: BACKWARD rule attached (HTTP $STATUS)"
-          else
-            echo "ERROR: unexpected HTTP $STATUS for orders.events/OrderCreated" >&2
-            exit 1
-          fi
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
 
-      - name: Attach rule — events.customers / CustomerRegistered
+      - name: Discover contract modules
+        id: modules
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" \
-            -H 'Content-Type: application/json' \
-            -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}')
-          if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
-            echo "events.customers/CustomerRegistered: BACKWARD rule attached (HTTP $STATUS)"
-          else
-            echo "ERROR: unexpected HTTP $STATUS for events.customers/CustomerRegistered" >&2
-            exit 1
-          fi
+          PL=$(for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done | sort | paste -sd, -)
+          echo "pl=$PL" >> "$GITHUB_OUTPUT"
+          echo "Discovered contract modules: $PL"
+
+      - name: Re-seed v1 — register every contract schema
+        # Idempotent (FIND_OR_CREATE_VERSION). Seeds all six artifacts from their committed
+        # generated schemas before the rules are attached.
+        run: |
+          ./mvnw -pl ${{ steps.modules.outputs.pl }} apicurio-registry:register \
+            -Dapicurio.registry.url="${REGISTRY_URL}" \
+            --no-transfer-progress
+
+      - name: Attach FORWARD compatibility rules
+        # Loop the data-driven ARTIFACTS list. JSON Schema: adding an optional property is
+        # FORWARD-compatible in Apicurio (BACKWARD rejects it as OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED).
+        # Here-string (<<<) keeps the loop in the current shell so a failing `exit 1` fails the step
+        # (a piped `while` would run in a subshell and swallow the exit).
+        run: |
+          while IFS='/' read -r GROUP ARTIFACT; do
+            [ -z "${GROUP}" ] && continue
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST "${REGISTRY_URL}/apis/registry/v3/groups/${GROUP}/artifacts/${ARTIFACT}/rules" \
+              -H 'Content-Type: application/json' \
+              -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}')
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ] || [ "$STATUS" = "409" ]; then
+              echo "${GROUP}/${ARTIFACT}: FORWARD rule attached (HTTP $STATUS)"
+            else
+              echo "ERROR: unexpected HTTP $STATUS for ${GROUP}/${ARTIFACT}" >&2
+              exit 1
+            fi
+          done <<< "${ARTIFACTS}"
 
       - name: Verify rules are active
         run: |
-          echo "=== orders.events/OrderCreated rules ==="
-          curl -sf "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.orders/artifacts/OrderCreated/rules" | cat
-          echo ""
-          echo "=== events.customers/CustomerRegistered rules ==="
-          curl -sf "${{ steps.url.outputs.registry_url }}/apis/registry/v3/groups/events.customers/artifacts/CustomerRegistered/rules" | cat
+          while IFS='/' read -r GROUP ARTIFACT; do
+            [ -z "${GROUP}" ] && continue
+            echo "=== ${GROUP}/${ARTIFACT} rules ==="
+            curl -sf "${REGISTRY_URL}/apis/registry/v3/groups/${GROUP}/artifacts/${ARTIFACT}/rules" | cat
+            echo ""
+          done <<< "${ARTIFACTS}"

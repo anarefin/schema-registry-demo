@@ -27,7 +27,7 @@ class EventConsumerSupportTest {
             Arguments.of(new SchemaValidationException("coords", "detail"),  RoutingDecision.DLQ_DIRECT),
             Arguments.of(new DeserializationException("ctx", new RuntimeException()), RoutingDecision.DLQ_DIRECT),
             Arguments.of(new SerializationException("ctx", new RuntimeException()),   RoutingDecision.DLQ_DIRECT),
-            Arguments.of(new IncompatibleSchemaTypeException("PROTOBUF", "JSON", "c"), RoutingDecision.DLQ_DIRECT),
+            Arguments.of(new IncompatibleSchemaTypeException("JSON", "PROTOBUF", "c"), RoutingDecision.DLQ_DIRECT),
             // TRANSIENT — eligible for retry
             Arguments.of(new SchemaNotFoundException("coords"),              RoutingDecision.RETRY),
             Arguments.of(new RegistryUnavailableException("down"),           RoutingDecision.RETRY),

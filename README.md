@@ -1,9 +1,10 @@
 # Schema Registry POC — Apicurio + RabbitMQ + Spring Boot 4.0
 
 End-to-end schema-governed messaging: **Apicurio Registry 3.2.0** as schema source of truth,
-**RabbitMQ** as transport, two **Spring Boot 4.0** services on **Java 25**. Demonstrates Protobuf
-and JSON Schema message flows, BACKWARD-compatibility governance as a CI merge gate, and a full
-DLX/DLQ/retry failure topology.
+**RabbitMQ** as transport, two **Spring Boot 4.0** services on **Java 25**. Demonstrates JSON
+Schema message flows (orders + customers), schema-compatibility governance as a CI merge gate
+(FORWARD — see §2 for why JSON Schema artifacts use FORWARD), and a full DLX/DLQ/retry failure
+topology.
 
 ---
 
@@ -12,8 +13,8 @@ DLX/DLQ/retry failure topology.
 | Spec §18 criterion | Demonstrated by |
 |---|---|
 | Cold `compose up` → all services healthy | `docker compose up`, healthchecks |
-| Orders (Protobuf) + customers (JSON Schema) received & deserialized | Demo curls → consumer logs |
-| Two artifacts with ≥2 versions, BACKWARD rule | `apicurio-registry:register` (v1 + v2) |
+| Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs (all six events) |
+| Six artifacts with FORWARD compat rules | `apicurio-registry:register` + bootstrap workflow |
 | Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
 | Registry down → cached processing, new messages fail gracefully | `SchemaResolver` last-known-good |
@@ -42,8 +43,9 @@ No system Maven installation needed. The wrapper downloads Maven 3.9.11 automati
 ./mvnw clean install -DskipTests
 ```
 
-Compiles all five modules, runs code generation (Protobuf + jsonschema2pojo), and installs
-JARs into the local Maven repository. Skip tests for speed; run them later with `./mvnw verify`.
+Compiles all seven modules, generates JSON Schemas from the code-first records via
+`schema-gen-tools`, and installs JARs into the local Maven repository. Skip tests for speed;
+run them later with `./mvnw verify`.
 
 ### 2. Start infrastructure
 
@@ -62,19 +64,32 @@ Starts (in dependency order, all with health checks):
 
 Schema registration is **not** a compose service — it's a host-Maven step. The contracts modules
 already carry the `apicurio-registry-maven-plugin`, so once Apicurio is healthy you register both
-schemas and attach their `BACKWARD` rules directly from the host:
+schemas and attach their compatibility rules directly from the host.
+
+Both artifacts are JSON Schema and use the **FORWARD** compatibility level — in Apicurio's
+JSON Schema checker, adding a property (even an optional/permissive one) is classified as
+`OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED` and is rejected under BACKWARD; it is only valid
+under FORWARD.
 
 ```bash
-# 1. Register both schemas (v1 + v2)
+# 1. Register all six schemas (three per domain — generated from code-first records)
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
 
-# 2. Attach the BACKWARD compatibility rule (register does not do this)
-for g in events.orders/artifacts/OrderCreated events.customers/artifacts/CustomerRegistered; do
+# 2. Attach FORWARD compatibility rules (register does not do this)
+#    Easiest: run the Schema Governance Bootstrap workflow, or POST each artifact:
+for pair in \
+  events.orders/OrderCreated \
+  events.orders/OrderShipped \
+  events.orders/OrderCancelled \
+  events.customers/CustomerRegistered \
+  events.customers/CustomerAddressAdded \
+  events.customers/CustomerTierChanged; do
+  group="${pair%/*}" artifact="${pair#*/}"
   curl -s -o /dev/null -X POST \
-    "http://localhost:8080/apis/registry/v3/groups/${g}/rules" \
+    "http://localhost:8080/apis/registry/v3/groups/${group}/artifacts/${artifact}/rules" \
     -H 'Content-Type: application/json' \
-    -d '{"ruleType":"COMPATIBILITY","config":"BACKWARD"}'
+    -d '{"ruleType":"COMPATIBILITY","config":"FORWARD"}'
 done
 ```
 
@@ -95,16 +110,36 @@ Two separate terminals:
 
 ### 4. Demo: publish messages
 
+All six events have REST endpoints on the producer (:8081). Each maps a request DTO to the
+code-first record and publishes via `EventPublisher`; `SchemaAwareMessageConverter` validates
+before send.
+
 ```bash
-# Publish an order event (Protobuf → events.orders)
+# --- Orders (events.orders) ---
 curl -s -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
-  -d '{"customerId":"cust-1","productId":"prod-42","quantity":2,"totalAmount":99.99,"currency":"USD"}'
+  -d '{"customerId":"11111111-1111-1111-1111-111111111111","productId":"22222222-2222-2222-2222-222222222222","quantity":2,"totalAmount":99.99,"currency":"USD"}'
 
-# Publish a customer event (JSON Schema → events.customers)
+curl -s -X POST http://localhost:8081/api/orders/ship \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"33333333-3333-3333-3333-333333333333","trackingNumber":"1Z999AA10123456784","carrier":"UPS"}'
+
+curl -s -X POST http://localhost:8081/api/orders/cancel \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"33333333-3333-3333-3333-333333333333","reason":"Customer request","refundAmount":49.99}'
+
+# --- Customers (events.customers) ---
 curl -s -X POST http://localhost:8081/api/customers \
   -H "Content-Type: application/json" \
   -d '{"email":"alice@example.com","firstName":"Alice","lastName":"Smith","phoneNumber":"+15551234567"}'
+
+curl -s -X POST http://localhost:8081/api/customers/address \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"44444444-4444-4444-4444-444444444444","address":{"line1":"221B Baker Street","city":"London","postalCode":"NW1 6XE","countryCode":"GB"}}'
+
+curl -s -X POST http://localhost:8081/api/customers/tier \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"44444444-4444-4444-4444-444444444444","previousTier":"BRONZE","newTier":"GOLD"}'
 ```
 
 Consumer logs confirm receipt and full deserialization. Check `X-Schema-*` headers in RabbitMQ
@@ -124,28 +159,28 @@ curl -s -X POST http://localhost:8081/api/customers \
 ### 6. Demo: malformed payload → DLQ
 
 ```bash
-# Publishes garbage Protobuf bytes with valid X-Schema-* headers
+# Publishes garbage JSON bytes with valid X-Schema-* headers
 curl -s -X POST http://localhost:8081/api/orders/poison
 ```
 
-Consumer fails deserialization → `DeserializationException` → **no retry** → `orders.created.dlq`.
+Consumer fails schema validation (unparseable JSON) → `SchemaValidationException` → **no retry** → `orders.created.dlq`.
 In RabbitMQ management UI (http://localhost:15672, guest/guest) browse `orders.created.dlq` to
 inspect all `X-Failure-*` headers (reason, message, stack trace truncated to 4 KB, original
 routing key, failed-at, retry-count).
 
 ### 7. Demo: schema evolution — accept and reject
 
-**Accepted (BACKWARD-compatible):** add an optional field (`promo_code` / `promoCode` already in v2).
+**Accepted:** add an optional property to a record — FORWARD-compatible for all six artifacts.
+Regenerate the schema (`./mvnw -pl order-contracts,customer-contracts -am process-classes`), commit, then register.
 
 ```bash
-# Register v2 (optional promo_code already present in order-created.proto)
+# After adding an optional field to OrderCreated and regenerating the schema:
 ./mvnw -pl order-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
-
-# ≥2 versions visible in Apicurio UI → events.orders / OrderCreated
 ```
 
-**Rejected (incompatible):** field-number reuse / type change triggers a BACKWARD violation.
+**Rejected (incompatible):** changing an existing property's type (`quantity` integer → string)
+violates every compatibility level.
 
 ```bash
 # Dry-run incompatible schema — BUILD FAILURE with Apicurio rejection message
@@ -186,13 +221,13 @@ sequenceDiagram
     participant MQ as RabbitMQ
 
     C->>P: POST /api/orders {payload}
-    P->>P: build OrderCreated (Protobuf)
+    P->>P: build OrderCreated (JSON)
     P->>R: resolve(SchemaCoordinates)
     R->>A: GET /apis/registry/v3/groups/events.orders/artifacts/OrderCreated
     A-->>R: schema bytes
     R-->>P: ResolvedSchema (cached)
-    P->>P: validate + serialize (pure Protobuf bytes)
-    P->>MQ: publish to events.exchange<br/>X-Schema-GlobalId / X-Schema-Type / X-Message-Id
+    P->>P: validate + serialize (raw JSON bytes)
+    P->>MQ: publish to that event's domain exchange (e.g. events.orders.exchange)<br/>X-Schema-GlobalId / X-Schema-Type / X-Correlation-Id
     P-->>C: 201 Created
 ```
 
@@ -205,7 +240,7 @@ sequenceDiagram
     participant R as SchemaResolver
     participant A as ApicurioRegistry
 
-    MQ->>CS: deliver message (Protobuf bytes + X-Schema-* headers)
+    MQ->>CS: deliver message (JSON bytes + X-Schema-* headers)
     CS->>R: fetchByGlobalId(X-Schema-GlobalId)
     alt cache hit
         R-->>CS: ResolvedSchema (from Caffeine cache)
@@ -227,8 +262,8 @@ sequenceDiagram
     participant A as ApicurioRegistry
 
     Dev->>CI: push incompatible schema change
-    CI->>A: apicurio-registry:test (BACKWARD check)
-    A-->>CI: 409 Conflict — BACKWARD rule violated
+    CI->>A: apicurio-registry:register -DdryRun (compatibility check)
+    A-->>CI: 409 Conflict — compatibility rule violated (FORWARD)
     CI-->>Dev: BUILD FAILURE (clear rejection message)
     Note over Dev,A: Merge blocked — incompatible change never lands
 ```
@@ -274,7 +309,7 @@ They are not appropriate for production use as-is.
 
 | Shortcut | POC rationale | Production path |
 |---|---|---|
-| In-memory idempotency (`IdempotencyFilter`, Caffeine ~10 K entries, TTL 1 h) | Avoids distributed state | Redis / database deduplication store keyed on `X-Message-Id` |
+| No consumer-side deduplication (honest at-least-once delivery) | Keeps the consumer stateless; no distributed dedup store | Redis / database deduplication store keyed on a producer-supplied message id |
 | Single-instance Apicurio Registry (no HA) | Simplifies compose topology | Multi-node Apicurio behind a load balancer, connection pooling |
 | Cache TTL vs evolution latency | 300 s `refresh-after-write` means producers see new schemas within 5 min | Tune or use event-driven cache invalidation (registry webhooks) |
 | OIDC disabled by default | No Keycloak setup needed for the demo | Enable via `RegistryClientOptions.oauth2(...)` in `SchemaMessagingAutoConfiguration` — see Javadoc for Keycloak token-url pattern |

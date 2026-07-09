@@ -17,7 +17,6 @@ public final class SchemaMessageHeaders {
     public static final String TYPE           = "X-Schema-Type";
 
     // Message tracing headers
-    public static final String MESSAGE_ID     = "X-Message-Id";
     public static final String CORRELATION_ID = "X-Correlation-Id";
 
     // DLQ failure headers (spec §11, used by EventConsumerSupport)
@@ -91,6 +90,15 @@ public final class SchemaMessageHeaders {
         String v = headerString(props, TYPE);
         if (v == null) return null;
         try { return SchemaType.valueOf(v); } catch (IllegalArgumentException e) { return null; }
+    }
+
+    /**
+     * Raw {@code X-Schema-Type} header value, without mapping onto the {@link SchemaType}
+     * enum. Lets the converter detect type mismatches even for types this library does not
+     * support (e.g. a stale producer still sending {@code PROTOBUF}).
+     */
+    public static String getSchemaTypeName(MessageProperties props) {
+        return headerString(props, TYPE);
     }
 
     public static int getRetryCount(MessageProperties props) {
