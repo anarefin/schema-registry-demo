@@ -92,6 +92,13 @@ Every record component carries `@JsonPropertyDescription` so the generated schem
 
 ### D1 — `schema-gen-tools` (build-only, the sole victools home)
 
+> **Superseded in part** by [ADR-0003](../docs/adr/0003-contracts-own-schema-generation.md): the
+> module-dependency direction (`schema-gen-tools` depending on the contract modules) and the
+> `GeneratedSchemas.ALL` hardcoded list / `exec-maven-plugin` binding described below are reversed —
+> `schema-gen-tools` is now dependency-free and each contracts module invokes it from its own
+> `process-classes`. The victools config, `SchemaGenerator.generate` behavior, and deterministic
+> output format below are unaffected and still current.
+
 A registered module `schema-gen-tools` (in root `<modules>`) depending on the two contract modules
 + victools; **never** on any service's runtime classpath. Package `com.example.schemagen`
 (domain-neutral).

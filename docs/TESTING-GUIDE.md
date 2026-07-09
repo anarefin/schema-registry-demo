@@ -70,7 +70,7 @@ This is exactly what `.github/workflows/schema-drift-check.yml` runs on every PR
 `*-contracts/**` or `schema-gen-tools/**`, and you can run it locally with no infrastructure:
 
 ```bash
-./mvnw -pl schema-gen-tools -am process-classes
+./mvnw -pl order-contracts,customer-contracts -am process-classes
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
 ```
 
@@ -83,12 +83,12 @@ regenerated.
 ```bash
 # Add a comment/description-only edit to a record, e.g. tweak the @JsonPropertyDescription
 # on OrderCreated.quantity() in order-contracts, then:
-./mvnw -pl schema-gen-tools -am process-classes
+./mvnw -pl order-contracts -am process-classes
 git diff -- '*-contracts/src/main/resources/schemas/order-created.schema.json'   # see the diff
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # now exits 1
 
 git checkout -- order-contracts/src/main/java/com/example/contracts/orders/OrderCreated.java
-./mvnw -pl schema-gen-tools -am process-classes   # regenerate back to the committed baseline
+./mvnw -pl order-contracts -am process-classes   # regenerate back to the committed baseline
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # back to exit 0
 ```
 
@@ -416,7 +416,7 @@ Add an optional field to `OrderCreated` (e.g. a nullable `notes` string with `@J
 no `@NotNull`), then:
 
 ```bash
-./mvnw -pl schema-gen-tools -am process-classes    # regenerate order-created.schema.json
+./mvnw -pl order-contracts -am process-classes     # regenerate order-created.schema.json
 git diff -- order-contracts/src/main/resources/schemas/order-created.schema.json   # see the new optional property
 
 ./mvnw -pl order-contracts apicurio-registry:register \
@@ -569,7 +569,7 @@ Stop both Spring Boot services with `Ctrl-C` in their terminals.
 ./mvnw clean install -DskipTests                          # build everything
 ./mvnw test                                                # unit tests only
 ./mvnw verify                                              # unit + Testcontainers IT
-./mvnw -pl schema-gen-tools -am process-classes            # regenerate schemas
+./mvnw -pl order-contracts,customer-contracts -am process-classes  # regenerate schemas
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
 ./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080

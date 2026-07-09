@@ -171,7 +171,7 @@ routing key, failed-at, retry-count).
 ### 7. Demo: schema evolution — accept and reject
 
 **Accepted:** add an optional property to a record — FORWARD-compatible for all six artifacts.
-Regenerate the schema (`./mvnw -pl schema-gen-tools -am process-classes`), commit, then register.
+Regenerate the schema (`./mvnw -pl order-contracts,customer-contracts -am process-classes`), commit, then register.
 
 ```bash
 # After adding an optional field to OrderCreated and regenerating the schema:

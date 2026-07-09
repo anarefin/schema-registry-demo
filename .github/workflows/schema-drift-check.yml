@@ -1,14 +1,14 @@
 name: Schema Drift Check
 
-# Offline gate: regenerates every JSON Schema from its Java Record (via the shared build-only
-# `schema-gen-tools` module) and fails if any committed artifact differs. Runs without a registry —
-# pure local Maven build.
+# Offline gate: regenerates every JSON Schema from its Java Record (each contracts module owns its
+# own generation via the shared build-only `schema-gen-tools` jar, ADR-0003) and fails if any
+# committed artifact differs. Runs without a registry — pure local Maven build.
 #
 # Catches: record/annotation changes that weren't followed by a schema regeneration + commit.
 #
-# Data-driven: `schema-gen-tools` regenerates every target listed in GeneratedSchemas.ALL, writing
-# into each owning contract module's src/main/resources/schemas/. Adding a domain needs no edit
-# here — the diff globs every `*-contracts` schemas dir.
+# Data-driven only insofar as the diff globs every `*-contracts` schemas dir; the modules whose
+# process-classes phase gets run must be listed explicitly below (each owns its own exec-maven-plugin
+# execution — adding a new contracts module means adding it to the -pl list here too).
 
 on:
   pull_request:
@@ -33,9 +33,9 @@ jobs:
           cache: maven
 
       - name: Regenerate all schemas
-        # `-am` also-builds the contract modules the generator depends on; the exec-maven-plugin
-        # bound to process-classes writes every schema into its owning contract module.
-        run: ./mvnw -pl schema-gen-tools -am process-classes --no-transfer-progress
+        # Each contracts module's own process-classes phase invokes schema-gen-tools against its
+        # own records (ADR-0003); -am also builds schema-gen-tools itself first.
+        run: ./mvnw -pl order-contracts,customer-contracts -am process-classes --no-transfer-progress
 
       - name: Fail if any schema differs from its committed artifact
         run: git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'

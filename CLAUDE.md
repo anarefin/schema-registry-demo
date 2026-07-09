@@ -11,13 +11,15 @@ Planning documents live in `docs/`:
   topology, failure model, acceptance criteria).
 - `docs/TODO.md` — checkbox execution breakdown with done-checks.
 - `spec/code-first-schema.md` — code-first contract specification. Its Guiding Principles 4/5 and
-  design section D3 (topology ownership) are **superseded** by `spec/contract-owned-amqp-topology.md`
-  — read historically for those sections; D1/D2/D4/D5/D6 (schema generation, governance, CI) still
-  apply.
+  design section D3 (topology ownership) are **superseded** by `spec/contract-owned-amqp-topology.md`;
+  D1/D2's module-dependency-direction/invocation-binding details are **superseded** by
+  `docs/adr/0003-contracts-own-schema-generation.md` — read historically for those parts; D1/D2's
+  victools config/output-format details and D4/D5/D6 (governance, CI) still apply.
 - `spec/contract-owned-amqp-topology.md` — current source of truth for AMQP topology ownership
   (each `*-contracts` module owns its domain's exchanges/queues/DLQs/retry ladder).
-- `CONTEXT.md` — glossary; `docs/adr/0001-code-first-schema-generation.md` and
-  `docs/adr/0002-contract-owned-amqp-topology.md` — ADRs.
+- `CONTEXT.md` — glossary; `docs/adr/0001-code-first-schema-generation.md`,
+  `docs/adr/0002-contract-owned-amqp-topology.md`, and
+  `docs/adr/0003-contracts-own-schema-generation.md` — ADRs.
 
 ## What this is
 
@@ -40,7 +42,7 @@ The build uses the **committed Maven Wrapper** (`./mvnw`) — always prefer it o
 ./mvnw -pl schema-messaging-core compile
 
 # Schema drift (offline — no registry)
-./mvnw -pl schema-gen-tools -am process-classes
+./mvnw -pl order-contracts,customer-contracts -am process-classes
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
 
 # Schema governance (official apicurio-registry-maven-plugin; requires a running registry)
@@ -103,15 +105,18 @@ Eight Maven modules (parent root = this directory):
   retry-ladder factory, `com.example.amqp.topology.*`). A pure leaf module: banned from depending
   on core or either `*-contracts` module. Depended on only by `order-contracts` /
   `customer-contracts`.
-- **`schema-gen-tools`** — build-only schema generator (victools). Depends on contract modules;
-  writes generated `*.schema.json` into sibling modules at `process-classes`. **Never** on service
+- **`schema-gen-tools`** — build-only schema generator (victools). Dependency-free with respect to
+  every `*-contracts` module (ADR-0003): each contracts module declares it as a plugin-level
+  `exec-maven-plugin` dependency and invokes it against its own classes at its own
+  `process-classes`, writing into its own `src/main/resources/schemas/`. **Never** on service
   runtime classpath.
 - **`order-contracts`** — three code-first order event records + generated schemas
   (`com.example.contracts.orders.*`), plus that domain's AMQP topology auto-configuration
   (`topology.OrderTopologyAutoConfiguration`, self-activating via
   `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`). Depends on
   Jackson, jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and
-  `amqp-topology-kit`.
+  `amqp-topology-kit` (plus a test-scope dependency on `schema-gen-tools` for its own determinism
+  test).
 - **`customer-contracts`** — mirror of `order-contracts` for the three customer events
   (`com.example.contracts.customers.*`, `topology.CustomerTopologyAutoConfiguration`).
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
