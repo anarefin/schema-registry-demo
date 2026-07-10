@@ -51,6 +51,11 @@ public class DlxMessageRecoverer implements MessageRecoverer {
         String originalRoutingKey = props.getReceivedRoutingKey() != null
                 ? props.getReceivedRoutingKey() : "unknown";
         String receivedExchange = props.getReceivedExchange();
+        if (receivedExchange == null || receivedExchange.isBlank()) {
+            throw new IllegalStateException(
+                    "Cannot route failure: MessageProperties.receivedExchange is null/blank"
+                    + " (routingKey=" + originalRoutingKey + ")");
+        }
         String dlxExchange = receivedExchange.replaceFirst("\\.exchange$", ".dlx");
         String retryExchange = receivedExchange.replaceFirst("\\.exchange$", ".retry.exchange");
 

@@ -5,14 +5,15 @@
 `README.md` is the 15-minute quick start: build, start infra, register schemas, run the demo
 curls. This guide goes deeper — it walks **every feature** of the POC one at a time, states the
 exact expected output/assertion for each step, and covers scenarios the README intentionally
-skips for brevity (the retry ladder, health-indicator failure modes, schema pinning fail-fast,
+skips for brevity (the retry ladder, DLQ health, startup fail-fast for missing classpath schemas,
 and a structural walkthrough of the four CI workflows).
 
-Work through the sections in order — later sections (schema pinning, evolution, CI) assume the
-infrastructure and services from earlier sections are already up. All commands assume you're
-running from the repo root with `./mvnw` (the Maven Wrapper — never a system `mvn`), on the
-current working tree of this branch (some code-first files are still uncommitted; that's expected
-mid-migration and does not block any step below).
+Runtime validation uses classpath schemas via `LocalSchemaCatalog` (ADR-0004) — producer/consumer
+never call Apicurio at runtime. Apicurio remains the CI/governance tool (register + compat-check).
+
+Work through the sections in order — later sections (evolution, CI) assume the infrastructure and
+services from earlier sections are already up. All commands assume you're running from the repo
+root with `./mvnw` (the Maven Wrapper — never a system `mvn`).
 
 Six event types flow through this system, three per domain:
 
@@ -103,18 +104,16 @@ its committed schema is mechanically detectable without touching the registry.
 ./mvnw verify
 ```
 
-Runs Failsafe (`*IT.java`) on top of everything in §2 — spins up real RabbitMQ (Testcontainers);
-`ApicurioClient` is mocked in these tests so no live registry is required. Expect `BUILD SUCCESS`.
-What each class proves, so you know what "verify passed" already covered before you do anything
-manually in §9–§14:
+Runs Failsafe (`*IT.java`) on top of everything in §2 — spins up real RabbitMQ (Testcontainers).
+Schema validation is local (`LocalSchemaCatalog`); no live registry is required for ITs. Expect
+`BUILD SUCCESS`. What each class proves:
 
 | Test class | Proves |
 |---|---|
-| `OrderCreatedIT` | Producer → real RabbitMQ → consumer round trip for `OrderCreated`; asserts `content-type: application/json` and all `X-Schema-*` headers land on the delivered message; asserts `X-Schema-GlobalId` lets the consumer skip the coordinate lookup (`fetchByGlobalId` used, not `fetchByCoordinates`). |
+| `OrderCreatedIT` | Producer → real RabbitMQ → consumer round trip for `OrderCreated`; asserts `content-type: application/json` and `X-Schema-GroupId` / `ArtifactId` / `Type` (+ correlation id) on the delivered message. |
 | `CustomerRegisteredIT` | Same round trip for `CustomerRegistered`; also verifies an extra unknown JSON field on the wire still deserializes (Jackson `FAIL_ON_UNKNOWN_PROPERTIES=false`). |
-| `DlxRoutingIT` | The full retry-ladder + DLQ classification matrix: schema-not-found → retried through short test TTLs then DLQ; deserialization ("poison") → immediate DLQ, `X-Retry-Count=0`; any permanent exception → immediate DLQ; a downstream `RuntimeException` → retried 3× then DLQ; every retry hop increments `X-Retry-Count` with the correct tier suffix; all `X-Failure-*` headers present once a message lands on a DLQ. |
-| `SchemaVersionPinningIT` | With `schema.orders.pinned-version=1`, the outbound `X-Schema-Version` header is exactly `1`, not "latest". |
-| `StartupSchemaValidatorIT` | With `apicurio.auto-register=OFF` and an unregistered pinned version, the Spring context **fails to start** (`IllegalStateException`). |
+| `DlxRoutingIT` | Retry-ladder + DLQ matrix: deserialization poison / missing schema headers / unknown artifact → immediate DLQ (`X-Retry-Count=0`); downstream `RuntimeException` → retried 3× then DLQ; all `X-Failure-*` headers present on final DLQ. |
+| `LocalSchemaCatalogStartupIT` | A `TypeMapping` whose classpath schema resource is missing aborts Spring context refresh with `SchemaNotFoundException`. |
 
 Run a single IT: `./mvnw -pl consumer-service verify -Dit.test=DlxRoutingIT`.
 
@@ -212,14 +211,12 @@ curl -s localhost:8081/actuator/health | jq
 curl -s localhost:8082/actuator/health | jq
 ```
 
-With `show-details: always` and `show-components: always`, expect a `components.registry` entry
-(from `RegistryHealthIndicator`, bean name `registryHealthIndicator`) with `status: UP` and
-`details: { preWarmCompleted: true, preWarmErrors: 0 }`. The consumer additionally shows a
+With `show-details: always` and `show-components: always`, the consumer shows a
 `components.queueDepth` entry (from `QueueDepthHealthIndicator`) with `status: UP` (no DLQ has
-messages yet).
+messages yet). There is no runtime registry health component — Apicurio is CI-only (ADR-0004).
 
-**What you verified:** both services start cleanly against a live registry and RabbitMQ, and their
-own custom health indicators are wired and reporting correctly before you send any traffic.
+**What you verified:** both services start cleanly against RabbitMQ (and a live registry is only
+needed later for governance curls), and queue-depth health is wired before you send any traffic.
 
 ---
 
@@ -266,13 +263,13 @@ message properties should show:
 
 | Header | Example value |
 |---|---|
-| `X-Schema-GlobalId` | a registry-assigned long |
 | `X-Schema-GroupId` | `events.orders` |
 | `X-Schema-ArtifactId` | `OrderCreated` |
-| `X-Schema-Version` | e.g. `1` |
 | `X-Schema-Type` | `JSON` |
 | `X-Correlation-Id` | a UUID |
 | content-type | `application/json` |
+
+(No `X-Schema-GlobalId` / `X-Schema-Version` — runtime identity is group + artifact only, ADR-0004.)
 
 Body is the **raw JSON only** — no envelope wrapper.
 
@@ -332,85 +329,45 @@ lands on the correct DLQ with the full failure-header set populated.
 ## 11. Transient failure → retry ladder → DLQ
 
 Not covered in the README — this walks a message through all three retry tiers before it finally
-DLQs. `SchemaNotFoundException` and `RegistryUnavailableException` are **not** in the permanent set,
-so they classify as `RETRY`.
+DLQs. Schema presence is guaranteed at startup (`LocalSchemaCatalog`), so there is no runtime
+"schema unavailable" path. Transient failures are **downstream handler errors** (any exception not
+in the permanent set).
 
-The simplest reproducible trigger: publish to a routing key whose consumer type mapping exists but
-whose schema coordinates the registry has never seen (forces `SchemaNotFoundException` on lookup),
-or briefly stop the registry after clearing any warm cache entry for that coordinate:
-
-```bash
-docker compose stop apicurio
-# with the registry down and nothing cached yet for a coordinate, any resolve attempt raises
-# RegistryUnavailableException (SchemaResolver only serves stale-from-cache if something is
-# already cached — a cold miss throws instead)
-curl -si -X POST http://localhost:8081/api/orders   # this call likely now itself fails to publish
-```
-
-The more reliable way to observe the **consumer-side** retry ladder specifically (rather than a
-producer-side publish failure) is to run `DlxRoutingIT` (§4) and read its assertions, or watch a
-message you know will resolve on the producer side but fail on the consumer side after a registry
-outage window. Either way, once a transient failure is triggered, watch the message hop through
-these exact queues in the management UI:
+The reliable way to observe the consumer-side retry ladder is `DlxRoutingIT` (§4) — it spies the
+listener to throw `RuntimeException` and asserts 4 deliveries then DLQ. Manually, once a transient
+failure is triggered, watch the message hop through these queues in the management UI:
 
 ```
 orders.created.queue  →  orders.created.retry.5s  →  orders.created.retry.30s  →  orders.created.retry.5m  →  orders.created.dlq
 ```
 
 (Retry queue names have **no** `.queue` suffix — they're named directly `<routingKey>.retry.<tier>`.)
-Exact TTLs, so you know how long to wait at each hop: **tier 0 = 5000ms (5s)**, **tier 1 = 30000ms
-(30s)**, **tier 2 = 300000ms (5m)** (`events.retry.tier0.ms`/`tier1.ms`/`tier2.ms`). Each retry queue
-dead-letters back into that event's domain exchange (e.g. `events.orders.exchange` for order
-events) with the *original* routing key on TTL expiry, landing the
-message back on the main queue for redelivery; `X-Retry-Count` increments by one on each hop (`0`→
-`1`→`2`→`3`). Once `X-Retry-Count` reaches 3 (the length of the TTL array), the next failure is
-forced to `DLQ_DIRECT` regardless of classification, and only then are the `X-Failure-*` headers
-populated (they are **not** set on the intermediate retry hops — only on final DLQ arrival).
+Exact TTLs: **tier 0 = 5000ms (5s)**, **tier 1 = 30000ms (30s)**, **tier 2 = 300000ms (5m)**
+(`events.retry.tier0.ms`/`tier1.ms`/`tier2.ms`). Each retry queue dead-letters back into that
+event's domain exchange with the *original* routing key on TTL expiry; `X-Retry-Count` increments
+(`0`→`1`→`2`→`3`). Once `X-Retry-Count` reaches 3, the next failure is forced to `DLQ_DIRECT` and
+`X-Failure-*` headers are populated (only on final DLQ arrival).
 
-Bring the registry back up when done:
-
-```bash
-docker compose start apicurio
-```
-
-**What you verified:** transient failures are retried on an exponential-ish TTL ladder rather than
-DLQ'd immediately, retry exhaustion still lands on the DLQ, and the queue-hop sequence matches the
-declared topology exactly.
+**What you verified:** transient failures are retried on a TTL ladder rather than DLQ'd immediately,
+retry exhaustion still lands on the DLQ, and the queue-hop sequence matches the declared topology.
 
 ---
 
-## 12. Schema version pinning
+## 12. Startup fail-fast — missing classpath schema
 
-```bash
-SCHEMA_ORDERS_PINNED_VERSION=1 ./mvnw -pl producer-service spring-boot:run
-```
+Runtime schema pinning / Apicurio auto-register are gone (ADR-0004). Fail-fast is now: every
+`TypeMapping` must have a matching `schemas/<kebab-name>.schema.json` on the classpath, or
+`LocalSchemaCatalog` aborts context refresh.
 
-Publish an order (§8's first curl) and inspect the message in `orders.created.queue`: expect
-`X-Schema-Version: 1` regardless of whether a later version has since been registered. Restart
-without the env var and republish — `X-Schema-Version` should track the registry's latest.
+Covered by `LocalSchemaCatalogStartupIT` (§4). Unit coverage also lives in
+`LocalSchemaCatalogTest` / `JsonSchemaStrategyTest#warm_malformedSchema_throwsInvalidSchemaDefinition`.
 
-**What you verified:** a producer can pin to an exact schema version independent of what's
-currently latest in the registry.
-
----
-
-## 13. Fail-fast on unregistered pinned schema
-
-```bash
-APICURIO_AUTO_REGISTER=OFF SCHEMA_ORDERS_PINNED_VERSION=999 \
-  ./mvnw -pl producer-service spring-boot:run
-```
-
-Version `999` doesn't exist. Expect the Spring context to **refuse to start** — `StartupSchemaValidator`
-throws `IllegalStateException` during startup rather than deferring the failure to the first publish
-attempt (mirrors `StartupSchemaValidatorIT`, §4).
-
-**What you verified:** with auto-register disabled, a missing pinned schema is a hard startup
-failure, not a runtime surprise on the first request.
+**What you verified:** a missing or malformed classpath schema is a hard startup failure, not a
+runtime surprise on the first message.
 
 ---
 
-## 14. Schema evolution — accepted change
+## 13. Schema evolution — accepted change
 
 Add an optional field to `OrderCreated` (e.g. a nullable `notes` string with `@JsonPropertyDescription`,
 no `@NotNull`), then:
@@ -431,7 +388,7 @@ edit the record, regenerate, register — with no manual schema authoring.
 
 ---
 
-## 15. Schema evolution — rejected change
+## 14. Schema evolution — rejected change
 
 ```bash
 ./mvnw -pl order-contracts verify -Pincompatible-demo \
@@ -455,7 +412,7 @@ branch, for both domains.
 
 ---
 
-## 16. Compatibility gate — the same check CI runs
+## 15. Compatibility gate — the same check CI runs
 
 ```bash
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
@@ -472,7 +429,7 @@ baseline, before you ever open a PR.
 
 ---
 
-## 17. CI governance workflows (structural walkthrough)
+## 16. CI governance workflows (structural walkthrough)
 
 All four workflows discover contract modules dynamically (`for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done`), so adding a seventh domain module needs no workflow edit. Read each file in `.github/workflows/` alongside this table:
 
@@ -495,22 +452,9 @@ two are operational/one-shot (`schema-governance-bootstrap`, `schema-register`) 
 
 ---
 
-## 18. Health-indicator failure scenarios
+## 17. Health-indicator failure scenarios
 
-**Registry down:**
-
-```bash
-docker compose stop apicurio
-curl -s localhost:8081/actuator/health | jq '.components.registry'
-```
-
-Expect `status: DOWN` — `RegistryHealthIndicator` probes a deliberately-nonexistent artifact
-(`__health__`/`__probe__`); a `SchemaNotFoundException` there means UP (registry responded), but any
-other failure (connection refused) means DOWN. Bring it back:
-
-```bash
-docker compose start apicurio
-```
+There is no runtime registry health probe (ADR-0004). Remaining scenario:
 
 **DLQ has messages:**
 
@@ -523,13 +467,12 @@ Expect `status: DOWN` — `QueueDepthHealthIndicator` is DOWN whenever *any* DLQ
 messages (main-queue depth alone is informational, not a health signal). Drain the DLQ (management
 UI → purge, or manually ack the message) and re-check to see it return to `UP`.
 
-**What you verified:** both custom health indicators correctly surface operational problems
-(registry unreachable, poison messages piling up) through the standard actuator surface, not just
-generic liveness.
+**What you verified:** queue-depth health surfaces poison messages piling up through the standard
+actuator surface.
 
 ---
 
-## 19. Teardown
+## 18. Teardown
 
 ```bash
 docker compose down       # stop containers, keep the pgdata volume (registered schemas persist)
@@ -540,7 +483,7 @@ Stop both Spring Boot services with `Ctrl-C` in their terminals.
 
 ---
 
-## 20. Quick reference
+## 19. Quick reference
 
 **UIs / endpoints:**
 

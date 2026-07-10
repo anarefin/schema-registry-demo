@@ -33,7 +33,7 @@ This is a one-shot, clean cutover: a POC with no live production traffic and onl
    contracts depend on the kit.
 3. **Schema-resolution wiring is untouched.** The hand-written `TypeMapping` beans in
    `producer-service`/`consumer-service`'s `*ContractsConfiguration` classes (Java type ↔ registry
-   coordinates ↔ routing key, used by `SchemaAwareMessageConverter`/`SchemaResolver`) stay exactly
+   coordinates ↔ routing key, used by `SchemaAwareMessageConverter`/`LocalSchemaCatalog`) stay exactly
    as they are — a separate concern from physical AMQP topology.
 4. **Exchanges are domain-scoped**, named to mirror the Apicurio registry group (`events.orders`,
    `events.customers`), not a single shared exchange set for every event across every domain.

@@ -4,14 +4,14 @@ import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
 
 /**
- * Associates a Java type with its Apicurio schema coordinates, wire format, and AMQP routing key.
- * Each contracts module contributes one {@code TypeMapping} bean (spec §10.3/§10.4).
+ * Associates a Java type with its schema coordinates, wire format, and AMQP routing key.
+ * Each service contributes one {@code TypeMapping} bean per event (spec §10.3/§10.4).
  *
- * <p>Example (from customer-contracts auto-configuration):
+ * <p>Example:
  * <pre>
  *   new TypeMapping(
  *       CustomerRegistered.class,
- *       new SchemaCoordinates("events.customers", "CustomerRegistered", null),
+ *       new SchemaCoordinates("events.customers", "CustomerRegistered"),
  *       SchemaType.JSON,
  *       "customers.registered"
  *   )

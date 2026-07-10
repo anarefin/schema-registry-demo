@@ -37,7 +37,6 @@
          Override on the CLI: -Dapicurio.registry.url=http://host:8080 -->
     <apicurio.registry.url>http://localhost:8080</apicurio.registry.url>
     <networknt-json-schema-validator.version>1.5.6</networknt-json-schema-validator.version>
-    <caffeine.version>3.1.8</caffeine.version>
     <testcontainers.version>1.20.4</testcontainers.version>
 
     <!-- Plugin versions -->
@@ -69,16 +68,6 @@
         <groupId>com.networknt</groupId>
         <artifactId>json-schema-validator</artifactId>
         <version>${networknt-json-schema-validator.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.github.ben-manes.caffeine</groupId>
-        <artifactId>caffeine</artifactId>
-        <version>${caffeine.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>io.apicurio</groupId>
-        <artifactId>apicurio-registry-java-sdk</artifactId>
-        <version>${apicurio.version}</version>
       </dependency>
 
       <!-- victools jsonschema-generator + modules (code-first, schema-gen-tools) -->

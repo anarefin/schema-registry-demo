@@ -2,10 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project status: code-first migration + contract-owned AMQP topology complete
+## Project status: code-first migration + contract-owned AMQP topology + local schema validation complete
 
 All phases in `spec/code-first-schema.md` and `spec/contract-owned-amqp-topology.md` are done.
-Planning documents live in `docs/`:
+Runtime schema validation no longer calls Apicurio Registry — producer/consumer validate against
+the JSON Schemas already generated at build time, loaded eagerly from the classpath (see
+`docs/adr/0004-local-schema-validation.md`). Apicurio Registry remains the CI/governance tool
+(register + compat-check), unchanged. Planning documents live in `docs/`:
 
 - `docs/POC-Implementation-Plan.md` — original POC phase plan (architecture, wire format,
   topology, failure model, acceptance criteria).
@@ -18,8 +21,9 @@ Planning documents live in `docs/`:
 - `spec/contract-owned-amqp-topology.md` — current source of truth for AMQP topology ownership
   (each `*-contracts` module owns its domain's exchanges/queues/DLQs/retry ladder).
 - `CONTEXT.md` — glossary; `docs/adr/0001-code-first-schema-generation.md`,
-  `docs/adr/0002-contract-owned-amqp-topology.md`, and
-  `docs/adr/0003-contracts-own-schema-generation.md` — ADRs.
+  `docs/adr/0002-contract-owned-amqp-topology.md`,
+  `docs/adr/0003-contracts-own-schema-generation.md`, and
+  `docs/adr/0004-local-schema-validation.md` — ADRs.
 
 ## What this is
 
@@ -72,7 +76,7 @@ docker compose up                       # cold start must reach all-healthy
 ```
 
 Run a single test class/method with the standard Surefire/Failsafe selectors, e.g.
-`./mvnw -pl schema-messaging-core test -Dtest=SchemaResolverTest#cacheHit`.
+`./mvnw -pl schema-messaging-core test -Dtest=JsonSchemaStrategyTest#schemaType_isJson`.
 
 **Test split is load-bearing:** Surefire (`*Test.java`) stays fast and mock-based; Failsafe
 (`*IT.java`, Testcontainers) runs only on `verify`. Keep new tests on the correct side.
@@ -97,10 +101,11 @@ Run a single test class/method with the standard Surefire/Failsafe selectors, e.
 Eight Maven modules (parent root = this directory):
 
 - **`schema-messaging-core`** — domain-agnostic library (`jar`, no Spring Boot repackage).
-  All reusable plumbing lives here: converter, resolver, schema-resolution wiring. Owns **no**
-  AMQP topology — that now lives per-domain in the contracts modules (see `amqp-topology-kit`
-  below) — and is machine-forbidden from depending on either a `*-contracts` module or
-  `amqp-topology-kit`.
+  All reusable plumbing lives here: converter, local schema catalog, schema-resolution wiring.
+  Validates against schemas loaded from the classpath — no runtime Apicurio dependency (ADR-0004).
+  Owns **no** AMQP topology — that now lives per-domain in the contracts modules (see
+  `amqp-topology-kit` below) — and is machine-forbidden from depending on either a `*-contracts`
+  module or `amqp-topology-kit`.
 - **`amqp-topology-kit`** — domain-agnostic AMQP topology-building library (naming conventions +
   retry-ladder factory, `com.example.amqp.topology.*`). A pure leaf module: banned from depending
   on core or either `*-contracts` module. Depended on only by `order-contracts` /
@@ -127,20 +132,20 @@ Eight Maven modules (parent root = this directory):
 
 The center of the design is `SchemaAwareMessageConverter` (a Spring AMQP `MessageConverter`):
 
-- **Produce** (`toMessage`): look up the Java type in the `TypeMappingRegistry` → resolve the
-  schema via `SchemaResolver` → **validate** the payload → serialize via the type's
-  `SerializationStrategy` → populate `X-Schema-*` headers + content-type. Validation failure
-  throws `SchemaValidationException` and **no message is emitted**.
-- **Consume** (`fromMessage`): read `X-Schema-*` headers → resolve schema (preferring
-  `X-Schema-GlobalId` to skip the coordinate lookup) → dispatch to the matching strategy →
-  return the typed object.
+- **Produce** (`toMessage`): look up the Java type in the `TypeMappingRegistry` → look up the
+  schema in the `LocalSchemaCatalog` (classpath, no network call) → **validate** the payload →
+  serialize via the type's `SerializationStrategy` → populate `X-Schema-*` headers + content-type.
+  Validation failure throws `SchemaValidationException` and **no message is emitted**.
+- **Consume** (`fromMessage`): read `X-Schema-*` headers → look up the `TypeMapping` by
+  group/artifact → dispatch to the matching strategy → return the typed object.
 
 Supporting pieces in core:
-- **`ApicurioClient`** — thin façade over the Apicurio Java SDK (`fetchByGlobalId`,
-  `fetchByCoordinates`, `latestVersion`); accepts a bearer-token supplier (OIDC, off by default).
-- **`SchemaResolver`** — Caffeine cache (`byGlobalId` + `byCoordinates`) with TTL +
-  refresh-after-write; pre-warms on startup; on registry outage **serves stale from cache**
-  and only throws `RegistryUnavailableException` when nothing is cached.
+- **`LocalSchemaCatalog`** — eagerly loads every registered `TypeMapping`'s JSON Schema from the
+  classpath at application startup and fails fast (aborts context refresh) if a resource is
+  missing. No TTL, no refresh, no stale-serving, no network calls — the runtime never talks to
+  Apicurio Registry (ADR-0004). Malformed schema content is caught the same way via
+  `SerializationStrategy.warm(...)`, called once per mapping from `SchemaAwareMessageConverter`'s
+  constructor.
 - **`SerializationStrategy`** SPI with `JsonSchemaStrategy` as the sole built-in strategy
   (the SPI remains for future formats, e.g. Avro). Each event contributes one
   `TypeMapping` bean (Java type ↔ coordinates ↔ type ↔ routing) in producer/consumer config.
@@ -166,18 +171,21 @@ Schema identity travels entirely in `X-Schema-*` headers, plus
 ### Failure model (spec §9/§11)
 
 Each domain's contracts module declares its topology idempotently on startup: its own
-`events.{orders,customers}.exchange`, `.dlx`, `.retry.exchange` + queues/bindings. **Transient** failures (registry unavailable,
-schema-not-found, downstream errors) go through the retry exchange with a TTL ladder
-(5s/30s/5m, max 3) before the DLQ. **Permanent** failures (validation, deserialization, type
-mismatch) go **straight to the DLQ, no retry**. DLQ messages carry the full `X-Failure-*`
+`events.{orders,customers}.exchange`, `.dlx`, `.retry.exchange` + queues/bindings. **Transient**
+failures (downstream errors, any exception not in the permanent set) go through the retry exchange
+with a TTL ladder (5s/30s/5m, max 3) before the DLQ. **Permanent** failures (validation,
+deserialization, type mismatch) go **straight to the DLQ, no retry**. DLQ messages carry the full `X-Failure-*`
 header set (stack trace truncated to 4KB). Delivery is honest **at-least-once** — there is no
 consumer-side deduplication; idempotency, if needed, is the responsibility of downstream
 handlers (out of POC scope).
 
 ### Exception taxonomy (drives routing)
 
-`SchemaNotFoundException`, `SchemaValidationException`, `DeserializationException`,
-`SerializationException`, `IncompatibleSchemaTypeException`, `RegistryUnavailableException`.
+**Permanent (DLQ, no retry):** `SchemaValidationException`, `DeserializationException`,
+`SerializationException`, `IncompatibleSchemaTypeException`, `MissingSchemaHeadersException`,
+`UnknownSchemaArtifactException`.
+**Startup-only (abort context):** `SchemaNotFoundException` (missing classpath schema),
+`InvalidSchemaDefinitionException` (malformed schema at `warm()`).
 The mapping from exception → retry-vs-DLQ decision is the contract `EventConsumerSupport` tests
 table-drive — keep them aligned.
 
@@ -188,16 +196,15 @@ carry a **FORWARD** rule — Apicurio's JSON Schema checker classifies adding an
 `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`, which BACKWARD rejects but FORWARD accepts (so optional
 JSON field additions only validate under FORWARD). The `compat-check` Maven profile is hoisted to
 the parent POM; contract modules supply per-artifact coordinates. CI workflows discover `*-contracts`
-modules dynamically. Drift is checked offline via `schema-gen-tools` + `git diff --exit-code`.
-Producers can pin a schema version via `schema.{orders,customers}.pinned-version` in
-`application.yml`; with `auto-register=OFF` an unregistered pinned schema must **fail fast on
-startup**.
+modules dynamically. Drift is checked offline via `schema-gen-tools` + `git diff --exit-code`. This
+is a build-time/CI-only flow (`apicurio-registry-maven-plugin`) — producer/consumer never call the
+registry at runtime (ADR-0004), so there is no runtime schema-version pinning to configure.
 
 ### Health checks
 
-`QueueDepthHealthIndicator` (consumer) and `RegistryHealthIndicator` (core) expose Spring Boot
-Actuator health checks at `/actuator/health` on both services. (The metrics/tracing stack —
-Micrometer, Prometheus, Grafana, OpenTelemetry/Jaeger — was removed from the POC.)
+`QueueDepthHealthIndicator` (consumer) exposes a Spring Boot Actuator health check at
+`/actuator/health`. (The metrics/tracing stack — Micrometer, Prometheus, Grafana,
+OpenTelemetry/Jaeger — was removed from the POC.)
 
 ### DLQ demo
 

@@ -1,8 +1,10 @@
 package com.example.messaging.core.serde;
 
 import com.example.messaging.core.exception.DeserializationException;
+import com.example.messaging.core.exception.InvalidSchemaDefinitionException;
 import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.model.ResolvedSchema;
+import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -43,7 +45,8 @@ class JsonSchemaStrategyTest {
         ObjectMapper mapper = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         strategy = new JsonSchemaStrategy(mapper, true);
-        schema = new ResolvedSchema(10L, SchemaType.JSON, SCHEMA_JSON.getBytes(StandardCharsets.UTF_8));
+        schema = new ResolvedSchema(new SchemaCoordinates("test", "Person"), SchemaType.JSON,
+                SCHEMA_JSON.getBytes(StandardCharsets.UTF_8));
     }
 
     /** TC-serde-5: valid payload serializes to bytes and deserializes back to equal object. */
@@ -124,9 +127,9 @@ class JsonSchemaStrategyTest {
                 .isInstanceOf(DeserializationException.class);
     }
 
-    /** TC-serde-9: compiled JsonSchema for the same globalId is reused (cache hit). */
+    /** TC-serde-9: compiled JsonSchema for the same coordinates is reused (cache hit). */
     @Test
-    void serialize_sameGlobalId_compiledSchemaCachedOnSecondCall() throws Exception {
+    void serialize_sameCoordinates_compiledSchemaCachedOnSecondCall() throws Exception {
         Person p = new Person("Bob", 20);
 
         byte[] first = strategy.serialize(p, schema);
@@ -141,5 +144,18 @@ class JsonSchemaStrategyTest {
     void schemaType_isJson() {
         assertThat(strategy.schemaType()).isEqualTo(SchemaType.JSON);
         assertThat(strategy.contentType()).isEqualTo("application/json");
+    }
+
+    /** Malformed schema bytes fail at warm() with InvalidSchemaDefinitionException (ADR-0004). */
+    @Test
+    void warm_malformedSchema_throwsInvalidSchemaDefinition() {
+        ResolvedSchema bad = new ResolvedSchema(
+                new SchemaCoordinates("test", "Broken"),
+                SchemaType.JSON,
+                "not-valid-json-schema{{{".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> strategy.warm(bad))
+                .isInstanceOf(InvalidSchemaDefinitionException.class)
+                .hasMessageContaining("Broken");
     }
 }

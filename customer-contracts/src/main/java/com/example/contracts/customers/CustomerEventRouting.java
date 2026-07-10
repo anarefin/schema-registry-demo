@@ -5,9 +5,9 @@ package com.example.contracts.customers;
  *
  * <p>Plain {@code String} constants only — no Spring dependency — so {@code @RabbitListener}
  * and the poison demo can reference them as compile-time constants. The AMQP topology itself
- * lives in {@code schema-messaging-core} and derives queue/DLQ names from the routing key
- * ({@code rk} → main queue {@code rk.queue}, DLQ {@code rk.dlq}); these constants follow the
- * same convention and are the single source of truth for the names.
+ * lives in {@code CustomerTopologyAutoConfiguration} (this module) via {@code amqp-topology-kit};
+ * these constants follow the same naming convention and are the single source of truth for
+ * the names.
  */
 public final class CustomerEventRouting {
 

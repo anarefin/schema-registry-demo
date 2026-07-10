@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * Collects all service-contributed {@link TypeMapping} beans and provides O(1) lookups
@@ -21,10 +20,26 @@ public class TypeMappingRegistry {
 
     public TypeMappingRegistry(List<TypeMapping> mappings) {
         this.all = Collections.unmodifiableList(mappings);
-        this.byJavaType = mappings.stream()
-                .collect(Collectors.toUnmodifiableMap(TypeMapping::javaType, Function.identity()));
-        this.byCoordinates = mappings.stream()
-                .collect(Collectors.toUnmodifiableMap(TypeMapping::coordinates, Function.identity()));
+        this.byJavaType = indexBy(mappings, TypeMapping::javaType, "java type");
+        this.byCoordinates = indexBy(mappings, TypeMapping::coordinates, "coordinates");
+    }
+
+    private static <K> Map<K, TypeMapping> indexBy(
+            List<TypeMapping> mappings,
+            Function<TypeMapping, K> keyFn,
+            String keyLabel) {
+        Map<K, TypeMapping> map = new java.util.LinkedHashMap<>();
+        for (TypeMapping mapping : mappings) {
+            K key = keyFn.apply(mapping);
+            TypeMapping previous = map.put(key, mapping);
+            if (previous != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate TypeMapping " + keyLabel + ": " + key
+                        + " (already mapped to " + previous.javaType().getName()
+                        + ", also " + mapping.javaType().getName() + ")");
+            }
+        }
+        return Map.copyOf(map);
     }
 
     public List<TypeMapping> all() {
@@ -39,11 +54,8 @@ public class TypeMappingRegistry {
         return Optional.ofNullable(byCoordinates.get(coordinates));
     }
 
-    /** Convenience: lookup by coordinates without version (latest). */
+    /** Convenience: lookup by group/artifact, delegating to the coordinates map. */
     public Optional<TypeMapping> findByGroupAndArtifact(String groupId, String artifactId) {
-        return all.stream()
-                .filter(m -> m.coordinates().groupId().equals(groupId)
-                        && m.coordinates().artifactId().equals(artifactId))
-                .findFirst();
+        return findByCoordinates(new SchemaCoordinates(groupId, artifactId));
     }
 }

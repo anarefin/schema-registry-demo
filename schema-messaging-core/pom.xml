@@ -31,18 +31,6 @@
       <artifactId>spring-boot-autoconfigure</artifactId>
     </dependency>
 
-    <!-- Apicurio Registry 3.2.0 Kiota-generated Java SDK -->
-    <dependency>
-      <groupId>io.apicurio</groupId>
-      <artifactId>apicurio-registry-java-sdk</artifactId>
-    </dependency>
-
-    <!-- Caffeine cache -->
-    <dependency>
-      <groupId>com.github.ben-manes.caffeine</groupId>
-      <artifactId>caffeine</artifactId>
-    </dependency>
-
     <!-- networknt JSON Schema validator: JsonSchemaStrategy -->
     <dependency>
       <groupId>com.networknt</groupId>
@@ -62,13 +50,6 @@
     <dependency>
       <groupId>com.fasterxml.jackson.datatype</groupId>
       <artifactId>jackson-datatype-jsr310</artifactId>
-    </dependency>
-
-    <!-- T-6.5: Health indicators (optional — only wired when actuator is on classpath) -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-actuator</artifactId>
-      <optional>true</optional>
     </dependency>
 
     <!-- Annotation processor for @ConfigurationProperties metadata -->

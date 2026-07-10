@@ -107,9 +107,10 @@
               <mainClass>com.example.schemagen.SchemaGeneratorCli</mainClass>
               <includePluginDependencies>true</includePluginDependencies>
               <arguments>
-                <argument>com.example.contracts.customers.CustomerRegistered=${project.basedir}/src/main/resources/schemas/customer-registered.schema.json</argument>
-                <argument>com.example.contracts.customers.CustomerAddressAdded=${project.basedir}/src/main/resources/schemas/customer-address-added.schema.json</argument>
-                <argument>com.example.contracts.customers.CustomerTierChanged=${project.basedir}/src/main/resources/schemas/customer-tier-changed.schema.json</argument>
+                <argument>${project.basedir}/src/main/resources/schemas</argument>
+                <argument>com.example.contracts.customers.CustomerRegistered</argument>
+                <argument>com.example.contracts.customers.CustomerAddressAdded</argument>
+                <argument>com.example.contracts.customers.CustomerTierChanged</argument>
               </arguments>
             </configuration>
           </execution>

@@ -3,10 +3,10 @@ package com.example.messaging.core.consumer;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.exception.DeserializationException;
 import com.example.messaging.core.exception.IncompatibleSchemaTypeException;
-import com.example.messaging.core.exception.RegistryUnavailableException;
-import com.example.messaging.core.exception.SchemaNotFoundException;
+import com.example.messaging.core.exception.MissingSchemaHeadersException;
 import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.exception.SerializationException;
+import com.example.messaging.core.exception.UnknownSchemaArtifactException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
@@ -21,8 +21,8 @@ import java.util.Set;
  * Consumer-side support that wraps handler invocation and owns the failure-routing decision
  * per the exception taxonomy (spec §9/§11, T-1.10).
  *
- * <p>Phase 1: exposes {@link #classify(Exception)} for unit-test coverage (TC-1.14).
- * Phase 5 wires the actual AMQP retry / DLQ routing on top of this decision.
+ * <p>Exposes {@link #classify(Exception)} for unit-test coverage (TC-1.14).
+ * {@link DlxMessageRecoverer} applies the AMQP retry / DLQ routing on top of this decision.
  */
 public class EventConsumerSupport {
 
@@ -34,7 +34,9 @@ public class EventConsumerSupport {
             SchemaValidationException.class,
             DeserializationException.class,
             SerializationException.class,
-            IncompatibleSchemaTypeException.class
+            IncompatibleSchemaTypeException.class,
+            MissingSchemaHeadersException.class,
+            UnknownSchemaArtifactException.class
     );
 
     /**
@@ -44,9 +46,9 @@ public class EventConsumerSupport {
      *
      * <ul>
      *   <li>PERMANENT → {@link RoutingDecision#DLQ_DIRECT}: validation, deserialization,
-     *       serialization, type mismatch.</li>
-     *   <li>TRANSIENT → {@link RoutingDecision#RETRY}: registry unavailable, schema not found,
-     *       any other exception (conservative default).</li>
+     *       serialization, type mismatch, missing schema headers, unknown artifact.</li>
+     *   <li>TRANSIENT → {@link RoutingDecision#RETRY}: any other exception (conservative
+     *       default) — e.g. a downstream handler failure.</li>
      * </ul>
      */
     public RoutingDecision classify(Exception e) {

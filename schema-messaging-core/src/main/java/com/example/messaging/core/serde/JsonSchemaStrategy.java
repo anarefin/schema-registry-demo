@@ -1,14 +1,14 @@
 package com.example.messaging.core.serde;
 
 import com.example.messaging.core.exception.DeserializationException;
+import com.example.messaging.core.exception.InvalidSchemaDefinitionException;
 import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.exception.SerializationException;
 import com.example.messaging.core.model.ResolvedSchema;
+import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
@@ -18,7 +18,9 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -27,9 +29,11 @@ import java.util.stream.Collectors;
  * schemas, which target Draft-07 so Apicurio 3.2.0's compatibility checker can gate them),
  * then serializes / deserializes with Jackson.
  *
- * <p>Compiled {@link JsonSchema} objects are cached by globalId — parsing the schema
- * content string on every call is expensive and the result is always identical for the
- * same globalId.
+ * <p>Compiled {@link JsonSchema} objects are cached by {@link SchemaCoordinates} — parsing the
+ * schema content string on every call is expensive and the result is always identical for the
+ * same coordinates. The set of coordinates is fixed and small (one per registered
+ * {@code TypeMapping}), populated once via {@link #warm} during application startup, so a plain
+ * {@link ConcurrentHashMap} is used rather than an eviction-aware cache.
  *
  * <p>Consumer-side validation ({@code validateOnDeserialize}) is enabled by default so
  * that structurally invalid inbound JSON (wrong field types, missing required fields from
@@ -43,10 +47,8 @@ public class JsonSchemaStrategy implements SerializationStrategy {
     private final ObjectMapper objectMapper;
     private final boolean validateOnDeserialize;
 
-    // Compiled JsonSchema objects are immutable and thread-safe; cache by globalId.
-    private final Cache<Long, JsonSchema> compiledSchemaCache = Caffeine.newBuilder()
-            .maximumSize(200)
-            .build();
+    // Compiled JsonSchema objects are immutable and thread-safe; cache by coordinates.
+    private final Map<SchemaCoordinates, JsonSchema> compiledSchemaCache = new ConcurrentHashMap<>();
 
     public JsonSchemaStrategy(ObjectMapper objectMapper, boolean validateOnDeserialize) {
         this.objectMapper = objectMapper;
@@ -93,15 +95,21 @@ public class JsonSchemaStrategy implements SerializationStrategy {
         }
     }
 
+    @Override
+    public void warm(ResolvedSchema schema) {
+        try {
+            compile(schema);
+        } catch (Exception e) {
+            throw new InvalidSchemaDefinitionException(schema.coordinates().toString(),
+                    "Failed to compile JSON schema: " + e.getMessage(), e);
+        }
+    }
+
     // ---- private -----------------------------------------------------------
 
     private void validate(byte[] jsonBytes, ResolvedSchema resolvedSchema) throws SchemaValidationException {
-        String coordinatesCtx = "globalId=" + resolvedSchema.globalId();
         try {
-            JsonSchema jsonSchema = compiledSchemaCache.get(resolvedSchema.globalId(), id -> {
-                JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
-                return factory.getSchema(new String(resolvedSchema.rawContent(), StandardCharsets.UTF_8));
-            });
+            JsonSchema jsonSchema = compile(resolvedSchema);
             JsonNode node = objectMapper.readTree(jsonBytes);
             Set<ValidationMessage> errors = jsonSchema.validate(node);
             if (!errors.isEmpty()) {
@@ -109,13 +117,20 @@ public class JsonSchemaStrategy implements SerializationStrategy {
                         .map(ValidationMessage::getMessage)
                         .limit(5)
                         .collect(Collectors.toList());
-                throw new SchemaValidationException(coordinatesCtx, errorMessages);
+                throw new SchemaValidationException(resolvedSchema.coordinates().toString(), errorMessages);
             }
         } catch (SchemaValidationException e) {
             throw e;
         } catch (Exception e) {
-            throw new SchemaValidationException(coordinatesCtx,
+            throw new SchemaValidationException(resolvedSchema.coordinates().toString(),
                     "Failed to compile/validate JSON schema: " + e.getMessage(), e);
         }
+    }
+
+    private JsonSchema compile(ResolvedSchema resolvedSchema) {
+        return compiledSchemaCache.computeIfAbsent(resolvedSchema.coordinates(), coords -> {
+            JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
+            return factory.getSchema(new String(resolvedSchema.rawContent(), StandardCharsets.UTF_8));
+        });
     }
 }

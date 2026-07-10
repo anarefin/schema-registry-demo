@@ -10,10 +10,8 @@ import org.springframework.amqp.core.MessageProperties;
 public final class SchemaMessageHeaders {
 
     // Schema identity headers
-    public static final String GLOBAL_ID      = "X-Schema-GlobalId";
     public static final String GROUP_ID       = "X-Schema-GroupId";
     public static final String ARTIFACT_ID    = "X-Schema-ArtifactId";
-    public static final String VERSION        = "X-Schema-Version";
     public static final String TYPE           = "X-Schema-Type";
 
     // Message tracing headers
@@ -43,14 +41,11 @@ public final class SchemaMessageHeaders {
      */
     public static void setSchemaHeaders(
             MessageProperties props,
-            long globalId,
             SchemaCoordinates coords,
             SchemaType schemaType,
             String contentType) {
-        props.setHeader(GLOBAL_ID, globalId);
         props.setHeader(GROUP_ID, coords.groupId());
         props.setHeader(ARTIFACT_ID, coords.artifactId());
-        props.setHeader(VERSION, coords.versionExpression());
         props.setHeader(TYPE, schemaType.name());
         props.setContentType(contentType);
     }
@@ -58,21 +53,12 @@ public final class SchemaMessageHeaders {
     /** Convenience overload — uses {@link SchemaType#contentType()} as the content-type. */
     public static void setSchemaHeaders(
             MessageProperties props,
-            long globalId,
             SchemaCoordinates coords,
             SchemaType schemaType) {
-        setSchemaHeaders(props, globalId, coords, schemaType, schemaType.contentType());
+        setSchemaHeaders(props, coords, schemaType, schemaType.contentType());
     }
 
     // ---- read helpers ----------------------------------------------------
-
-    public static Long getGlobalId(MessageProperties props) {
-        Object v = props.getHeader(GLOBAL_ID);
-        if (v == null) return null;
-        if (v instanceof Long l) return l;
-        if (v instanceof Number n) return n.longValue();
-        try { return Long.parseLong(v.toString()); } catch (NumberFormatException e) { return null; }
-    }
 
     public static String getGroupId(MessageProperties props) {
         return headerString(props, GROUP_ID);
@@ -80,16 +66,6 @@ public final class SchemaMessageHeaders {
 
     public static String getArtifactId(MessageProperties props) {
         return headerString(props, ARTIFACT_ID);
-    }
-
-    public static String getVersion(MessageProperties props) {
-        return headerString(props, VERSION);
-    }
-
-    public static SchemaType getSchemaType(MessageProperties props) {
-        String v = headerString(props, TYPE);
-        if (v == null) return null;
-        try { return SchemaType.valueOf(v); } catch (IllegalArgumentException e) { return null; }
     }
 
     /**

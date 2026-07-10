@@ -17,8 +17,8 @@ topology.
 | Six artifacts with FORWARD compat rules | `apicurio-registry:register` + bootstrap workflow |
 | Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
-| Registry down → cached processing, new messages fail gracefully | `SchemaResolver` last-known-good |
-| `auto-register=OFF` + unregistered schema → fail to start | `StartupSchemaValidator` |
+| Missing/malformed local schema → service fails to start | `LocalSchemaCatalog` eager load, see ADR-0004 |
+| Producer/consumer runtime has zero dependency on Apicurio | `docker compose up rabbitmq postgres` (no Apicurio) still processes messages |
 | README walkthrough on fresh clone in under 15 min | This file |
 
 ---
@@ -216,18 +216,16 @@ Same CI gate for customers:
 sequenceDiagram
     participant C as Client
     participant P as ProducerService
-    participant R as SchemaResolver
-    participant A as ApicurioRegistry
+    participant L as LocalSchemaCatalog
     participant MQ as RabbitMQ
 
+    Note over L: schemas loaded from classpath at startup (no registry call)
     C->>P: POST /api/orders {payload}
     P->>P: build OrderCreated (JSON)
-    P->>R: resolve(SchemaCoordinates)
-    R->>A: GET /apis/registry/v3/groups/events.orders/artifacts/OrderCreated
-    A-->>R: schema bytes
-    R-->>P: ResolvedSchema (cached)
+    P->>L: get(SchemaCoordinates)
+    L-->>P: ResolvedSchema (pre-loaded, in-process)
     P->>P: validate + serialize (raw JSON bytes)
-    P->>MQ: publish to that event's domain exchange (e.g. events.orders.exchange)<br/>X-Schema-GlobalId / X-Schema-Type / X-Correlation-Id
+    P->>MQ: publish to that event's domain exchange (e.g. events.orders.exchange)<br/>X-Schema-GroupId / X-Schema-ArtifactId / X-Schema-Type / X-Correlation-Id
     P-->>C: 201 Created
 ```
 
@@ -237,18 +235,12 @@ sequenceDiagram
 sequenceDiagram
     participant MQ as RabbitMQ
     participant CS as ConsumerService
-    participant R as SchemaResolver
-    participant A as ApicurioRegistry
+    participant L as LocalSchemaCatalog
 
+    Note over L: schemas loaded from classpath at startup (no registry call)
     MQ->>CS: deliver message (JSON bytes + X-Schema-* headers)
-    CS->>R: fetchByGlobalId(X-Schema-GlobalId)
-    alt cache hit
-        R-->>CS: ResolvedSchema (from Caffeine cache)
-    else cache miss
-        R->>A: GET /apis/registry/v3/ids/globalIds/{id}
-        A-->>R: schema bytes
-        R-->>CS: ResolvedSchema (now cached)
-    end
+    CS->>L: get(SchemaCoordinates) via X-Schema-GroupId/ArtifactId
+    L-->>CS: ResolvedSchema (pre-loaded, in-process)
     CS->>CS: deserialize → OrderCreated
     CS->>CS: business logic (OrderEventListener)
 ```
@@ -293,11 +285,12 @@ sequenceDiagram
 ./mvnw test           # unit tests only (fast, no Docker)
 ./mvnw verify         # unit + Testcontainers integration tests
 ./mvnw -pl schema-messaging-core test   # single-module
-./mvnw -pl schema-messaging-core test -Dtest=SchemaResolverTest#cacheHit   # single test
+./mvnw -pl schema-messaging-core test -Dtest=JsonSchemaStrategyTest#schemaType_isJson   # single test
 ```
 
 Tests are split by convention: `*Test.java` → Surefire (unit, mock-based);
-`*IT.java` → Failsafe (Testcontainers, real RabbitMQ + Apicurio). Keep new tests on the
+`*IT.java` → Failsafe (Testcontainers, real RabbitMQ). Schema validation is local
+(classpath) in both, so no Apicurio container is needed for either suite. Keep new tests on the
 correct side — the split is load-bearing.
 
 ---
@@ -310,11 +303,9 @@ They are not appropriate for production use as-is.
 | Shortcut | POC rationale | Production path |
 |---|---|---|
 | No consumer-side deduplication (honest at-least-once delivery) | Keeps the consumer stateless; no distributed dedup store | Redis / database deduplication store keyed on a producer-supplied message id |
-| Single-instance Apicurio Registry (no HA) | Simplifies compose topology | Multi-node Apicurio behind a load balancer, connection pooling |
-| Cache TTL vs evolution latency | 300 s `refresh-after-write` means producers see new schemas within 5 min | Tune or use event-driven cache invalidation (registry webhooks) |
-| OIDC disabled by default | No Keycloak setup needed for the demo | Enable via `RegistryClientOptions.oauth2(...)` in `SchemaMessagingAutoConfiguration` — see Javadoc for Keycloak token-url pattern |
+| Single-instance Apicurio Registry (no HA) | Simplifies compose topology; Apicurio is CI/governance-only, not a runtime dependency (ADR-0004) | Multi-node Apicurio behind a load balancer, connection pooling |
+| No schema hot-swap without redeploy | Schemas are baked into the contracts JAR at build time (`LocalSchemaCatalog`, ADR-0004) | If live schema updates are needed, reintroduce a registry-backed resolution path with appropriate caching |
 | Schema registration is a manual host-Maven step after `docker compose up` | Keeps the build single-source (no second Maven toolchain in a container) | CI: run `apicurio-registry:register` + rule attachment as a dedicated post-deploy Maven step with a populated cache layer |
-| `apicurio.auto-register=ON` (default) | Services start without pre-registered schemas | Set `OFF` in production; `StartupSchemaValidator` then fails fast if a pinned schema is missing |
 
 ---
 
@@ -350,9 +341,6 @@ They are not appropriate for production use as-is.
 
 # Run with prod profile (structured JSON logging)
 ./mvnw -pl producer-service spring-boot:run -Dspring-boot.run.profiles=prod
-
-# Version pinning demo (resolves exact schema version at startup)
-SCHEMA_ORDERS_PINNED_VERSION=1 ./mvnw -pl producer-service spring-boot:run
 ```
 
 ---

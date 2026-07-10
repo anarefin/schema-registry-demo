@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — schema-registry-demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .mass-iface { background: #fef3c7; border: 2px solid #d97706; }
+      .mass-impl { background: #e2e8f0; border: 2px solid #64748b; }
+      .band { border-left-width: 4px; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+      <header class="space-y-4 border-b border-stone-200 pb-8">
+        <p class="text-xs uppercase tracking-wider text-stone-500">Architecture review</p>
+        <h1 class="font-serif text-3xl text-slate-900">schema-registry-demo</h1>
+        <p class="text-sm text-stone-600">10 Jul 2026 · improve-codebase-architecture</p>
+        <div class="flex flex-wrap gap-4 text-xs text-stone-600 pt-2">
+          <span class="inline-flex items-center gap-2"><span class="inline-block w-4 h-4 border-2 border-slate-800 bg-white"></span> module</span>
+          <span class="inline-flex items-center gap-2"><span class="inline-block w-8 border-t-2 border-dashed border-slate-500"></span> seam</span>
+          <span class="inline-flex items-center gap-2"><span class="inline-block w-8 border-t-2 border-red-600"></span> leakage</span>
+          <span class="inline-flex items-center gap-2"><span class="inline-block w-4 h-4 deep"></span> deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- CANDIDATE 1 -->
+        <article id="c1" class="rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">Contracts-owned TypeMapping auto-configuration</h2>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">Strong</span>
+                <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">in-process</span>
+              </div>
+            </div>
+            <ul class="font-mono text-sm text-stone-600 space-y-0.5">
+              <li>producer-service/.../OrderContractsConfiguration.java</li>
+              <li>producer-service/.../CustomerContractsConfiguration.java</li>
+              <li>consumer-service/.../OrderContractsConfiguration.java</li>
+              <li>consumer-service/.../CustomerContractsConfiguration.java</li>
+              <li>order-contracts/.../OrderTopologyAutoConfiguration.java</li>
+              <li>customer-contracts/.../CustomerTopologyAutoConfiguration.java</li>
+            </ul>
+
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 space-y-3">
+                <p class="text-xs uppercase tracking-wider text-stone-500">Before — shallow adapters</p>
+                <div class="flex items-end justify-center gap-3 h-40">
+                  <div class="flex flex-col items-center gap-1 w-16">
+                    <div class="mass-iface w-full h-14 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-amber-900">iface</div>
+                    <div class="mass-impl w-full h-16 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-slate-600">impl</div>
+                    <span class="text-[10px] text-stone-500">prod Order</span>
+                  </div>
+                  <div class="flex flex-col items-center gap-1 w-16">
+                    <div class="mass-iface w-full h-14 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-amber-900">iface</div>
+                    <div class="mass-impl w-full h-16 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-slate-600">impl</div>
+                    <span class="text-[10px] text-stone-500">cons Order</span>
+                  </div>
+                  <div class="flex flex-col items-center gap-1 w-16">
+                    <div class="mass-iface w-full h-14 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-amber-900">iface</div>
+                    <div class="mass-impl w-full h-16 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-slate-600">impl</div>
+                    <span class="text-[10px] text-stone-500">prod Cust</span>
+                  </div>
+                  <div class="flex flex-col items-center gap-1 w-16">
+                    <div class="mass-iface w-full h-14 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-amber-900">iface</div>
+                    <div class="mass-impl w-full h-16 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-slate-600">impl</div>
+                    <span class="text-[10px] text-stone-500">cons Cust</span>
+                  </div>
+                </div>
+                <p class="text-xs text-stone-500 text-center">Interface ≈ implementation × 4 identical adapters</p>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 space-y-3">
+                <p class="text-xs uppercase tracking-wider text-stone-500">After — deep Contract module</p>
+                <div class="flex items-end justify-center gap-6 h-40">
+                  <div class="flex flex-col items-center gap-1 w-28">
+                    <div class="mass-iface w-full h-8 rounded flex items-center justify-center text-[10px] uppercase tracking-wider text-amber-900">iface</div>
+                    <div class="deep w-full h-28 rounded flex flex-col items-center justify-center text-[10px] uppercase tracking-wider text-stone-200 gap-1 px-2 text-center">
+                      <span>topology</span>
+                      <span>+ TypeMapping</span>
+                      <span class="text-stone-400">auto-config</span>
+                    </div>
+                    <span class="text-[10px] text-stone-500">*-contracts</span>
+                  </div>
+                  <div class="flex flex-col items-center gap-1 w-20 opacity-40">
+                    <div class="w-full h-6 border border-dashed border-slate-400 rounded"></div>
+                    <div class="w-full h-10 border border-dashed border-slate-400 rounded"></div>
+                    <span class="text-[10px] text-stone-500">services</span>
+                  </div>
+                </div>
+                <p class="text-xs text-stone-500 text-center">One interface; implementation absorbs wiring</p>
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <pre class="mermaid">
+flowchart LR
+  subgraph before [Before]
+    R1[OrderCreated record]
+    R1 --> T[TopologyAutoConfig]
+    R1 --> P[producer TypeMapping]
+    R1 --> C[consumer TypeMapping]
+    P -.leak.-> C
+  end
+  subgraph after [After]
+    R2[OrderCreated record]
+    R2 --> Deep[Contract auto-config]
+    Deep --> Core[LocalSchemaCatalog]
+    Svc[producer / consumer] -.-> Deep
+  end
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class P,C leak
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a;
+  class Deep deep
+              </pre>
+            </div>
+
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Problem</span><br>
+              Contracts own topology (ADR-0002) but TypeMapping stays hand-duplicated in both services — half a plug-in module.</p>
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Solution</span><br>
+              Deepen contracts (or a thin wiring jar above the enforcer ban) so TypeMapping beans auto-register with topology; delete the four service config classes.</p>
+            <ul class="text-sm space-y-1 list-disc list-inside text-slate-700">
+              <li>locality at event boundary</li>
+              <li>leverage: one interface, N services</li>
+              <li>delete 4 shallow adapters</li>
+            </ul>
+            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Contradicts spec Principle 3 / ADR-0002 (“schema-resolution wiring untouched”) — worth reopening: topology migration left the costliest seam behind. <code class="font-mono text-xs">core ↛ contracts</code> still holds via neutral leaf or contracts→core types only.
+            </div>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 2 -->
+        <article id="c2" class="rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">Single per-event metadata registry</h2>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-amber-100 text-amber-900 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">Worth exploring</span>
+                <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">in-process</span>
+              </div>
+            </div>
+            <ul class="font-mono text-sm text-stone-600 space-y-0.5">
+              <li>*-contracts/.../*EventRouting.java</li>
+              <li>*-contracts/.../*TopologyAutoConfiguration.java</li>
+              <li>*-contracts/pom.xml (exec + apicurio artifacts)</li>
+              <li>*ContractsSchemaDeterminismTest.java</li>
+              <li>.github/workflows/schema-governance-bootstrap.yml</li>
+            </ul>
+
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="text-xs uppercase tracking-wider text-stone-500 mb-2">Before — touch graph</p>
+                <pre class="mermaid">
+flowchart TB
+  Rec[Event record]
+  Rec --> ER[EventRouting]
+  Rec --> Topo[Topology loop]
+  Rec --> POM[pom.xml x2]
+  Rec --> Det[Determinism test]
+  Rec --> TM[TypeMapping x2]
+  Rec --> CI[CI ARTIFACTS]
+  Rec --> Ctrl[Controller]
+  Rec --> Lsn[Listener]
+                </pre>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="text-xs uppercase tracking-wider text-stone-500 mb-2">After — collapsed metadata</p>
+                <pre class="mermaid">
+flowchart TB
+  Rec2[Event record + metadata]
+  Rec2 --> Meta[Event metadata module]
+  Meta --> Gen[schema-gen / topology / TypeMapping / CI]
+  App[Controller + Listener] -.-> Rec2
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a;
+  class Meta deep
+                </pre>
+              </div>
+            </div>
+
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Problem</span><br>
+              Event identity re-enumerated in 8+ places; interface of “add event” is as wide as the implementation checklist.</p>
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Solution</span><br>
+              One annotation, enum, or companion per record drives schema-gen args, topology keys, TypeMapping factory, and governance lists.</p>
+            <ul class="text-sm space-y-1 list-disc list-inside text-slate-700">
+              <li>locality for new events</li>
+              <li>interface shrinks</li>
+              <li>implementation absorbs lists</li>
+              <li>pairs with candidate 1</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 3 -->
+        <article id="c3" class="rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">Declarative failure classification</h2>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">Strong</span>
+                <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">in-process</span>
+              </div>
+            </div>
+            <ul class="font-mono text-sm text-stone-600 space-y-0.5">
+              <li>schema-messaging-core/.../EventConsumerSupport.java</li>
+              <li>schema-messaging-core/.../exception/*</li>
+              <li>schema-messaging-core/.../SchemaAwareMessageConverter.java</li>
+            </ul>
+
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="text-xs uppercase tracking-wider text-stone-500 mb-2">Before — RETRY leak</p>
+                <pre class="mermaid">
+flowchart LR
+  Conv[MessageConverter]
+  Conv -->|SchemaValidationException| Set[PERMANENT_EXCEPTIONS Set]
+  Conv -->|MessageConversionException| Retry[RETRY]
+  Set --> DLQ[DLQ]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class Retry leak
+                </pre>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="text-xs uppercase tracking-wider text-stone-500 mb-2">After — intent on exception</p>
+                <pre class="mermaid">
+flowchart LR
+  Ex[SchemaMessagingException]
+  Ex --> Kind[Permanent / Transient]
+  Kind --> Cls[FailureClassifier]
+  Cls --> Route[DLQ or retry]
+  Spring[MessageConversionException] --> Wrap[map to permanent]
+  Wrap --> Cls
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a;
+  class Cls deep
+                </pre>
+              </div>
+            </div>
+
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Problem</span><br>
+              Taxonomy manually synced across Set + javadoc + CLAUDE.md; <code class="font-mono text-xs">MessageConversionException</code> misclassified as RETRY.</p>
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Solution</span><br>
+              Marker interface or kind on <code class="font-mono text-xs">SchemaMessagingException</code>; classifier reads intent; wrap Spring conversion exceptions into the permanent set.</p>
+            <ul class="text-sm space-y-1 list-disc list-inside text-slate-700">
+              <li>locality of routing intent</li>
+              <li>one interface for tests</li>
+              <li>closes RETRY leak</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 4 -->
+        <article id="c4" class="rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">Unified schema bootstrap Module</h2>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-amber-100 text-amber-900 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">Worth exploring</span>
+                <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">in-process</span>
+              </div>
+            </div>
+            <ul class="font-mono text-sm text-stone-600 space-y-0.5">
+              <li>schema-messaging-core/.../LocalSchemaCatalog.java</li>
+              <li>schema-messaging-core/.../SchemaAwareMessageConverter.java</li>
+              <li>schema-messaging-core/.../SerializationStrategy.java</li>
+              <li>schema-messaging-core/.../JsonSchemaStrategy.java</li>
+            </ul>
+
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 space-y-2">
+                <p class="text-xs uppercase tracking-wider text-stone-500">Before — cross-section bounce</p>
+                <div class="space-y-1">
+                  <div class="band h-10 bg-white border border-slate-200 border-l-amber-500 px-3 flex items-center text-xs uppercase tracking-wider">TypeMapping beans</div>
+                  <div class="band h-10 bg-white border border-slate-200 border-l-amber-500 px-3 flex items-center text-xs uppercase tracking-wider">TypeMappingRegistry</div>
+                  <div class="band h-10 bg-white border border-slate-200 border-l-amber-500 px-3 flex items-center text-xs uppercase tracking-wider">LocalSchemaCatalog load</div>
+                  <div class="band h-10 bg-white border border-slate-200 border-l-amber-500 px-3 flex items-center text-xs uppercase tracking-wider">Converter ctor + warm()</div>
+                </div>
+                <p class="text-xs text-stone-500">Four thin bands for one fail-fast concept</p>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 space-y-2">
+                <p class="text-xs uppercase tracking-wider text-stone-500">After — one deep band</p>
+                <div class="deep h-40 rounded px-4 flex flex-col justify-center gap-2 text-stone-200">
+                  <span class="text-xs uppercase tracking-wider text-stone-400">SchemaBootstrap</span>
+                  <span class="text-sm">load · strategy presence · warm</span>
+                  <span class="text-xs text-stone-400">→ frozen SchemaRuntime</span>
+                </div>
+                <div class="h-10 bg-white border border-dashed border-slate-300 px-3 flex items-center text-xs uppercase tracking-wider text-stone-500">Converter = thin adapter</div>
+              </div>
+            </div>
+
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Problem</span><br>
+              “Why did startup abort?” bounces across four files — poor locality for one mental model.</p>
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Solution</span><br>
+              One <code class="font-mono text-xs">SchemaBootstrap</code> / frozen <code class="font-mono text-xs">SchemaRuntime</code> module owns load + strategy presence + warm; converter becomes a thin adapter.</p>
+            <ul class="text-sm space-y-1 list-disc list-inside text-slate-700">
+              <li>one fail-fast interface</li>
+              <li>tests hit one seam</li>
+              <li>converter depth stays on wire path</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 5 -->
+        <article id="c5" class="rounded-xl border border-stone-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <h2 class="font-serif text-2xl">Shared retry / exchange naming conventions Module</h2>
+              <div class="flex flex-wrap gap-2">
+                <span class="rounded-full bg-amber-100 text-amber-900 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">Worth exploring</span>
+                <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-0.5 text-xs font-medium uppercase tracking-wider">ports &amp; adapters</span>
+              </div>
+            </div>
+            <ul class="font-mono text-sm text-stone-600 space-y-0.5">
+              <li>schema-messaging-core/.../DlxMessageRecoverer.java (tierSuffix)</li>
+              <li>amqp-topology-kit/.../TopologyNaming.java (tierSuffix)</li>
+              <li>schema-messaging-core/.../schema/SchemaFileNaming.java</li>
+              <li>schema-gen-tools/.../SchemaFileNaming.java</li>
+            </ul>
+
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="text-xs uppercase tracking-wider text-stone-500 mb-2">Before — duplicated conventions</p>
+                <pre class="mermaid">
+flowchart LR
+  Core[DlxMessageRecoverer]
+  Kit[TopologyNaming]
+  Core -->|"tierSuffix 5s/30s/5m"| Strings
+  Kit -->|"tierSuffix 5s/30s/5m"| Strings
+  Gen[schema-gen SchemaFileNaming]
+  Cat[core SchemaFileNaming]
+  Gen -.leak.-> Cat
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class Gen,Cat leak
+                </pre>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="text-xs uppercase tracking-wider text-stone-500 mb-2">After — inverted leaf</p>
+                <pre class="mermaid">
+flowchart TB
+  Conv[messaging-conventions]
+  Core2[schema-messaging-core] --> Conv
+  Kit2[amqp-topology-kit] --> Conv
+  Gen2[schema-gen-tools] --> Conv
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a;
+  class Conv deep
+                </pre>
+              </div>
+            </div>
+
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Problem</span><br>
+              Conventions duplicated across enforcer-banned seams; drift = silent runtime failure.</p>
+            <p><span class="text-xs uppercase tracking-wider text-stone-500">Solution</span><br>
+              Tiny <code class="font-mono text-xs">messaging-conventions</code> leaf that core, kit, and optionally gen-tools depend on — dependency inversion, not core→kit.</p>
+            <ul class="text-sm space-y-1 list-disc list-inside text-slate-700">
+              <li>locality of naming rules</li>
+              <li>leverage across banned seams</li>
+              <li>one adapter per consumer module</li>
+            </ul>
+            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              SchemaFileNaming dual copy is explicit in ADR-0004 — reopen only if a third consumer appears or parity tests fail. Retry-tier duplication is <em>not</em> ADR-blessed and is cleaner to fix first.
+            </div>
+          </div>
+        </article>
+
+        <!-- Deferred note -->
+        <aside class="rounded-lg border border-dashed border-stone-300 bg-stone-100/50 px-5 py-4 text-sm text-stone-600">
+          <p class="text-xs uppercase tracking-wider text-stone-500 mb-2">Deletion-test only — no full cards</p>
+          <p>Shallow pass-throughs: <code class="font-mono text-xs">EventPublisher</code> double lookup, unused <code class="font-mono text-xs">ResolvedSchema.schemaType</code>, single-value <code class="font-mono text-xs">SchemaType</code> + SPI until second format, producer loading full consumer auto-config.</p>
+        </aside>
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl border-2 border-emerald-700 deep text-stone-100 p-8 space-y-3">
+        <p class="text-xs uppercase tracking-wider text-emerald-300">Top recommendation</p>
+        <h2 class="font-serif text-2xl">
+          <a href="#c1" class="underline decoration-emerald-400/50 hover:decoration-emerald-300">Contracts-owned TypeMapping auto-configuration</a>
+        </h2>
+        <p class="text-stone-300 max-w-2xl">
+          Highest leverage. Matches post-ADR-0002 reality (contracts already self-activate for topology). Biggest locality win for the POC’s extension cost. Candidate 3 is the best core-only follow-up if Principle 3 stays closed.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

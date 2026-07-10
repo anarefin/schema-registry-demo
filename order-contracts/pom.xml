@@ -106,9 +106,10 @@
               <mainClass>com.example.schemagen.SchemaGeneratorCli</mainClass>
               <includePluginDependencies>true</includePluginDependencies>
               <arguments>
-                <argument>com.example.contracts.orders.OrderCreated=${project.basedir}/src/main/resources/schemas/order-created.schema.json</argument>
-                <argument>com.example.contracts.orders.OrderShipped=${project.basedir}/src/main/resources/schemas/order-shipped.schema.json</argument>
-                <argument>com.example.contracts.orders.OrderCancelled=${project.basedir}/src/main/resources/schemas/order-cancelled.schema.json</argument>
+                <argument>${project.basedir}/src/main/resources/schemas</argument>
+                <argument>com.example.contracts.orders.OrderCreated</argument>
+                <argument>com.example.contracts.orders.OrderShipped</argument>
+                <argument>com.example.contracts.orders.OrderCancelled</argument>
               </arguments>
             </configuration>
           </execution>

@@ -22,8 +22,9 @@ same walk with different names.
 
 This repo demonstrates **schema-governed messaging**: a producer and a consumer that
 share **no compile-time dependency** on each other, only a runtime contract enforced by
-a schema registry (Apicurio) and a shared message converter. Neither service imports the
-other's code. What keeps them compatible is:
+classpath JSON Schemas (generated at build time) and a shared message converter. Apicurio
+Registry is the CI/governance tool (register + compat-check), not a runtime dependency
+(ADR-0004). Neither service imports the other's code. What keeps them compatible is:
 
 1. Both depend on the same `*-contracts` module (e.g. `order-contracts`), which is the
    single source of truth for an event's shape (a Java **record**) and its generated
@@ -45,7 +46,7 @@ The parent POM aggregates 7 submodules:
 
 | Module | Type | Depends on | Forbidden from depending on | Runtime or build-only |
 |---|---|---|---|---|
-| `schema-messaging-core` | domain-agnostic library | Spring AMQP, Jackson, Caffeine, Apicurio SDK | `*-contracts`, `amqp-topology-kit` (enforced by `maven-enforcer-plugin`) | runtime |
+| `schema-messaging-core` | domain-agnostic library | Spring AMQP, Jackson, networknt | `*-contracts`, `amqp-topology-kit` (enforced by `maven-enforcer-plugin`) | runtime |
 | `amqp-topology-kit` | domain-agnostic library (leaf) | Spring AMQP only | `schema-messaging-core`, `*-contracts` | runtime |
 | `schema-gen-tools` | build-only schema generator (victools) | `*-contracts` | — | **build-only**, never on a service classpath |
 | `order-contracts` | contract module | Jackson, jakarta.validation, `spring-rabbit`, `spring-boot-autoconfigure`, `amqp-topology-kit` | — | runtime |
@@ -55,7 +56,7 @@ The parent POM aggregates 7 submodules:
 
 ```mermaid
 graph LR
-    core["schema-messaging-core<br/>(converter, resolver, publisher, DLX routing)"]
+    core["schema-messaging-core<br/>(converter, LocalSchemaCatalog, publisher, DLX routing)"]
     kit["amqp-topology-kit<br/>(naming + retry-ladder factory, leaf)"]
     oc["order-contracts<br/>(records + schemas + topology autoconfig)"]
     cc["customer-contracts<br/>(records + schemas + topology autoconfig)"]
@@ -84,7 +85,7 @@ graph LR
 ### Core libraries
 
 `schema-messaging-core` holds everything reusable and domain-agnostic: the
-`SchemaAwareMessageConverter`, `SchemaResolver` (Apicurio caching), `EventPublisher`,
+`SchemaAwareMessageConverter`, `LocalSchemaCatalog` (classpath schema load), `EventPublisher`,
 and the consumer-side DLX/retry machinery (`EventConsumerSupport`, `DlxMessageRecoverer`,
 `DlxRoutingAdvice`). It knows nothing about orders or customers.
 
@@ -139,9 +140,9 @@ naming, so you don't have to keep looking them up mid-trace.
 | Class | Module | Role |
 |---|---|---|
 | `TypeMapping` / `TypeMappingRegistry` | `schema-messaging-core` | Maps a Java type ↔ `SchemaCoordinates` ↔ `SchemaType` ↔ AMQP routing key. One `TypeMapping` bean per event. |
-| `SchemaCoordinates` / `ResolvedSchema` | `schema-messaging-core` | `SchemaCoordinates` is the cache key (group/artifact/version); `ResolvedSchema` is the cached value (raw schema bytes + globalId + a `stale` flag). |
+| `SchemaCoordinates` / `ResolvedSchema` | `schema-messaging-core` | `SchemaCoordinates` is group/artifact; `ResolvedSchema` is the classpath-loaded schema bytes + type. |
 | `SchemaAwareMessageConverter` | `schema-messaging-core` | The one Spring AMQP `MessageConverter` that does `toMessage`/`fromMessage` for every event — the single validation authority. |
-| `SchemaResolver` | `schema-messaging-core` | Caffeine cache in front of `ApicurioClient`; serves stale-on-registry-outage. |
+| `LocalSchemaCatalog` | `schema-messaging-core` | Eagerly loads every mapping's JSON Schema from the classpath at startup; fails fast if missing. |
 | `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. |
 | `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send()`. |
 | `DlxRoutingAdvice` | `schema-messaging-core` | AOP advice wrapped around every listener invocation; catches exceptions and hands them to the recoverer. |
@@ -162,10 +163,10 @@ Roadmap (each numbered step below is one hop):
 1. HTTP request → `OrderController` builds the record and hands it to `EventPublisher`.
 2. `EventPublisher.publish()` looks up the `TypeMapping`, calls the converter, sends via `RabbitTemplate`.
 3. The `TypeMapping` bean itself, registered in `producer-service`.
-4. The converter's produce path (`toMessage`): resolve schema → validate → serialize → stamp headers.
+4. The converter's produce path (`toMessage`): catalog lookup → validate → serialize → stamp headers.
 5. The AMQP topology that the message lands in — declared once at startup, not per-publish.
 6. The consumer's listener container + `@RabbitListener`.
-7. The converter's consume path (`fromMessage`): read headers → resolve schema → validate → deserialize.
+7. The converter's consume path (`fromMessage`): read headers → catalog lookup → validate → deserialize.
 8. What happens when any of the above throws — the DLX/retry routing decision.
 
 ### 4.1 HTTP entrypoint
@@ -217,40 +218,35 @@ public TypeMapping orderCreatedMapping() {
 ```
 
 One `@Bean` method per event, all in one `@Configuration` class per service. The
-`coords()` helper (lines 25-29 of the same file) resolves to
-`SchemaCoordinates.latest(...)` unless `schema.orders.pinned-version` is set in
-`application.yml`, in which case every artifact is locked to that version — this is the
-version-pinning mechanism `docs/TESTING-GUIDE.md` §12-13 demonstrates.
+`coords()` helper builds a 2-arg `SchemaCoordinates(groupId, artifactId)` — no version
+pinning at runtime (ADR-0004).
 
 ### 4.4 Convert: produce path
 
-`schema-messaging-core/.../converter/SchemaAwareMessageConverter.java:66-93` (`toMessage`):
+`schema-messaging-core/.../converter/SchemaAwareMessageConverter.java` (`toMessage`):
 
 ```java
 public Message toMessage(Object object, MessageProperties messageProperties) {
     TypeMapping mapping = typeMappingRegistry.findByJavaType(type).orElseThrow(...);
-    ResolvedSchema schema = schemaResolver.resolveByCoordinates(mapping.coordinates());
+    ResolvedSchema schema = localSchemaCatalog.get(mapping.coordinates());
     SerializationStrategy strategy = strategyFor(mapping.schemaType());
     byte[] bytes = strategy.serialize(object, schema);
-    SchemaMessageHeaders.setSchemaHeaders(messageProperties, schema.globalId(), ...);
+    SchemaMessageHeaders.setSchemaHeaders(messageProperties, mapping.coordinates(),
+            mapping.schemaType(), strategy.contentType());
     return new Message(bytes, messageProperties);
 }
 ```
 
-- `schemaResolver.resolveByCoordinates()` (`registry/SchemaResolver.java:78-81`) hits a
-  Caffeine `LoadingCache`; on a cache miss it fetches from Apicurio, and if Apicurio is
-  down it serves the last-known-good value with a WARN rather than failing the publish.
-- `strategy.serialize()` → `JsonSchemaStrategy.serialize()` (`serde/JsonSchemaStrategy.java:66-77`)
-  Jackson-serializes the record, then calls `validate()` (lines 98-119): compiles/caches
-  the schema (networknt, Draft-07) and validates the JSON against it. **If validation
-  fails, `SchemaValidationException` is thrown and no message is ever sent** — the
-  producer sees a 400, not a message on the broker.
-- `SchemaMessageHeaders.setSchemaHeaders()` stamps the identity headers:
+- `localSchemaCatalog.get()` returns the schema loaded at startup from
+  `classpath:schemas/<kebab-name>.schema.json` — no network call.
+- `strategy.serialize()` → `JsonSchemaStrategy.serialize()` Jackson-serializes the record,
+  then validates (networknt, Draft-07). **If validation fails, `SchemaValidationException`
+  is thrown and no message is ever sent** — the producer sees a 400.
+- `SchemaMessageHeaders.setSchemaHeaders()` stamps identity headers:
 
   | Header | Purpose |
   |---|---|
-  | `X-Schema-GlobalId` | Apicurio global content ID — lets the consumer skip a coordinate lookup |
-  | `X-Schema-GroupId` / `X-Schema-ArtifactId` / `X-Schema-Version` | Full coordinates (fallback path) |
+  | `X-Schema-GroupId` / `X-Schema-ArtifactId` | Coordinates for consumer TypeMapping lookup |
   | `X-Schema-Type` | `JSON` today — the SPI exists for future formats (e.g. Avro) |
   | `X-Correlation-Id` | Generated if not already present |
 
@@ -259,8 +255,7 @@ sequenceDiagram
     participant C as OrderController
     participant P as EventPublisher
     participant TM as TypeMappingRegistry
-    participant SR as SchemaResolver
-    participant AR as Apicurio Registry
+    participant Cat as LocalSchemaCatalog
     participant JS as JsonSchemaStrategy
     participant RT as RabbitTemplate / Broker
 
@@ -268,16 +263,14 @@ sequenceDiagram
     P->>TM: findByJavaType(OrderCreated.class)
     TM-->>P: TypeMapping
     P->>JS: toMessage(event) [via converter]
-    JS->>SR: resolveByCoordinates(coords)
-    SR->>AR: fetch (cache miss only)
-    AR-->>SR: schema content + globalId
-    SR-->>JS: ResolvedSchema
+    JS->>Cat: get(coords)
+    Cat-->>JS: ResolvedSchema
     JS->>JS: serialize() + validate()
     alt validation fails
         JS-->>P: throws SchemaValidationException
         Note over P: no message sent, publish call fails
     else validation passes
-        JS-->>P: bytes + X-Schema-* headers
+        JS-->>P: Message with X-Schema-* headers
         P->>RT: send(exchange, routingKey, message)
     end
 ```
@@ -335,7 +328,7 @@ by the time `onOrderCreated` executes, `event` is already a validated, typed
 
 ### 4.7 Convert: consume path
 
-`SchemaAwareMessageConverter.fromMessage()` (lines 98-134):
+`SchemaAwareMessageConverter.fromMessage()`:
 
 ```java
 public Object fromMessage(Message message) {
@@ -343,38 +336,36 @@ public Object fromMessage(Message message) {
     String artifactId = SchemaMessageHeaders.getArtifactId(props);
     String headerTypeName = SchemaMessageHeaders.getSchemaTypeName(props);
 
-    TypeMapping mapping = typeMappingRegistry.findByGroupAndArtifact(groupId, artifactId)
-            .orElseThrow(...);
+    requireHeader(groupId, ...); requireHeader(artifactId, ...); requireHeader(headerTypeName, ...);
 
-    if (headerTypeName != null && !headerTypeName.equalsIgnoreCase(mapping.schemaType().name())) {
+    TypeMapping mapping = typeMappingRegistry.findByGroupAndArtifact(groupId, artifactId)
+            .orElseThrow(() -> new UnknownSchemaArtifactException(groupId, artifactId));
+
+    if (!headerTypeName.equalsIgnoreCase(mapping.schemaType().name())) {
         throw new IncompatibleSchemaTypeException(...);
     }
 
-    ResolvedSchema schema = resolveSchema(props, mapping.schemaType());
+    ResolvedSchema schema = localSchemaCatalog.get(mapping.coordinates());
     return strategyFor(mapping.schemaType()).deserialize(message.getBody(), mapping.javaType(), schema);
 }
 ```
 
 Notable details:
 
-- **Type-mismatch guard** (lines 113-117): the raw `X-Schema-Type` header string is
-  compared against what this consumer's `TypeMapping` expects. If a stale producer sent
-  a different schema type (e.g. `PROTOBUF`), this throws `IncompatibleSchemaTypeException`
-  immediately, rather than letting a mismatched deserializer fail confusingly downstream.
-  This is a **permanent** failure (section 4.8).
-- **`resolveSchema()`** (lines 138-151) prefers the `X-Schema-GlobalId` fast path
-  (`resolveByGlobalId`, skips a coordinate lookup entirely) and only falls back to
-  group/artifact/version coordinates if no globalId header is present.
-- `JsonSchemaStrategy.deserialize()` (lines 80-94) validates (if
-  `validateOnDeserialize` is enabled — the default) then Jackson-deserializes.
-  Deserialization failures are wrapped as `DeserializationException`.
+- **Required headers:** missing/blank `X-Schema-GroupId` / `ArtifactId` / `Type` →
+  `MissingSchemaHeadersException` (permanent → DLQ).
+- **Type-mismatch guard:** raw `X-Schema-Type` vs mapping expectation →
+  `IncompatibleSchemaTypeException` (permanent).
+- **Unknown artifact:** no TypeMapping → `UnknownSchemaArtifactException` (permanent).
+- Schema comes from `LocalSchemaCatalog` (already loaded at startup).
+- `JsonSchemaStrategy.deserialize()` validates (default) then Jackson-deserializes.
 
 ```mermaid
 sequenceDiagram
     participant B as Broker
     participant C as SchemaAwareMessageConverter
     participant TM as TypeMappingRegistry
-    participant SR as SchemaResolver
+    participant Cat as LocalSchemaCatalog
     participant JS as JsonSchemaStrategy
     participant L as OrderEventListener
 
@@ -382,8 +373,8 @@ sequenceDiagram
     C->>TM: findByGroupAndArtifact(groupId, artifactId)
     TM-->>C: TypeMapping
     C->>C: compare X-Schema-Type vs mapping.schemaType()
-    C->>SR: resolveByGlobalId(globalId) [fast path]
-    SR-->>C: ResolvedSchema
+    C->>Cat: get(coords)
+    Cat-->>C: ResolvedSchema
     C->>JS: deserialize(bytes, OrderCreated.class, schema)
     JS-->>C: validated OrderCreated record
     C->>L: onOrderCreated(event)
@@ -391,9 +382,9 @@ sequenceDiagram
 
 ### 4.8 What happens when it fails
 
-If anything above throws — schema-not-found, validation failure, deserialization
-failure, registry unavailable — `DlxRoutingAdvice.invoke()`
-(`consumer/DlxRoutingAdvice.java:29-54`) is wrapped around the entire listener
+If anything above throws — validation failure, deserialization failure, missing headers,
+unknown artifact — `DlxRoutingAdvice.invoke()`
+(`consumer/DlxRoutingAdvice.java`) is wrapped around the entire listener
 invocation and catches it:
 
 ```java
@@ -412,14 +403,14 @@ for a routing decision:
 
 | Exception | Classification |
 |---|---|
-| `SchemaValidationException`, `DeserializationException`, `SerializationException`, `IncompatibleSchemaTypeException` | **PERMANENT** → `DLQ_DIRECT`, no retry |
-| Everything else (e.g. `RegistryUnavailableException`, `SchemaNotFoundException`) | **TRANSIENT** → `RETRY` |
+| `SchemaValidationException`, `DeserializationException`, `SerializationException`, `IncompatibleSchemaTypeException`, `MissingSchemaHeadersException`, `UnknownSchemaArtifactException` | **PERMANENT** → `DLQ_DIRECT`, no retry |
+| Everything else (e.g. downstream `RuntimeException`) | **TRANSIENT** → `RETRY` |
 
 ```mermaid
 flowchart TD
     A[Listener invocation throws] --> B["EventConsumerSupport.classify(exception)"]
-    B -->|permanent: validation, deserialization,<br/>serialization, type-mismatch| C[DLQ_DIRECT]
-    B -->|transient: everything else,<br/>e.g. registry unavailable| D{"retryCount >= maxRetries (3)?"}
+    B -->|permanent: validation, deserialization,<br/>serialization, type-mismatch, bad headers| C[DLQ_DIRECT]
+    B -->|transient: everything else,<br/>e.g. downstream handler error| D{"retryCount >= maxRetries (3)?"}
     D -->|yes| C
     D -->|no| E["bump X-Retry-Count,<br/>send to *.retry.exchange<br/>with tier routing key (5s/30s/5m)"]
     C --> F["populateFailureHeaders()<br/>send to *.dlx exchange"]

@@ -7,23 +7,6 @@ spring:
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
 
-apicurio:
-  registry:
-    url: ${APICURIO_REGISTRY_URL:http://localhost:8080}
-  cache:
-    max-size: 100
-    ttl: 600s
-    refresh-after-write: 300s
-  # T-6.6: Set to OFF to fail fast on startup if a pinned schema version is not registered.
-  auto-register: ${APICURIO_AUTO_REGISTER:ON}
-
-# T-4.7 (spec §10.5): Schema version pinning.
-schema:
-  orders:
-    pinned-version: ${SCHEMA_ORDERS_PINNED_VERSION:}
-  customers:
-    pinned-version: ${SCHEMA_CUSTOMERS_PINNED_VERSION:}
-
 server:
   port: 8082
 

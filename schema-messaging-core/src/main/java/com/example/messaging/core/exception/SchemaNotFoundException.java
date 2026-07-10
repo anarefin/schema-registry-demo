@@ -1,6 +1,9 @@
 package com.example.messaging.core.exception;
 
-/** Schema artifact or version does not exist in the registry (spec App. B). */
+/**
+ * Schema classpath resource is missing or unreadable (spec App. B / ADR-0004).
+ * Thrown at startup by {@code LocalSchemaCatalog} — not a message-time failure path.
+ */
 public class SchemaNotFoundException extends SchemaMessagingException {
 
     public SchemaNotFoundException(String coordinates) {

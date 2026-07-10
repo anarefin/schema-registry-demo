@@ -1,13 +1,15 @@
 package com.example.messaging.core.converter;
 
 import com.example.messaging.core.exception.IncompatibleSchemaTypeException;
+import com.example.messaging.core.exception.MissingSchemaHeadersException;
 import com.example.messaging.core.exception.SchemaValidationException;
+import com.example.messaging.core.exception.UnknownSchemaArtifactException;
 import com.example.messaging.core.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.messaging.core.model.SchemaCoordinates;
 import com.example.messaging.core.model.SchemaType;
-import com.example.messaging.core.registry.SchemaResolver;
+import com.example.messaging.core.schema.LocalSchemaCatalog;
 import com.example.messaging.core.serde.SerializationStrategy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,16 +33,16 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class SchemaAwareMessageConverterTest {
 
-    @Mock private SchemaResolver schemaResolver;
+    @Mock private LocalSchemaCatalog localSchemaCatalog;
     @Mock private SerializationStrategy strategy;
 
     private SchemaAwareMessageConverter converter;
 
     private static final byte[] PAYLOAD_BYTES = "serialized".getBytes();
     private static final SchemaCoordinates COORDS =
-            new SchemaCoordinates("events.orders", "OrderCreated", "1");
+            new SchemaCoordinates("events.orders", "OrderCreated");
     private static final ResolvedSchema SCHEMA =
-            new ResolvedSchema(42L, SchemaType.JSON, "{}".getBytes());
+            new ResolvedSchema(COORDS, SchemaType.JSON, "{}".getBytes());
 
     // A minimal stand-in for a domain object
     record Order(String id) {}
@@ -49,11 +51,18 @@ class SchemaAwareMessageConverterTest {
     void setUp() {
         when(strategy.schemaType()).thenReturn(SchemaType.JSON);
         lenient().when(strategy.contentType()).thenReturn(SchemaType.JSON.contentType());
+        when(localSchemaCatalog.get(COORDS)).thenReturn(SCHEMA);
 
         TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.created");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
 
-        converter = new SchemaAwareMessageConverter(registry, schemaResolver, List.of(strategy));
+        converter = new SchemaAwareMessageConverter(registry, localSchemaCatalog, List.of(strategy));
+    }
+
+    /** Constructor eagerly warms each mapping's schema so malformed content fails fast at startup. */
+    @Test
+    void constructor_warmsEachMappingsSchema() {
+        verify(strategy).warm(SCHEMA);
     }
 
     /** TC-1.9: object → message → object round-trip produces equal payload. */
@@ -61,9 +70,7 @@ class SchemaAwareMessageConverterTest {
     void roundTrip_objectToMessageToObject() throws Exception {
         Order order = new Order("ord-1");
 
-        when(schemaResolver.resolveByCoordinates(COORDS)).thenReturn(SCHEMA);
         when(strategy.serialize(order, SCHEMA)).thenReturn(PAYLOAD_BYTES);
-        when(schemaResolver.resolveByGlobalId(42L, SchemaType.JSON)).thenReturn(SCHEMA);
         when(strategy.deserialize(PAYLOAD_BYTES, Order.class, SCHEMA)).thenReturn(order);
 
         Message msg = converter.toMessage(order, new MessageProperties());
@@ -76,16 +83,13 @@ class SchemaAwareMessageConverterTest {
     @Test
     void toMessage_populatesAllSchemaHeaders() throws Exception {
         Order order = new Order("ord-2");
-        when(schemaResolver.resolveByCoordinates(COORDS)).thenReturn(SCHEMA);
         when(strategy.serialize(any(), any())).thenReturn(PAYLOAD_BYTES);
 
         Message msg = converter.toMessage(order, new MessageProperties());
         MessageProperties props = msg.getMessageProperties();
 
-        assertThat((Object) props.getHeader(SchemaMessageHeaders.GLOBAL_ID)).isNotNull();
         assertThat((Object) props.getHeader(SchemaMessageHeaders.GROUP_ID)).isEqualTo("events.orders");
         assertThat((Object) props.getHeader(SchemaMessageHeaders.ARTIFACT_ID)).isEqualTo("OrderCreated");
-        assertThat((Object) props.getHeader(SchemaMessageHeaders.VERSION)).isEqualTo("1");
         assertThat((Object) props.getHeader(SchemaMessageHeaders.TYPE)).isEqualTo("JSON");
         assertThat(props.getContentType()).isEqualTo("application/json");
         assertThat((Object) props.getHeader(SchemaMessageHeaders.CORRELATION_ID)).isNotNull();
@@ -95,12 +99,11 @@ class SchemaAwareMessageConverterTest {
      * TC-1.11: X-Schema-Type header says PROTOBUF (e.g. a stale producer) but the TypeMapping
      * is JSON → IncompatibleSchemaTypeException. The raw header string is compared, so even
      * types this library no longer supports surface as a crisp mismatch. The check runs
-     * before schema resolution (no stub needed for resolveByGlobalId).
+     * before schema lookup.
      */
     @Test
     void fromMessage_schemaTipeMismatch_throwsIncompatible() {
         MessageProperties props = new MessageProperties();
-        props.setHeader(SchemaMessageHeaders.GLOBAL_ID, 42L);
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
         props.setHeader(SchemaMessageHeaders.TYPE, "PROTOBUF"); // mismatch — TypeMapping says JSON
@@ -115,7 +118,6 @@ class SchemaAwareMessageConverterTest {
     @Test
     void toMessage_validationFails_throwsAndNoMessageProduced() throws Exception {
         Order order = new Order("ord-3");
-        when(schemaResolver.resolveByCoordinates(COORDS)).thenReturn(SCHEMA);
         when(strategy.serialize(any(), any())).thenThrow(new SchemaValidationException(COORDS.toString(), "required field missing"));
 
         assertThatThrownBy(() -> converter.toMessage(order, new MessageProperties()))
@@ -127,12 +129,10 @@ class SchemaAwareMessageConverterTest {
     @Test
     void fromMessage_badBytes_throwsDeserialization() throws Exception {
         MessageProperties props = new MessageProperties();
-        props.setHeader(SchemaMessageHeaders.GLOBAL_ID, 42L);
         props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
         props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
         props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
 
-        when(schemaResolver.resolveByGlobalId(42L, SchemaType.JSON)).thenReturn(SCHEMA);
         when(strategy.deserialize(any(), any(), any()))
                 .thenThrow(new com.example.messaging.core.exception.DeserializationException("Order", new RuntimeException("bad bytes")));
 
@@ -140,6 +140,40 @@ class SchemaAwareMessageConverterTest {
 
         assertThatThrownBy(() -> converter.fromMessage(msg))
                 .isInstanceOf(com.example.messaging.core.exception.DeserializationException.class);
+    }
+
+    @Test
+    void fromMessage_missingGroupId_throwsMissingSchemaHeaders() {
+        MessageProperties props = new MessageProperties();
+        props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
+        props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
+
+        assertThatThrownBy(() -> converter.fromMessage(new Message(PAYLOAD_BYTES, props)))
+                .isInstanceOf(MissingSchemaHeadersException.class)
+                .hasMessageContaining(SchemaMessageHeaders.GROUP_ID);
+    }
+
+    @Test
+    void fromMessage_missingType_throwsMissingSchemaHeaders() {
+        MessageProperties props = new MessageProperties();
+        props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
+        props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
+
+        assertThatThrownBy(() -> converter.fromMessage(new Message(PAYLOAD_BYTES, props)))
+                .isInstanceOf(MissingSchemaHeadersException.class)
+                .hasMessageContaining(SchemaMessageHeaders.TYPE);
+    }
+
+    @Test
+    void fromMessage_unknownArtifact_throwsUnknownSchemaArtifact() {
+        MessageProperties props = new MessageProperties();
+        props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
+        props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "DoesNotExist");
+        props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
+
+        assertThatThrownBy(() -> converter.fromMessage(new Message(PAYLOAD_BYTES, props)))
+                .isInstanceOf(UnknownSchemaArtifactException.class)
+                .hasMessageContaining("DoesNotExist");
     }
 
     /**
@@ -153,8 +187,24 @@ class SchemaAwareMessageConverterTest {
 
         // No strategy provided — JSON mapping has no matching strategy
         assertThatThrownBy(() ->
-                new SchemaAwareMessageConverter(registry, schemaResolver, List.of()))
+                new SchemaAwareMessageConverter(registry, localSchemaCatalog, List.of()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("SchemaType.JSON");
+    }
+
+    /** Malformed schema content fails at converter construction via strategy.warm (ADR-0004). */
+    @Test
+    void constructor_malformedSchema_throwsInvalidSchemaDefinition() {
+        TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.created");
+        TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
+        ResolvedSchema bad = new ResolvedSchema(COORDS, SchemaType.JSON, "{{{".getBytes());
+        when(localSchemaCatalog.get(COORDS)).thenReturn(bad);
+        doThrow(new com.example.messaging.core.exception.InvalidSchemaDefinitionException(
+                COORDS.toString(), "Failed to compile JSON schema: bad"))
+                .when(strategy).warm(bad);
+
+        assertThatThrownBy(() ->
+                new SchemaAwareMessageConverter(registry, localSchemaCatalog, List.of(strategy)))
+                .isInstanceOf(com.example.messaging.core.exception.InvalidSchemaDefinitionException.class);
     }
 }

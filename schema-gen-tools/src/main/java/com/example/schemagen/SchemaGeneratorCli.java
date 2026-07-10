@@ -10,26 +10,25 @@ import java.nio.file.Paths;
  * Build-time entry point invoked by {@code exec-maven-plugin} at a contracts module's own
  * {@code process-classes} phase. Not part of any public API and never on a service classpath.
  *
- * <p>Accepts one or more explicit {@code FQCN=outputPath} pairs, e.g.
- * {@code com.example.contracts.orders.OrderCreated=/abs/path/order-created.schema.json}. Callers
- * pass absolute paths (typically built from {@code ${project.basedir}}), so no working-directory
- * assumptions are made here.
+ * <p>Accepts an output directory followed by one or more event FQCNs, e.g.
+ * {@code /abs/path/schemas com.example.contracts.orders.OrderCreated ...}. The output filename for
+ * each class is derived via {@link SchemaFileNaming}. Callers pass an absolute directory
+ * (typically built from {@code ${project.basedir}}), so no working-directory assumptions are made
+ * here.
  */
 public final class SchemaGeneratorCli {
 
     private SchemaGeneratorCli() {}
 
     public static void main(String[] args) throws IOException, ClassNotFoundException {
-        if (args.length == 0) {
-            throw new IllegalArgumentException("Expected at least one FQCN=outputPath argument");
+        if (args.length < 2) {
+            throw new IllegalArgumentException("Expected: <outputDir> <FQCN> [<FQCN> ...]");
         }
-        for (String arg : args) {
-            int eq = arg.indexOf('=');
-            if (eq < 0) {
-                throw new IllegalArgumentException("Expected FQCN=outputPath, got: " + arg);
-            }
-            Class<?> eventType = Class.forName(arg.substring(0, eq));
-            write(eventType, Paths.get(arg.substring(eq + 1)));
+        Path outputDir = Paths.get(args[0]);
+        for (int i = 1; i < args.length; i++) {
+            Class<?> eventType = Class.forName(args[i]);
+            Path outputPath = outputDir.resolve(SchemaFileNaming.toFileName(eventType.getSimpleName()));
+            write(eventType, outputPath);
         }
     }
 

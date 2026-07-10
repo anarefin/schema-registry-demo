@@ -1,5 +1,5 @@
 /**
- * Domain-agnostic schema-aware messaging plumbing (Phase 1 builds this out).
- * Placeholder so the module compiles in the Phase 0 skeleton (T-0.6).
+ * Domain-agnostic schema-aware messaging plumbing: converter, local schema catalog,
+ * serialization strategies, and DLX/retry consumer support (ADR-0004).
  */
 package com.example.messaging.core;

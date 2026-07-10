@@ -43,4 +43,14 @@ public interface SerializationStrategy {
      */
     Object deserialize(byte[] bytes, Class<?> targetType, ResolvedSchema schema)
             throws DeserializationException;
+
+    /**
+     * Eagerly prepare {@code schema} for use (e.g. compile and cache a parsed representation),
+     * called once per {@link com.example.messaging.core.mapping.TypeMapping} during
+     * {@code SchemaAwareMessageConverter} construction so malformed schema content fails fast at
+     * application startup rather than on the first message of that type. Default is a no-op;
+     * override when the strategy has something worth pre-compiling (see
+     * {@link JsonSchemaStrategy#warm}).
+     */
+    default void warm(ResolvedSchema schema) {}
 }
