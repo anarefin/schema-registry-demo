@@ -39,7 +39,7 @@ Planning documents live in `docs/`:
 ## What this is
 
 A Maven multi-module POC proving end-to-end **schema-governed messaging**: Apicurio Registry
-3.2.0 (schema source of truth) + RabbitMQ (transport) + Spring Boot 4.0 services on **Java 25**.
+3.2.0 (schema source of truth) + RabbitMQ (transport) + Spring Boot 4.1 services on **Java 25**.
 It demonstrates **six JSON Schema event types** (three orders + three customers) flowing
 producer → registry → consumer, schema-compatibility governance as a CI merge gate, and a full
 DLX/DLQ/retry failure topology. All contracts are **code-first**: Java records are the source of
@@ -95,8 +95,8 @@ Run a single test class/method with the standard Surefire/Failsafe selectors, e.
 ## Build conventions (enforced — do not violate)
 
 - **Single source of versions:** all versions live in the parent POM
-  `<properties>`/`<dependencyManagement>` (Spring Boot **4.0.x** BOM imported). Module POMs
-  inherit and **never re-declare versions**. Stay on Spring Boot 4.0.x — **not 4.1**.
+  `<properties>`/`<dependencyManagement>` (Spring Boot **4.1.x** BOM imported). Module POMs
+  inherit and **never re-declare versions**.
 - **Java 25** via `maven-toolchains-plugin` + `maven-compiler-plugin <release>25</release>`
   (bytecode major version 69). Requires a JDK-25 entry in `~/.m2/toolchains.xml`; the Maven
   daemon JVM may differ from the compile toolchain.

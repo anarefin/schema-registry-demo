@@ -28,8 +28,9 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>25</maven.compiler.release>
 
-    <!-- Spring Boot 4.0.x BOM — NOT 4.1 (spec §19). -->
-    <spring-boot.version>4.0.0</spring-boot.version>
+    <!-- Single source of truth for the Spring Boot BOM version; spring-boot-maven-plugin
+         below shares this property and updates with it. -->
+    <spring-boot.version>4.1.0</spring-boot.version>
 
     <!-- Pinned spec §3 versions -->
     <apicurio.version>3.2.0</apicurio.version>

@@ -88,10 +88,16 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
         <executions>
+          <!-- Bound to verify (not the default package) so it runs after Failsafe's
+               integration-test: repackage overwrites the plain jar with a fat jar in place,
+               and Failsafe's own-module classpath resolution picking that up mid-session
+               (BOOT-INF/classes layout, not a flat root) throws ClassNotFoundException for
+               this module's own classes if repackage has already run in the same session. -->
           <execution>
             <goals>
               <goal>repackage</goal>
             </goals>
+            <phase>verify</phase>
           </execution>
         </executions>
       </plugin>
