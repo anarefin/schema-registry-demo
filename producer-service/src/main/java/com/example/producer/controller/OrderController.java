@@ -3,7 +3,11 @@ package com.example.producer.controller;
 import com.example.contracts.orders.OrderCancelled;
 import com.example.contracts.orders.OrderCreated;
 import com.example.contracts.orders.OrderEventRouting;
+import com.example.contracts.orders.OrderFulfilled;
 import com.example.contracts.orders.OrderShipped;
+import com.example.contracts.orders.OrderBuyer;
+import com.example.contracts.orders.PaymentDetails;
+import com.example.contracts.orders.ShippingAddress;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.publisher.EventPublisher;
 import org.slf4j.Logger;
@@ -82,6 +86,23 @@ public class OrderController {
         log.info("Published OrderCancelled orderId={}", event.orderId());
     }
 
+    @PostMapping("/fulfill")
+    @ResponseStatus(HttpStatus.CREATED)
+    public void fulfillOrder(@RequestBody FulfillOrderRequest request) {
+        OrderFulfilled event = new OrderFulfilled(
+                request.orderId(),
+                new OrderBuyer(request.buyer().customerId(), request.buyer().email(),
+                        request.buyer().displayName()),
+                new ShippingAddress(request.shipping().line1(), request.shipping().line2(),
+                        request.shipping().city(), request.shipping().postalCode(),
+                        request.shipping().countryCode()),
+                new PaymentDetails(request.payment().method(), request.payment().amount(),
+                        request.payment().currency()),
+                Instant.now());
+        eventPublisher.publish(event);
+        log.info("Published OrderFulfilled orderId={}", event.orderId());
+    }
+
     /**
      * Bypass-validation poison demo — publishes a malformed payload directly to
      * {@link OrderEventRouting#EXCHANGE} with valid X-Schema-* headers but garbage bytes. The
@@ -119,4 +140,27 @@ public class OrderController {
             UUID orderId,
             String reason,
             BigDecimal refundAmount) {}
+
+    public record FulfillOrderRequest(
+            UUID orderId,
+            BuyerRequest buyer,
+            ShippingRequest shipping,
+            PaymentRequest payment) {}
+
+    public record BuyerRequest(
+            UUID customerId,
+            String email,
+            String displayName) {}
+
+    public record ShippingRequest(
+            String line1,
+            String line2,
+            String city,
+            String postalCode,
+            String countryCode) {}
+
+    public record PaymentRequest(
+            String method,
+            BigDecimal amount,
+            String currency) {}
 }

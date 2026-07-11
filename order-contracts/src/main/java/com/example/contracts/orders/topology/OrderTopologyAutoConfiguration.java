@@ -17,7 +17,7 @@ import java.util.List;
 /**
  * Declares the {@code events.orders} domain's AMQP topology (spec contract-owned-amqp-topology
  * D2): the 3 domain-scoped exchanges (main, DLX, retry) plus the main queue/DLQ/retry-ladder for
- * each of the 3 order routing keys. Self-contained — enumerates its own routing keys directly
+ * each of the 4 order routing keys. Self-contained — enumerates its own routing keys directly
  * rather than iterating a shared registry it has no visibility into, so it carries no ordering
  * constraint relative to schema-resolution autoconfiguration.
  */
@@ -59,7 +59,8 @@ public class OrderTopologyAutoConfiguration {
         for (String routingKey : List.of(
                 OrderEventRouting.CREATED_ROUTING_KEY,
                 OrderEventRouting.SHIPPED_ROUTING_KEY,
-                OrderEventRouting.CANCELLED_ROUTING_KEY)) {
+                OrderEventRouting.CANCELLED_ROUTING_KEY,
+                OrderEventRouting.FULFILLED_ROUTING_KEY)) {
             declarables.addAll(EventTopologyFactory.declarablesForEvent(
                     routingKey, ordersExchange, ordersDlx, ordersRetryExchange, tierTtls));
         }

@@ -1,7 +1,7 @@
 package com.example.contracts.orders;
 
 /**
- * AMQP routing constants for the three order events (spec §9/§10.4, code-first D3).
+ * AMQP routing constants for the four order events (spec §9/§10.4, code-first D3).
  *
  * <p>Plain {@code String} constants only — no Spring dependency — so the poison demo and
  * {@code OrderTypeMappingAutoConfiguration} can reference them as compile-time constants. Queue
@@ -26,6 +26,10 @@ public final class OrderEventRouting {
     // ---- orders.cancelled ----
     public static final String CANCELLED_ROUTING_KEY = "orders.cancelled";
     public static final String CANCELLED_DLQ         = "orders.cancelled.dlq";
+
+    // ---- orders.fulfilled ----
+    public static final String FULFILLED_ROUTING_KEY = "orders.fulfilled";
+    public static final String FULFILLED_DLQ         = "orders.fulfilled.dlq";
 
     // ---- domain-scoped exchanges (spec contract-owned-amqp-topology D2) ----
     public static final String EXCHANGE       = "events.orders.exchange";

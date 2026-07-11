@@ -1,0 +1,110 @@
+{
+  "$id" : "urn:example:schema:OrderFulfilled",
+  "$schema" : "http://json-schema.org/draft-07/schema#",
+  "description" : "Emitted when an order is fulfilled and ready for delivery.",
+  "properties" : {
+    "buyer" : {
+      "description" : "The customer who placed the order.",
+      "properties" : {
+        "customerId" : {
+          "description" : "Unique identifier of the customer.",
+          "format" : "uuid",
+          "type" : "string"
+        },
+        "displayName" : {
+          "description" : "Display name shown on the order.",
+          "type" : "string"
+        },
+        "email" : {
+          "description" : "Customer email address.",
+          "format" : "email",
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "customerId",
+        "displayName",
+        "email"
+      ],
+      "type" : "object"
+    },
+    "fulfilledAt" : {
+      "description" : "Instant the order was fulfilled (ISO-8601).",
+      "format" : "date-time",
+      "type" : "string"
+    },
+    "orderId" : {
+      "description" : "Unique identifier of the order.",
+      "format" : "uuid",
+      "type" : "string"
+    },
+    "payment" : {
+      "description" : "Payment details for the fulfilled order.",
+      "properties" : {
+        "amount" : {
+          "description" : "Amount charged; must be greater than 0.01.",
+          "exclusiveMinimum" : 0.01,
+          "type" : "number"
+        },
+        "currency" : {
+          "description" : "ISO-4217 three-letter currency code, e.g. USD.",
+          "maxLength" : 3,
+          "minLength" : 3,
+          "type" : "string"
+        },
+        "method" : {
+          "description" : "Payment method used, e.g. CARD or PAYPAL.",
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "amount",
+        "currency",
+        "method"
+      ],
+      "type" : "object"
+    },
+    "shipping" : {
+      "description" : "The shipping destination for the order.",
+      "properties" : {
+        "city" : {
+          "description" : "City or locality.",
+          "type" : "string"
+        },
+        "countryCode" : {
+          "description" : "ISO-3166-1 alpha-2 country code, e.g. US.",
+          "maxLength" : 2,
+          "minLength" : 2,
+          "type" : "string"
+        },
+        "line1" : {
+          "description" : "First line of the street address.",
+          "type" : "string"
+        },
+        "line2" : {
+          "description" : "Optional second line of the street address.",
+          "type" : "string"
+        },
+        "postalCode" : {
+          "description" : "Postal or ZIP code.",
+          "type" : "string"
+        }
+      },
+      "required" : [
+        "city",
+        "countryCode",
+        "line1",
+        "postalCode"
+      ],
+      "type" : "object"
+    }
+  },
+  "required" : [
+    "buyer",
+    "orderId",
+    "payment",
+    "shipping"
+  ],
+  "title" : "OrderFulfilled",
+  "type" : "object"
+}

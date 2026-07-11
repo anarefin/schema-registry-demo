@@ -143,7 +143,7 @@
         </executions>
       </plugin>
 
-      <!-- Seed the three order artifacts from their generated schemas (spec code-first D4).
+      <!-- Seed the four order artifacts from their generated schemas (spec code-first D4).
            The FORWARD compatibility rule + v1 reset are attached via the data-driven bootstrap.
            Run: ./mvnw -pl order-contracts apicurio-registry:register
            Override URL: -Dapicurio.registry.url=http://host:8080 -->
@@ -173,6 +173,13 @@
               <groupId>events.orders</groupId>
               <artifactId>OrderCancelled</artifactId>
               <file>${project.basedir}/src/main/resources/schemas/order-cancelled.schema.json</file>
+              <artifactType>JSON</artifactType>
+              <ifExists>FIND_OR_CREATE_VERSION</ifExists>
+            </artifact>
+            <artifact>
+              <groupId>events.orders</groupId>
+              <artifactId>OrderFulfilled</artifactId>
+              <file>${project.basedir}/src/main/resources/schemas/order-fulfilled.schema.json</file>
               <artifactType>JSON</artifactType>
               <ifExists>FIND_OR_CREATE_VERSION</ifExists>
             </artifact>

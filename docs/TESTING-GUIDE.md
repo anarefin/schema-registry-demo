@@ -19,7 +19,7 @@ Six event types flow through this system, three per domain:
 
 | Domain | Events | Routing keys |
 |---|---|---|
-| `events.orders` | `OrderCreated`, `OrderShipped`, `OrderCancelled` | `orders.created`, `orders.shipped`, `orders.cancelled` |
+| `events.orders` | `OrderCreated`, `OrderShipped`, `OrderCancelled`, `OrderFulfilled` | `orders.created`, `orders.shipped`, `orders.cancelled`, `orders.fulfilled` |
 | `events.customers` | `CustomerRegistered`, `CustomerAddressAdded`, `CustomerTierChanged` | `customers.registered`, `customers.address-added`, `customers.tier-changed` |
 
 ---
@@ -111,6 +111,7 @@ Schema validation is local (`LocalSchemaCatalog`); no live registry is required 
 | Test class | Proves |
 |---|---|
 | `OrderCreatedIT` | Producer → real RabbitMQ → consumer round trip for `OrderCreated`; asserts `content-type: application/json` and `X-Schema-GroupId` / `ArtifactId` / `Type` (+ correlation id) on the delivered message. |
+| `OrderFulfilledIT` | Same round trip for `OrderFulfilled` with three nested objects (`buyer`, `shipping`, `payment`); asserts nested fields survive publish/consume and schema headers resolve to `OrderFulfilled`. |
 | `CustomerRegisteredIT` | Same round trip for `CustomerRegistered`; also verifies an extra unknown JSON field on the wire still deserializes (Jackson `FAIL_ON_UNKNOWN_PROPERTIES=false`). |
 | `DlxRoutingIT` | Retry-ladder + DLQ matrix: deserialization poison / missing schema headers / unknown artifact → immediate DLQ (`X-Retry-Count=0`); downstream `RuntimeException` → retried 3× then DLQ; all `X-Failure-*` headers present on final DLQ. |
 | `LocalSchemaCatalogStartupIT` | A `TypeMapping` whose classpath schema resource is missing aborts Spring context refresh with `SchemaNotFoundException`. |

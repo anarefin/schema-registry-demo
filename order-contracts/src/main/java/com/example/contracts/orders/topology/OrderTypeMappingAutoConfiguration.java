@@ -3,6 +3,7 @@ package com.example.contracts.orders.topology;
 import com.example.contracts.orders.OrderCancelled;
 import com.example.contracts.orders.OrderCreated;
 import com.example.contracts.orders.OrderEventRouting;
+import com.example.contracts.orders.OrderFulfilled;
 import com.example.contracts.orders.OrderShipped;
 import com.example.amqp.topology.mapping.SchemaCoordinates;
 import com.example.amqp.topology.mapping.SchemaType;
@@ -46,5 +47,12 @@ public class OrderTypeMappingAutoConfiguration {
     public TypeMapping orderCancelledMapping() {
         return new TypeMapping(OrderCancelled.class, coords("OrderCancelled"),
                 SchemaType.JSON, OrderEventRouting.CANCELLED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
+    }
+
+    @Bean("orderFulfilledMapping")
+    @ConditionalOnMissingBean(name = "orderFulfilledMapping")
+    public TypeMapping orderFulfilledMapping() {
+        return new TypeMapping(OrderFulfilled.class, coords("OrderFulfilled"),
+                SchemaType.JSON, OrderEventRouting.FULFILLED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
     }
 }

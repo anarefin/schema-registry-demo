@@ -28,7 +28,8 @@ class OrderContractsSchemaDeterminismTest {
         return List.of(
                 new Target(OrderCreated.class,   "src/main/resources/schemas/order-created.schema.json"),
                 new Target(OrderShipped.class,   "src/main/resources/schemas/order-shipped.schema.json"),
-                new Target(OrderCancelled.class, "src/main/resources/schemas/order-cancelled.schema.json"));
+                new Target(OrderCancelled.class, "src/main/resources/schemas/order-cancelled.schema.json"),
+                new Target(OrderFulfilled.class, "src/main/resources/schemas/order-fulfilled.schema.json"));
     }
 
     @ParameterizedTest(name = "generation is byte-stable: {0}")

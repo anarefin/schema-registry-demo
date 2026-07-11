@@ -2,6 +2,7 @@ package com.example.consumer.listener;
 
 import com.example.contracts.orders.OrderCancelled;
 import com.example.contracts.orders.OrderCreated;
+import com.example.contracts.orders.OrderFulfilled;
 import com.example.contracts.orders.OrderShipped;
 import com.example.messaging.core.consumer.BitsEventHandler;
 import org.slf4j.Logger;
@@ -37,5 +38,12 @@ public class OrderEventListener {
     public void onOrderCancelled(OrderCancelled event) {
         log.info("Received OrderCancelled orderId={} reason={} refund={}",
                 event.orderId(), event.reason(), event.refundAmount());
+    }
+
+    @BitsEventHandler
+    public void onOrderFulfilled(OrderFulfilled event) {
+        log.info("Received OrderFulfilled orderId={} buyer={} city={} method={}",
+                event.orderId(), event.buyer().displayName(),
+                event.shipping().city(), event.payment().method());
     }
 }

@@ -39,6 +39,7 @@ env:
     events.orders/OrderCreated
     events.orders/OrderShipped
     events.orders/OrderCancelled
+    events.orders/OrderFulfilled
     events.customers/CustomerRegistered
     events.customers/CustomerAddressAdded
     events.customers/CustomerTierChanged

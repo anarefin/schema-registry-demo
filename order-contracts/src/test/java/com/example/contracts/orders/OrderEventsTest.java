@@ -81,6 +81,33 @@ class OrderEventsTest {
     }
 
     @Test
+    void orderFulfilledRoundTripsNestedObjects() throws Exception {
+        OrderBuyer buyer = new OrderBuyer(
+                UUID.randomUUID(), "buyer@example.com", "Jane Doe");
+        ShippingAddress shipping = new ShippingAddress(
+                "221B Baker Street", null, "London", "NW1 6XE", "GB");
+        PaymentDetails payment = new PaymentDetails(
+                "CARD", new BigDecimal("149.99"), "GBP");
+        OrderFulfilled original = new OrderFulfilled(
+                UUID.randomUUID(), buyer, shipping, payment,
+                Instant.parse("2026-06-04T10:00:00Z"));
+
+        var json = mapper.readTree(mapper.writeValueAsBytes(original));
+        assertThat(json.get("buyer").isObject()).isTrue();
+        assertThat(json.get("buyer").get("email").asText()).isEqualTo("buyer@example.com");
+        assertThat(json.get("shipping").isObject()).isTrue();
+        assertThat(json.get("shipping").get("city").asText()).isEqualTo("London");
+        assertThat(json.get("payment").isObject()).isTrue();
+        assertThat(json.get("payment").get("method").asText()).isEqualTo("CARD");
+        assertThat(json.get("payment").get("currency").asText()).isEqualTo("GBP");
+
+        OrderFulfilled parsed =
+                mapper.readValue(mapper.writeValueAsBytes(original), OrderFulfilled.class);
+        assertThat(parsed).isEqualTo(original);
+        assertThat(parsed.shipping().line2()).isNull();
+    }
+
+    @Test
     void deserializesFromHandWrittenJson() throws Exception {
         String json = """
                 {
