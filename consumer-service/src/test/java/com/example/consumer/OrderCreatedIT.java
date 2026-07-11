@@ -1,7 +1,6 @@
 package com.example.consumer;
 
 import com.example.contracts.orders.OrderCreated;
-import com.example.contracts.orders.OrderEventRouting;
 import com.example.consumer.listener.OrderEventListener;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
@@ -62,7 +61,7 @@ class OrderCreatedIT {
     void tc33_roundTrip() {
         OrderCreated event = buildEvent(3, new BigDecimal("99.99"), "USD");
 
-        eventPublisher.publish(OrderEventRouting.EXCHANGE, event);
+        eventPublisher.publish(event);
 
         ArgumentCaptor<OrderCreated> captor = ArgumentCaptor.forClass(OrderCreated.class);
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->

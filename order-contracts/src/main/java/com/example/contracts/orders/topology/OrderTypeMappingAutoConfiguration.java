@@ -31,20 +31,20 @@ public class OrderTypeMappingAutoConfiguration {
     @ConditionalOnMissingBean(name = "orderCreatedMapping")
     public TypeMapping orderCreatedMapping() {
         return new TypeMapping(OrderCreated.class, coords("OrderCreated"),
-                SchemaType.JSON, OrderEventRouting.CREATED_ROUTING_KEY);
+                SchemaType.JSON, OrderEventRouting.CREATED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
     }
 
     @Bean("orderShippedMapping")
     @ConditionalOnMissingBean(name = "orderShippedMapping")
     public TypeMapping orderShippedMapping() {
         return new TypeMapping(OrderShipped.class, coords("OrderShipped"),
-                SchemaType.JSON, OrderEventRouting.SHIPPED_ROUTING_KEY);
+                SchemaType.JSON, OrderEventRouting.SHIPPED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
     }
 
     @Bean("orderCancelledMapping")
     @ConditionalOnMissingBean(name = "orderCancelledMapping")
     public TypeMapping orderCancelledMapping() {
         return new TypeMapping(OrderCancelled.class, coords("OrderCancelled"),
-                SchemaType.JSON, OrderEventRouting.CANCELLED_ROUTING_KEY);
+                SchemaType.JSON, OrderEventRouting.CANCELLED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
     }
 }

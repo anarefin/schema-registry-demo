@@ -13,7 +13,8 @@ import org.springframework.amqp.support.converter.MessageConverter;
  * Wraps {@link RabbitTemplate} + {@link MessageConverter} for schema-governed publishing (T-1.10).
  *
  * <p>The converter handles validation → serialization → header population.
- * Routing key is read from the registered {@link TypeMapping}.
+ * Exchange and routing key are both read from the event's registered {@link TypeMapping} —
+ * the caller supplies only the event.
  */
 public class EventPublisher {
 
@@ -33,13 +34,12 @@ public class EventPublisher {
     }
 
     /**
-     * Validate, serialize, and publish {@code event} to the configured exchange.
-     * The routing key is taken from the event's {@link TypeMapping}.
+     * Validate, serialize, and publish {@code event}. Both the exchange and routing key are
+     * taken from the event's {@link TypeMapping}.
      *
-     * @param exchange target AMQP exchange
      * @param event the domain object to publish (must have a registered TypeMapping)
      */
-    public void publish(String exchange, Object event) {
+    public void publish(Object event) {
         TypeMapping mapping = typeMappingRegistry.findByJavaType(event.getClass())
                 .orElseThrow(() -> new IllegalStateException(
                         "No TypeMapping for " + event.getClass().getName()));
@@ -48,7 +48,7 @@ public class EventPublisher {
         Message message = messageConverter.toMessage(event, props);
 
         log.info("Publishing {} to exchange={} routingKey={}",
-                event.getClass().getSimpleName(), exchange, mapping.routingKey());
-        rabbitTemplate.send(exchange, mapping.routingKey(), message);
+                event.getClass().getSimpleName(), mapping.exchange(), mapping.routingKey());
+        rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), message);
     }
 }

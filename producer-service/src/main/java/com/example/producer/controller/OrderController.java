@@ -54,7 +54,7 @@ public class OrderController {
                 request.totalAmount(),
                 request.currency(),
                 Instant.now());
-        eventPublisher.publish(OrderEventRouting.EXCHANGE, event);
+        eventPublisher.publish(event);
         log.info("Published OrderCreated orderId={}", event.orderId());
     }
 
@@ -66,7 +66,7 @@ public class OrderController {
                 request.trackingNumber(),
                 request.carrier(),
                 Instant.now());
-        eventPublisher.publish(OrderEventRouting.EXCHANGE, event);
+        eventPublisher.publish(event);
         log.info("Published OrderShipped orderId={}", event.orderId());
     }
 
@@ -78,7 +78,7 @@ public class OrderController {
                 request.reason(),
                 request.refundAmount(),
                 Instant.now());
-        eventPublisher.publish(OrderEventRouting.EXCHANGE, event);
+        eventPublisher.publish(event);
         log.info("Published OrderCancelled orderId={}", event.orderId());
     }
 

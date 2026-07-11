@@ -3,7 +3,6 @@ package com.example.producer.controller;
 import com.example.contracts.customers.Address;
 import com.example.contracts.customers.CustomerAddressAdded;
 import com.example.contracts.customers.CustomerRegistered;
-import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerTier;
 import com.example.contracts.customers.CustomerTierChanged;
 import com.example.messaging.core.publisher.EventPublisher;
@@ -47,7 +46,7 @@ public class CustomerController {
                 request.lastName(),
                 request.phoneNumber(),
                 Instant.now());
-        eventPublisher.publish(CustomerEventRouting.EXCHANGE, event);
+        eventPublisher.publish(event);
         log.info("Published CustomerRegistered customerId={}", event.customerId());
     }
 
@@ -58,7 +57,7 @@ public class CustomerController {
                 request.customerId(),
                 request.address(),
                 Instant.now());
-        eventPublisher.publish(CustomerEventRouting.EXCHANGE, event);
+        eventPublisher.publish(event);
         log.info("Published CustomerAddressAdded customerId={}", event.customerId());
     }
 
@@ -70,7 +69,7 @@ public class CustomerController {
                 request.previousTier(),
                 request.newTier(),
                 Instant.now());
-        eventPublisher.publish(CustomerEventRouting.EXCHANGE, event);
+        eventPublisher.publish(event);
         log.info("Published CustomerTierChanged customerId={} newTier={}",
                 event.customerId(), event.newTier());
     }

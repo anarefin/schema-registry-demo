@@ -20,7 +20,7 @@ class LocalSchemaCatalogTest {
     @Test
     void loadsAndReturnsSchemaPresentOnClasspath() {
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(
-                new TypeMapping(FixtureEvent.class, FIXTURE_COORDS, SchemaType.JSON, "fixtures.event")));
+                new TypeMapping(FixtureEvent.class, FIXTURE_COORDS, SchemaType.JSON, "fixtures.event", "test.fixtures.exchange")));
 
         LocalSchemaCatalog catalog = new LocalSchemaCatalog(registry);
 
@@ -34,7 +34,7 @@ class LocalSchemaCatalogTest {
     void constructorFailsFastWhenClasspathResourceMissing() {
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(
                 new TypeMapping(MissingEvent.class, new SchemaCoordinates("test.fixtures", "MissingEvent"),
-                        SchemaType.JSON, "fixtures.missing")));
+                        SchemaType.JSON, "fixtures.missing", "test.fixtures.exchange")));
 
         assertThatThrownBy(() -> new LocalSchemaCatalog(registry))
                 .isInstanceOf(SchemaNotFoundException.class)

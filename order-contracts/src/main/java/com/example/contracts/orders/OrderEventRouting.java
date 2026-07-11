@@ -3,11 +3,13 @@ package com.example.contracts.orders;
 /**
  * AMQP routing constants for the three order events (spec §9/§10.4, code-first D3).
  *
- * <p>Plain {@code String} constants only — no Spring dependency — so {@code @RabbitListener}
- * and the poison demo can reference them as compile-time constants. The AMQP topology itself
- * lives in {@code OrderTopologyAutoConfiguration} (this module) via {@code amqp-topology-kit};
- * these constants follow the same naming convention and are the single source of truth for
- * the names.
+ * <p>Plain {@code String} constants only — no Spring dependency — so the poison demo and
+ * {@code OrderTypeMappingAutoConfiguration} can reference them as compile-time constants. Queue
+ * names are no longer declared here — listeners resolve them internally via
+ * {@code @BitsEventHandler} from the routing key below (spec
+ * {@code simplified-publish-and-listen.md} D4). The AMQP topology itself lives in
+ * {@code OrderTopologyAutoConfiguration} (this module) via {@code amqp-topology-kit}; these
+ * constants follow the same naming convention and are the single source of truth for the names.
  */
 public final class OrderEventRouting {
 
@@ -15,17 +17,14 @@ public final class OrderEventRouting {
 
     // ---- orders.created ----
     public static final String CREATED_ROUTING_KEY = "orders.created";
-    public static final String CREATED_QUEUE       = "orders.created.queue";
     public static final String CREATED_DLQ         = "orders.created.dlq";
 
     // ---- orders.shipped ----
     public static final String SHIPPED_ROUTING_KEY = "orders.shipped";
-    public static final String SHIPPED_QUEUE       = "orders.shipped.queue";
     public static final String SHIPPED_DLQ         = "orders.shipped.dlq";
 
     // ---- orders.cancelled ----
     public static final String CANCELLED_ROUTING_KEY = "orders.cancelled";
-    public static final String CANCELLED_QUEUE       = "orders.cancelled.queue";
     public static final String CANCELLED_DLQ         = "orders.cancelled.dlq";
 
     // ---- domain-scoped exchanges (spec contract-owned-amqp-topology D2) ----

@@ -29,20 +29,20 @@ public class CustomerTypeMappingAutoConfiguration {
     @ConditionalOnMissingBean(name = "customerRegisteredMapping")
     public TypeMapping customerRegisteredMapping() {
         return new TypeMapping(CustomerRegistered.class, coords("CustomerRegistered"),
-                SchemaType.JSON, CustomerEventRouting.REGISTERED_ROUTING_KEY);
+                SchemaType.JSON, CustomerEventRouting.REGISTERED_ROUTING_KEY, CustomerEventRouting.EXCHANGE);
     }
 
     @Bean("customerAddressAddedMapping")
     @ConditionalOnMissingBean(name = "customerAddressAddedMapping")
     public TypeMapping customerAddressAddedMapping() {
         return new TypeMapping(CustomerAddressAdded.class, coords("CustomerAddressAdded"),
-                SchemaType.JSON, CustomerEventRouting.ADDRESS_ADDED_ROUTING_KEY);
+                SchemaType.JSON, CustomerEventRouting.ADDRESS_ADDED_ROUTING_KEY, CustomerEventRouting.EXCHANGE);
     }
 
     @Bean("customerTierChangedMapping")
     @ConditionalOnMissingBean(name = "customerTierChangedMapping")
     public TypeMapping customerTierChangedMapping() {
         return new TypeMapping(CustomerTierChanged.class, coords("CustomerTierChanged"),
-                SchemaType.JSON, CustomerEventRouting.TIER_CHANGED_ROUTING_KEY);
+                SchemaType.JSON, CustomerEventRouting.TIER_CHANGED_ROUTING_KEY, CustomerEventRouting.EXCHANGE);
     }
 }

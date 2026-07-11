@@ -39,7 +39,8 @@ account identified by `customerId`.
 | **Generated schema** | The committed `*.schema.json` file under `src/main/resources/schemas/`, produced by `schema-gen-tools` from the record via victools. |
 | **`@GenerateSchema`** | Build-time marker on an event record (`event-contract-kit`). `schema-gen-tools` package-scans `target/classes` for this annotation at `process-classes`; nested value objects must not carry it. |
 | **Registry group / artifact** | Apicurio coordinates: `group` (e.g. `events.orders`) + `artifact-id` (e.g. `OrderCreated`), used by `apicurio-registry-maven-plugin` (register/compat-check) as the CI-time identity for each event's schema. At runtime, `SchemaCoordinates(groupId, artifactId)` in `event-contract-kit` (ADR-0006) reuses the same pair only as a local lookup key into the classpath-baked schema catalog (`LocalSchemaCatalog`, in `schema-messaging-core`) — no registry call is made. See [ADR-0004](docs/adr/0004-local-schema-validation.md). |
-| **TypeMapping** | Runtime wiring bean linking a Java record type → schema coordinates (CI-governance identity, also used as the local classpath-schema lookup key) → schema type → RabbitMQ routing key. Lives in `event-contract-kit` (ADR-0006), registered in each domain's `*-contracts` module via its `*TypeMappingAutoConfiguration` (pattern established by ADR-0005). |
+| **TypeMapping** | Runtime wiring bean linking a Java record type → schema coordinates (CI-governance identity, also used as the local classpath-schema lookup key) → schema type → RabbitMQ routing key → AMQP exchange (exchange field added by ADR-0007). Lives in `event-contract-kit` (ADR-0006), registered in each domain's `*-contracts` module via its `*TypeMappingAutoConfiguration` (pattern established by ADR-0005). `EventPublisher.publish(Object event)` resolves both exchange and routing key from it — the caller supplies only the event. |
+| **`@BitsEventHandler`** | Marker annotation (`schema-messaging-core`) for a listener method with only an event-typed parameter — no queue name, no container factory. `BitsEventHandlerRegistrar` (a `RabbitListenerConfigurer`, ADR-0008) resolves the queue at startup from the parameter's `TypeMapping` and registers the endpoint programmatically against the shared `rabbitListenerContainerFactory`, replacing `@RabbitListener(queues = ...)` on `OrderEventListener`/`CustomerEventListener`. |
 | **Local schema catalog** | `LocalSchemaCatalog` (`schema-messaging-core`): eagerly loads every registered event's JSON Schema from the classpath (`schemas/<kebab-case-name>.schema.json`, computed by `SchemaFileNaming`) at application startup, and fails fast if a schema is missing or malformed. No network calls, no cache TTL — the runtime never talks to Apicurio Registry. |
 | **Drift gate** | CI check: regenerate schemas via `schema-gen-tools`, fail if committed files differ (`git diff --exit-code`). |
 | **Compat gate** | CI check: dry-run `apicurio-registry:register` against the standing registry; incompatible changes block merge. |
@@ -57,6 +58,12 @@ See `docs/adr/0001-code-first-schema-generation.md` for the code-first schema de
 `docs/adr/0002-contract-owned-amqp-topology.md` for the AMQP topology ownership reversal,
 `docs/adr/0004-local-schema-validation.md` for the removal of runtime Apicurio dependency,
 `docs/adr/0005-contracts-may-depend-on-core.md` (superseded) for the one-directional
-`contracts → core` dependency amendment, and
+`contracts → core` dependency amendment,
 `docs/adr/0006-typemapping-relocated-to-event-contract-kit.md` for how that dependency was
-closed again by relocating `TypeMapping`/`SchemaCoordinates`/`SchemaType` into `event-contract-kit`.
+closed again by relocating `TypeMapping`/`SchemaCoordinates`/`SchemaType` into `event-contract-kit`,
+`docs/adr/0007-typemapping-carries-exchange.md` for why `TypeMapping` grew an `exchange` field
+(amends ADR-0006's field scoping), and
+`docs/adr/0008-bitsevenhandler-programmatic-listener-registration.md` for `@BitsEventHandler`,
+the programmatic listener-registration mechanism that replaced `@RabbitListener` on
+`OrderEventListener`/`CustomerEventListener`. Both are the code-level detail behind
+`spec/simplified-publish-and-listen.md`.

@@ -1,9 +1,11 @@
 package com.example.messaging.core.config;
 
+import com.example.messaging.core.consumer.BitsEventHandlerRegistrar;
 import com.example.messaging.core.consumer.DlxMessageRecoverer;
 import com.example.messaging.core.consumer.DlxRoutingAdvice;
 import com.example.messaging.core.consumer.EventConsumerSupport;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
+import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -11,6 +13,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -25,6 +28,8 @@ import org.springframework.context.annotation.Bean;
  *       delegates to the recoverer, ACKing the original message.</li>
  *   <li>{@code rabbitListenerContainerFactory} — listener container wired with the
  *       schema-aware converter and DLX routing advice.</li>
+ *   <li>{@code BitsEventHandlerRegistrar} — registers {@code @BitsEventHandler} methods as
+ *       listener endpoints, resolving their queue from the event's {@code TypeMapping}.</li>
  * </ul>
  *
  * <p>Each domain now owns its own DLX/retry exchange (spec: contract-owned-amqp-topology.md),
@@ -72,5 +77,13 @@ public class SchemaMessagingConsumerAutoConfiguration {
         factory.setDefaultRequeueRejected(false);
         factory.setAdviceChain(dlxRoutingAdvice);
         return factory;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public BitsEventHandlerRegistrar bitsEventHandlerRegistrar(
+            ApplicationContext applicationContext,
+            TypeMappingRegistry typeMappingRegistry) {
+        return new BitsEventHandlerRegistrar(applicationContext, typeMappingRegistry);
     }
 }

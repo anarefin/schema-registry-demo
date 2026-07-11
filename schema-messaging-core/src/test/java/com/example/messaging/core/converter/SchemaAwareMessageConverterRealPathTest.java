@@ -34,7 +34,8 @@ class SchemaAwareMessageConverterRealPathTest {
                 FixtureEvent.class,
                 new SchemaCoordinates("events.test", "FixtureEvent"),
                 SchemaType.JSON,
-                "test.fixture");
+                "test.fixture",
+                "events.test.exchange");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
         LocalSchemaCatalog catalog = new LocalSchemaCatalog(registry);
         ObjectMapper mapper = new ObjectMapper()

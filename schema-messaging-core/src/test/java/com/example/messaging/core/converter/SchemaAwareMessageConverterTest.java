@@ -53,7 +53,7 @@ class SchemaAwareMessageConverterTest {
         lenient().when(strategy.contentType()).thenReturn(SchemaType.JSON.contentType());
         when(localSchemaCatalog.get(COORDS)).thenReturn(SCHEMA);
 
-        TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.created");
+        TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.created", "events.orders.exchange");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
 
         converter = new SchemaAwareMessageConverter(registry, localSchemaCatalog, List.of(strategy));
@@ -182,7 +182,7 @@ class SchemaAwareMessageConverterTest {
      */
     @Test
     void constructor_missingStrategy_throwsIllegalState() {
-        TypeMapping jsonMapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.json");
+        TypeMapping jsonMapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.json", "events.orders.exchange");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(jsonMapping));
 
         // No strategy provided — JSON mapping has no matching strategy
@@ -195,7 +195,7 @@ class SchemaAwareMessageConverterTest {
     /** Malformed schema content fails at converter construction via strategy.warm (ADR-0004). */
     @Test
     void constructor_malformedSchema_throwsInvalidSchemaDefinition() {
-        TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.created");
+        TypeMapping mapping = new TypeMapping(Order.class, COORDS, SchemaType.JSON, "orders.created", "events.orders.exchange");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
         ResolvedSchema bad = new ResolvedSchema(COORDS, SchemaType.JSON, "{{{".getBytes());
         when(localSchemaCatalog.get(COORDS)).thenReturn(bad);

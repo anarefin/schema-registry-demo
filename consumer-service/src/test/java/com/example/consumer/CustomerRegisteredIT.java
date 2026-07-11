@@ -1,6 +1,5 @@
 package com.example.consumer;
 
-import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
 import com.example.consumer.listener.CustomerEventListener;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
@@ -58,7 +57,7 @@ class CustomerRegisteredIT {
     void tc23_roundTrip() {
         CustomerRegistered event = buildEvent("round@trip.com", "Round", "Trip");
 
-        eventPublisher.publish(CustomerEventRouting.EXCHANGE, event);
+        eventPublisher.publish(event);
 
         ArgumentCaptor<CustomerRegistered> captor = ArgumentCaptor.forClass(CustomerRegistered.class);
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->

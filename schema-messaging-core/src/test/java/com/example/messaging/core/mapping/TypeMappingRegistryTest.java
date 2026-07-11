@@ -18,9 +18,9 @@ class TypeMappingRegistryTest {
     @Test
     void duplicateJavaType_throwsWithClearMessage() {
         TypeMapping first = new TypeMapping(A.class,
-                new SchemaCoordinates("g", "A"), SchemaType.JSON, "a");
+                new SchemaCoordinates("g", "A"), SchemaType.JSON, "a", "g.exchange");
         TypeMapping second = new TypeMapping(A.class,
-                new SchemaCoordinates("g", "A2"), SchemaType.JSON, "a2");
+                new SchemaCoordinates("g", "A2"), SchemaType.JSON, "a2", "g.exchange");
 
         assertThatThrownBy(() -> new TypeMappingRegistry(List.of(first, second)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -31,8 +31,8 @@ class TypeMappingRegistryTest {
     @Test
     void duplicateCoordinates_throwsWithClearMessage() {
         SchemaCoordinates coords = new SchemaCoordinates("g", "Same");
-        TypeMapping first = new TypeMapping(A.class, coords, SchemaType.JSON, "a");
-        TypeMapping second = new TypeMapping(B.class, coords, SchemaType.JSON, "b");
+        TypeMapping first = new TypeMapping(A.class, coords, SchemaType.JSON, "a", "g.exchange");
+        TypeMapping second = new TypeMapping(B.class, coords, SchemaType.JSON, "b", "g.exchange");
 
         assertThatThrownBy(() -> new TypeMappingRegistry(List.of(first, second)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -44,7 +44,7 @@ class TypeMappingRegistryTest {
     void findByGroupAndArtifact_returnsMapping() {
         TypeMapping mapping = new TypeMapping(A.class,
                 new SchemaCoordinates("events.orders", "OrderCreated"),
-                SchemaType.JSON, "orders.created");
+                SchemaType.JSON, "orders.created", "events.orders.exchange");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
 
         assertThat(registry.findByGroupAndArtifact("events.orders", "OrderCreated"))

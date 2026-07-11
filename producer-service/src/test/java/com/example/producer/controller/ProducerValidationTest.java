@@ -32,7 +32,7 @@ class ProducerValidationTest {
                 .build();
 
         doThrow(new SchemaValidationException("events.orders:OrderCreated", "field missing"))
-                .when(eventPublisher).publish(any(), any());
+                .when(eventPublisher).publish(any());
 
         mockMvc.perform(post("/api/orders")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -53,7 +53,7 @@ class ProducerValidationTest {
                 .build();
 
         doThrow(new SchemaValidationException("events.customers:CustomerRegistered", "email invalid"))
-                .when(eventPublisher).publish(any(), any());
+                .when(eventPublisher).publish(any());
 
         mockMvc.perform(post("/api/customers")
                         .contentType(MediaType.APPLICATION_JSON)

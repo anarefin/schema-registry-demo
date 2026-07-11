@@ -41,7 +41,8 @@ class LocalSchemaCatalogStartupIT {
                     MissingSchemaProbe.class,
                     new SchemaCoordinates("events.test", "MissingSchemaProbe"),
                     SchemaType.JSON,
-                    "test.missing");
+                    "test.missing",
+                    "events.test.exchange");
         }
     }
 
