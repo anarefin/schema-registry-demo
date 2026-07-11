@@ -13,7 +13,8 @@
   <!-- Build-only generator — the SOLE victools home (ADR-0003). Dependency-free with respect to
        every *-contracts module (compile AND test scope): each contracts module instead declares
        this jar as an exec-maven-plugin dependency and invokes SchemaGeneratorCli against its own
-       classes at its own process-classes phase. NEVER on any service's runtime classpath. -->
+       @GenerateSchema-annotated classes (package scan of target/classes) at its own
+       process-classes phase. NEVER on any service's runtime classpath. -->
   <artifactId>schema-gen-tools</artifactId>
   <packaging>jar</packaging>
 

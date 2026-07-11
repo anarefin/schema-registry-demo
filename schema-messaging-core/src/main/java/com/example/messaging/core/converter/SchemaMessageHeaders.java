@@ -1,7 +1,7 @@
 package com.example.messaging.core.converter;
 
-import com.example.messaging.core.model.SchemaCoordinates;
-import com.example.messaging.core.model.SchemaType;
+import com.example.amqp.topology.mapping.SchemaCoordinates;
+import com.example.amqp.topology.mapping.SchemaType;
 import org.springframework.amqp.core.MessageProperties;
 
 /**

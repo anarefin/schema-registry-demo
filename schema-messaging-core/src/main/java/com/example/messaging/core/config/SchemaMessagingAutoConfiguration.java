@@ -2,7 +2,7 @@ package com.example.messaging.core.config;
 
 import com.example.messaging.core.consumer.EventConsumerSupport;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
-import com.example.messaging.core.mapping.TypeMapping;
+import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import com.example.messaging.core.publisher.EventPublisher;
 import com.example.messaging.core.schema.LocalSchemaCatalog;

@@ -13,6 +13,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.support.converter.MessageConversionException;
 
 import java.util.stream.Stream;
 
@@ -34,6 +35,10 @@ class EventConsumerSupportTest {
             Arguments.of(new IncompatibleSchemaTypeException("JSON", "PROTOBUF", "c"), RoutingDecision.DLQ_DIRECT),
             Arguments.of(new MissingSchemaHeadersException("X-Schema-GroupId is required"), RoutingDecision.DLQ_DIRECT),
             Arguments.of(new UnknownSchemaArtifactException("events.orders", "Unknown"), RoutingDecision.DLQ_DIRECT),
+            // Spring's own converter failure — not one of our SchemaMessagingException subtypes,
+            // but can never succeed on retry either
+            Arguments.of(new MessageConversionException("no cause"), RoutingDecision.DLQ_DIRECT),
+            Arguments.of(new MessageConversionException("wrapped", new RuntimeException("boom")), RoutingDecision.DLQ_DIRECT),
             // Conservative default for unknown exceptions (e.g. downstream handler failure)
             Arguments.of(new RuntimeException("unexpected"),                 RoutingDecision.RETRY)
         );

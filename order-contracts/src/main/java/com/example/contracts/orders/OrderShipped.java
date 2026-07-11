@@ -1,5 +1,6 @@
 package com.example.contracts.orders;
 
+import com.example.amqp.topology.mapping.GenerateSchema;
 import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.constraints.NotNull;
@@ -13,6 +14,7 @@ import java.util.UUID;
  * Emitted when an order is handed to a carrier. Code-first source of truth: this annotated record
  * is the contract, and {@code order-shipped.schema.json} is generated from it (never hand-edited).
  */
+@GenerateSchema
 @JsonClassDescription("Emitted when an order is shipped to the customer.")
 public record OrderShipped(
 

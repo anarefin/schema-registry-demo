@@ -10,11 +10,14 @@
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
-  <!-- Domain-agnostic AMQP topology-building kit (spec contract-owned-amqp-topology D1/D5).
-       Reusable retry-ladder + naming-convention logic depended on only by order-contracts and
-       customer-contracts. Stays a pure leaf module: no dependency on schema-messaging-core or
-       either *-contracts module in either direction. -->
-  <artifactId>amqp-topology-kit</artifactId>
+  <!-- Domain-agnostic AMQP topology + event-contract runtime metadata kit (spec
+       contract-owned-amqp-topology D1/D5; ADR-0006). Carries reusable retry-ladder +
+       naming-convention logic, plus the TypeMapping/SchemaCoordinates/SchemaType data types
+       shared between contracts modules and schema-messaging-core. Depended on by
+       order-contracts, customer-contracts, and (since ADR-0006) schema-messaging-core. Stays a
+       pure leaf module itself: no dependency on schema-messaging-core or either *-contracts
+       module in either direction. -->
+  <artifactId>event-contract-kit</artifactId>
   <packaging>jar</packaging>
 
   <dependencies>
@@ -51,7 +54,7 @@
                     <exclude>com.example:order-contracts</exclude>
                     <exclude>com.example:customer-contracts</exclude>
                   </excludes>
-                  <message>amqp-topology-kit must stay a pure leaf module (no dependency on core or any *-contracts module).</message>
+                  <message>event-contract-kit must stay a pure leaf module (no dependency on core or any *-contracts module).</message>
                 </bannedDependencies>
               </rules>
               <fail>true</fail>

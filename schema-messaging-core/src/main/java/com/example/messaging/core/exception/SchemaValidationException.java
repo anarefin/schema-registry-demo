@@ -6,7 +6,7 @@ import java.util.List;
  * Payload fails validation against its registered schema (spec App. B).
  * PERMANENT failure — routes straight to DLQ, no retry.
  */
-public class SchemaValidationException extends SchemaMessagingException {
+public class SchemaValidationException extends SchemaMessagingException implements PermanentFailure {
 
     private final List<String> validationErrors;
 

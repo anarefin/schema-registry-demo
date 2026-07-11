@@ -1,9 +1,9 @@
 package com.example.messaging.core.converter;
 
-import com.example.messaging.core.mapping.TypeMapping;
+import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
-import com.example.messaging.core.model.SchemaCoordinates;
-import com.example.messaging.core.model.SchemaType;
+import com.example.amqp.topology.mapping.SchemaCoordinates;
+import com.example.amqp.topology.mapping.SchemaType;
 import com.example.messaging.core.schema.LocalSchemaCatalog;
 import com.example.messaging.core.serde.JsonSchemaStrategy;
 import com.fasterxml.jackson.databind.DeserializationFeature;

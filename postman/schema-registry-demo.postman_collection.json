@@ -1,0 +1,505 @@
+{
+  "info": {
+    "name": "Schema Registry Demo",
+    "description": "Schema-governed messaging POC — producer publish endpoints, actuator health checks, and failure-path demos.\n\nPrerequisites:\n- `docker compose up` (RabbitMQ, Postgres, Apicurio)\n- `./mvnw -pl producer-service spring-boot:run` (port 8081)\n- `./mvnw -pl consumer-service spring-boot:run` (port 8082)\n\nCollection variables:\n- `producerBaseUrl` → http://localhost:8081\n- `consumerBaseUrl` → http://localhost:8082",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "producerBaseUrl",
+      "value": "http://localhost:8081",
+      "type": "string"
+    },
+    {
+      "key": "consumerBaseUrl",
+      "value": "http://localhost:8082",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Producer - Orders",
+      "description": "Order event publish endpoints. Each maps a request DTO to a code-first record and publishes via EventPublisher. SchemaAwareMessageConverter validates before send.",
+      "item": [
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"11111111-1111-1111-1111-111111111111\",\n  \"productId\": \"22222222-2222-2222-2222-222222222222\",\n  \"quantity\": 2,\n  \"totalAmount\": 99.99,\n  \"currency\": \"USD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/orders",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "orders"]
+            },
+            "description": "Publishes OrderCreated event to events.orders exchange. Returns 201 on success."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ship Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"33333333-3333-3333-3333-333333333333\",\n  \"trackingNumber\": \"1Z999AA10123456784\",\n  \"carrier\": \"UPS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/orders/ship",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "orders", "ship"]
+            },
+            "description": "Publishes OrderShipped event. Returns 201 on success."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"33333333-3333-3333-3333-333333333333\",\n  \"reason\": \"Customer request\",\n  \"refundAmount\": 49.99\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/orders/cancel",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "orders", "cancel"]
+            },
+            "description": "Publishes OrderCancelled event. Returns 201 on success."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publish Poison (DLQ Demo)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/orders/poison",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "orders", "poison"]
+            },
+            "description": "Bypass-validation demo. Publishes garbage JSON bytes with valid X-Schema-* headers. Consumer fails schema validation → no retry → orders.created.dlq. Returns 202 Accepted."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 202 Accepted', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Producer - Customers",
+      "description": "Customer event publish endpoints. Each maps a request DTO to a code-first record and publishes via EventPublisher.",
+      "item": [
+        {
+          "name": "Register Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"firstName\": \"Alice\",\n  \"lastName\": \"Smith\",\n  \"phoneNumber\": \"+15551234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/customers",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "customers"]
+            },
+            "description": "Publishes CustomerRegistered event to events.customers exchange. Returns 201 on success."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add Address",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"44444444-4444-4444-4444-444444444444\",\n  \"address\": {\n    \"line1\": \"221B Baker Street\",\n    \"city\": \"London\",\n    \"postalCode\": \"NW1 6XE\",\n    \"countryCode\": \"GB\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/customers/address",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "customers", "address"]
+            },
+            "description": "Publishes CustomerAddressAdded event. Returns 201 on success."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change Tier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"44444444-4444-4444-4444-444444444444\",\n  \"previousTier\": \"BRONZE\",\n  \"newTier\": \"GOLD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/customers/tier",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "customers", "tier"]
+            },
+            "description": "Publishes CustomerTierChanged event. Valid tiers: BRONZE, SILVER, GOLD. Returns 201 on success."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 201 Created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "description": "Spring Boot Actuator endpoints for both services. Consumer health includes custom queueDepth component (DOWN when any DLQ has messages).",
+      "item": [
+        {
+          "name": "Producer Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{producerBaseUrl}}/actuator/health",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Producer service health check with component details."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Health status is UP', function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('UP');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Producer Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{producerBaseUrl}}/actuator/info",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["actuator", "info"]
+            },
+            "description": "Producer service info endpoint."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consumer Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{consumerBaseUrl}}/actuator/health",
+              "host": ["{{consumerBaseUrl}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Consumer service health check. Includes queueDepth component — DOWN when any DLQ has messages."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('queueDepth component present', function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.components).to.have.property('queueDepth');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consumer Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{consumerBaseUrl}}/actuator/info",
+              "host": ["{{consumerBaseUrl}}"],
+              "path": ["actuator", "info"]
+            },
+            "description": "Consumer service info endpoint."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Demos - Failure Paths",
+      "description": "Demonstration requests for schema validation failure (producer-side 400) and DLQ routing (poison publish).",
+      "item": [
+        {
+          "name": "Invalid Customer Payload (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bad@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/customers",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "customers"]
+            },
+            "description": "Missing required firstName/lastName fields. SchemaAwareMessageConverter rejects before publish. Returns 400 with plain-text body: 'Schema validation failed: ...'. No message emitted."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('Response mentions schema validation', function () {",
+                  "    pm.expect(pm.response.text()).to.include('Schema validation failed');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Poison Publish (DLQ)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{producerBaseUrl}}/api/orders/poison",
+              "host": ["{{producerBaseUrl}}"],
+              "path": ["api", "orders", "poison"]
+            },
+            "description": "Publishes garbage JSON with valid X-Schema-* headers. Consumer fails validation → permanent failure → orders.created.dlq with X-Failure-* headers. Run Consumer Health after to see queueDepth DOWN."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status is 202 Accepted', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

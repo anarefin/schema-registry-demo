@@ -1,7 +1,8 @@
 package com.example.messaging.core.mapping;
 
-import com.example.messaging.core.model.SchemaCoordinates;
-import com.example.messaging.core.model.SchemaType;
+import com.example.amqp.topology.mapping.SchemaCoordinates;
+import com.example.amqp.topology.mapping.SchemaType;
+import com.example.amqp.topology.mapping.TypeMapping;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

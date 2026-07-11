@@ -46,26 +46,27 @@ The parent POM aggregates 7 submodules:
 
 | Module | Type | Depends on | Forbidden from depending on | Runtime or build-only |
 |---|---|---|---|---|
-| `schema-messaging-core` | domain-agnostic library | Spring AMQP, Jackson, networknt | `*-contracts`, `amqp-topology-kit` (enforced by `maven-enforcer-plugin`) | runtime |
-| `amqp-topology-kit` | domain-agnostic library (leaf) | Spring AMQP only | `schema-messaging-core`, `*-contracts` | runtime |
+| `schema-messaging-core` | domain-agnostic library | Spring AMQP, Jackson, networknt, `event-contract-kit` (ADR-0006) | `*-contracts` (enforced by `maven-enforcer-plugin`) | runtime |
+| `event-contract-kit` (formerly `amqp-topology-kit`) | domain-agnostic library (leaf) | Spring AMQP only | `schema-messaging-core`, `*-contracts` | runtime |
 | `schema-gen-tools` | build-only schema generator (victools) | `*-contracts` | — | **build-only**, never on a service classpath |
-| `order-contracts` | contract module | Jackson, jakarta.validation, `spring-rabbit`, `spring-boot-autoconfigure`, `amqp-topology-kit` | — | runtime |
-| `customer-contracts` | contract module (mirror of `order-contracts`) | same as above | — | runtime |
+| `order-contracts` | contract module | Jackson, jakarta.validation, `spring-rabbit`, `spring-boot-autoconfigure`, `event-contract-kit` | `schema-messaging-core` (enforced by `maven-enforcer-plugin`, ADR-0006) | runtime |
+| `customer-contracts` | contract module (mirror of `order-contracts`) | same as above | same as above | runtime |
 | `producer-service` | Spring Boot app | `schema-messaging-core`, `order-contracts`, `customer-contracts` | — | runtime |
 | `consumer-service` | Spring Boot app | `schema-messaging-core`, `order-contracts`, `customer-contracts` | — | runtime |
 
 ```mermaid
 graph LR
     core["schema-messaging-core<br/>(converter, LocalSchemaCatalog, publisher, DLX routing)"]
-    kit["amqp-topology-kit<br/>(naming + retry-ladder factory, leaf)"]
-    oc["order-contracts<br/>(records + schemas + topology autoconfig)"]
-    cc["customer-contracts<br/>(records + schemas + topology autoconfig)"]
+    kit["event-contract-kit<br/>(naming + retry-ladder factory + TypeMapping/SchemaCoordinates/SchemaType, leaf)"]
+    oc["order-contracts<br/>(records + schemas + topology + TypeMapping autoconfig)"]
+    cc["customer-contracts<br/>(records + schemas + topology + TypeMapping autoconfig)"]
     gen["schema-gen-tools<br/>(build-only, victools)"]
     prod["producer-service"]
     cons["consumer-service"]
 
     oc --> kit
     cc --> kit
+    core --> kit
     prod --> core
     prod --> oc
     prod --> cc
@@ -76,7 +77,7 @@ graph LR
     gen -.->|build-time only, generates schemas into| cc
 
     core -.->|"✗ banned by enforcer plugin"| oc
-    core -.->|"✗ banned by enforcer plugin"| kit
+    oc -.->|"✗ banned by enforcer plugin"| core
 
     style gen stroke-dasharray: 5 5
     style kit stroke-width:2px
@@ -89,11 +90,13 @@ graph LR
 and the consumer-side DLX/retry machinery (`EventConsumerSupport`, `DlxMessageRecoverer`,
 `DlxRoutingAdvice`). It knows nothing about orders or customers.
 
-`amqp-topology-kit` is a pure leaf module: `EventTopologyFactory` (builds the
-queue/DLQ/retry-ladder `Declarable`s for one routing key) and `TopologyNaming` (the
+`event-contract-kit` (formerly `amqp-topology-kit`) is a pure leaf module: `EventTopologyFactory`
+(builds the queue/DLQ/retry-ladder `Declarable`s for one routing key) and `TopologyNaming` (the
 naming convention: `<routingKey>.queue`, `<routingKey>.dlq`, retry tier suffixes
 `5s`/`30s`/`5m`). It's a library the contracts modules call, not a Spring auto-config
-itself.
+itself. Since [ADR-0006](adr/0006-typemapping-relocated-to-event-contract-kit.md) it also carries
+the `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types, which is why
+`schema-messaging-core` now depends on it too.
 
 ### Build tooling
 
@@ -105,20 +108,26 @@ is authored by hand.
 
 ### Contracts
 
-`order-contracts` and `customer-contracts` each own three things for their domain: the
-event records, the generated JSON Schemas, and — per
-[ADR-0002](adr/0002-contract-owned-amqp-topology.md) — a
-`@AutoConfiguration` class (`OrderTopologyAutoConfiguration` /
-`CustomerTopologyAutoConfiguration`) that declares that domain's exchanges, queues,
-DLQs, and retry ladder. Nothing about AMQP topology lives in the services themselves.
+`order-contracts` and `customer-contracts` each own four things for their domain: the
+event records, the generated JSON Schemas, a
+[ADR-0002](adr/0002-contract-owned-amqp-topology.md) `@AutoConfiguration` class
+(`OrderTopologyAutoConfiguration` / `CustomerTopologyAutoConfiguration`) that declares that
+domain's exchanges, queues, DLQs, and retry ladder, and — a pattern established by
+[ADR-0005](adr/0005-contracts-may-depend-on-core.md) — a second `@AutoConfiguration` class
+(`OrderTypeMappingAutoConfiguration` / `CustomerTypeMappingAutoConfiguration`) that registers
+that domain's `TypeMapping` beans. `TypeMapping` itself lives in `event-contract-kit`, not core
+(see [ADR-0006](adr/0006-typemapping-relocated-to-event-contract-kit.md)), so this needs no
+dependency on `schema-messaging-core`. Nothing about AMQP topology or schema-mapping wiring lives
+in the services themselves.
 
 ### Services
 
-`producer-service` and `consumer-service` are thin: a `*ContractsConfiguration` class
-per service registering one `TypeMapping` bean per event, plus controllers (producer) or
-`@RabbitListener` methods (consumer). Topology and converter wiring arrive automatically
-via Spring Boot auto-configuration — there is no per-service topology or converter glue
-to maintain.
+`producer-service` and `consumer-service` are thin: just controllers (producer) or
+`@RabbitListener` methods (consumer). Per [ADR-0005](adr/0005-contracts-may-depend-on-core.md),
+each domain's `*-contracts` module registers its own `TypeMapping` beans (one per event) via a
+`*TypeMappingAutoConfiguration`, alongside its `*TopologyAutoConfiguration`. Topology, converter,
+and `TypeMapping` wiring all arrive automatically via Spring Boot auto-configuration — there is
+no per-service topology, converter, or schema-mapping glue to maintain.
 
 **Wire format** (see [`spec/code-first-schema.md`](../spec/code-first-schema.md) §6 for
 the full rationale): the AMQP message body is the raw serialized JSON bytes only, no
@@ -139,17 +148,19 @@ naming, so you don't have to keep looking them up mid-trace.
 
 | Class | Module | Role |
 |---|---|---|
-| `TypeMapping` / `TypeMappingRegistry` | `schema-messaging-core` | Maps a Java type ↔ `SchemaCoordinates` ↔ `SchemaType` ↔ AMQP routing key. One `TypeMapping` bean per event. |
-| `SchemaCoordinates` / `ResolvedSchema` | `schema-messaging-core` | `SchemaCoordinates` is group/artifact; `ResolvedSchema` is the classpath-loaded schema bytes + type. |
+| `TypeMapping` / `SchemaCoordinates` / `SchemaType` | `event-contract-kit` (ADR-0006) | `TypeMapping` maps a Java type ↔ `SchemaCoordinates` ↔ `SchemaType` ↔ AMQP routing key. One `TypeMapping` bean per event. `SchemaCoordinates` is group/artifact; `SchemaType` is the wire format. |
+| `TypeMappingRegistry` / `ResolvedSchema` | `schema-messaging-core` | `TypeMappingRegistry` indexes every `TypeMapping` bean for O(1) lookup; `ResolvedSchema` is the classpath-loaded schema bytes + type. |
 | `SchemaAwareMessageConverter` | `schema-messaging-core` | The one Spring AMQP `MessageConverter` that does `toMessage`/`fromMessage` for every event — the single validation authority. |
 | `LocalSchemaCatalog` | `schema-messaging-core` | Eagerly loads every mapping's JSON Schema from the classpath at startup; fails fast if missing. |
 | `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. |
 | `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send()`. |
 | `DlxRoutingAdvice` | `schema-messaging-core` | AOP advice wrapped around every listener invocation; catches exceptions and hands them to the recoverer. |
 | `DlxMessageRecoverer` | `schema-messaging-core` | Decides DLQ vs. retry-exchange and actually sends the message there. |
-| `EventConsumerSupport` | `schema-messaging-core` | `classify(Exception)` — the permanent-vs-transient decision table — and DLQ failure-header population. |
-| `EventTopologyFactory` / `TopologyNaming` | `amqp-topology-kit` | Builds the queue/DLQ/retry-tier `Declarable`s for one routing key, and supplies the naming convention. |
+| `EventConsumerSupport` | `schema-messaging-core` | `classify(Exception)` — the permanent-vs-transient decision, by cause-chain walk — and DLQ failure-header population. |
+| `PermanentFailure` | `schema-messaging-core` | Marker interface implemented by every permanent exception; `classify()` checks `instanceof` this, not a hand-maintained set. |
+| `EventTopologyFactory` / `TopologyNaming` | `event-contract-kit` | Builds the queue/DLQ/retry-tier `Declarable`s for one routing key, and supplies the naming convention. |
 | `OrderTopologyAutoConfiguration` | `order-contracts` | Declares `events.orders.*` exchanges and calls the factory once per order routing key. |
+| `OrderTypeMappingAutoConfiguration` | `order-contracts` | Registers this domain's `TypeMapping` beans (pattern established by ADR-0005) — one per order event. |
 
 ## 4. Deep Dive: `OrderCreated` End-to-End
 
@@ -162,7 +173,7 @@ Roadmap (each numbered step below is one hop):
 
 1. HTTP request → `OrderController` builds the record and hands it to `EventPublisher`.
 2. `EventPublisher.publish()` looks up the `TypeMapping`, calls the converter, sends via `RabbitTemplate`.
-3. The `TypeMapping` bean itself, registered in `producer-service`.
+3. The `TypeMapping` bean itself, registered in `order-contracts` via `OrderTypeMappingAutoConfiguration`.
 4. The converter's produce path (`toMessage`): catalog lookup → validate → serialize → stamp headers.
 5. The AMQP topology that the message lands in — declared once at startup, not per-publish.
 6. The consumer's listener container + `@RabbitListener`.
@@ -171,7 +182,7 @@ Roadmap (each numbered step below is one hop):
 
 ### 4.1 HTTP entrypoint
 
-`producer-service/src/main/java/com/example/producer/controller/OrderController.java:48-57`:
+`producer-service/src/main/java/com/example/producer/controller/OrderController.java:48-59`:
 
 ```java
 public void createOrder(@RequestBody CreateOrderRequest request) {
@@ -207,19 +218,21 @@ routing key from the `TypeMapping`.
 
 ### 4.3 Where the `TypeMapping` bean comes from
 
-`producer-service/src/main/java/com/example/producer/config/OrderContractsConfiguration.java:31-35`:
+`order-contracts/src/main/java/com/example/contracts/orders/topology/OrderTypeMappingAutoConfiguration.java:30-35`:
 
 ```java
-@Bean
+@Bean("orderCreatedMapping")
+@ConditionalOnMissingBean(name = "orderCreatedMapping")
 public TypeMapping orderCreatedMapping() {
     return new TypeMapping(OrderCreated.class, coords("OrderCreated"),
             SchemaType.JSON, OrderEventRouting.CREATED_ROUTING_KEY);
 }
 ```
 
-One `@Bean` method per event, all in one `@Configuration` class per service. The
-`coords()` helper builds a 2-arg `SchemaCoordinates(groupId, artifactId)` — no version
-pinning at runtime (ADR-0004).
+One `@Bean` method per event, all in one self-activating `@AutoConfiguration` class shipped in
+the `order-contracts` jar (ADR-0005) — not hand-registered per service. The `coords()` helper
+builds a 2-arg `SchemaCoordinates(groupId, artifactId)` — no version pinning at runtime
+(ADR-0004).
 
 ### 4.4 Convert: produce path
 
@@ -293,7 +306,7 @@ for (String routingKey : List.of(
 }
 ```
 
-`EventTopologyFactory.declarablesForEvent()` (`amqp-topology-kit/.../EventTopologyFactory.java:36-59`)
+`EventTopologyFactory.declarablesForEvent()` (`event-contract-kit/.../EventTopologyFactory.java:36-59`)
 builds, per routing key: the main queue + binding (`TopologyNaming.queueName`, e.g.
 `orders.created.queue`), the DLQ + binding (`TopologyNaming.dlqName`, e.g.
 `orders.created.dlq`), and three TTL retry queues + bindings (5s/30s/5m,
@@ -397,19 +410,41 @@ try {
 }
 ```
 
-It delegates to `DlxMessageRecoverer.recover()` (`consumer/DlxMessageRecoverer.java:44-69`),
-which asks `EventConsumerSupport.classify()` (`consumer/EventConsumerSupport.java:52-61`)
-for a routing decision:
+It delegates to `DlxMessageRecoverer.recover()` (`consumer/DlxMessageRecoverer.java:44-74`),
+which asks `EventConsumerSupport.classify()`
+(`schema-messaging-core/.../consumer/EventConsumerSupport.java:43-52`) for a routing decision.
+`classify()` is not a hand-maintained exception list — it walks the full cause chain (so a
+Spring AMQP wrapper like `ListenerExecutionFailedException` doesn't mask the real cause) and
+checks each `Throwable` against one condition:
+
+```java
+public RoutingDecision classify(Exception e) {
+    Throwable current = e;
+    while (current != null) {
+        if (current instanceof PermanentFailure || current instanceof MessageConversionException) {
+            return RoutingDecision.DLQ_DIRECT;
+        }
+        current = current.getCause();
+    }
+    return RoutingDecision.RETRY;
+}
+```
 
 | Exception | Classification |
 |---|---|
-| `SchemaValidationException`, `DeserializationException`, `SerializationException`, `IncompatibleSchemaTypeException`, `MissingSchemaHeadersException`, `UnknownSchemaArtifactException` | **PERMANENT** → `DLQ_DIRECT`, no retry |
+| `SchemaValidationException`, `DeserializationException`, `SerializationException`, `IncompatibleSchemaTypeException`, `MissingSchemaHeadersException`, `UnknownSchemaArtifactException` — each implements the `PermanentFailure` marker interface | **PERMANENT** → `DLQ_DIRECT`, no retry |
+| Spring's own `MessageConversionException` (e.g. an unmapped `SchemaType` in `strategyFor()`) — a converter failure can never succeed on retry | **PERMANENT** → `DLQ_DIRECT`, no retry |
 | Everything else (e.g. downstream `RuntimeException`) | **TRANSIENT** → `RETRY` |
+
+A new permanent exception type self-classifies simply by implementing `PermanentFailure` — no
+second edit to `classify()` is needed. The contract is table-driven in
+`EventConsumerSupportTest#exceptionToDecision` (schema-messaging-core), which keeps this table
+honest.
 
 ```mermaid
 flowchart TD
-    A[Listener invocation throws] --> B["EventConsumerSupport.classify(exception)"]
-    B -->|permanent: validation, deserialization,<br/>serialization, type-mismatch, bad headers| C[DLQ_DIRECT]
+    A[Listener invocation throws] --> B["EventConsumerSupport.classify(exception)<br/>walks the cause chain"]
+    B -->|"instanceof PermanentFailure,<br/>or instanceof MessageConversionException"| C[DLQ_DIRECT]
     B -->|transient: everything else,<br/>e.g. downstream handler error| D{"retryCount >= maxRetries (3)?"}
     D -->|yes| C
     D -->|no| E["bump X-Retry-Count,<br/>send to *.retry.exchange<br/>with tier routing key (5s/30s/5m)"]

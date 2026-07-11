@@ -12,13 +12,13 @@ topology.
 
 | Spec §18 criterion | Demonstrated by |
 |---|---|
-| Cold `compose up` → all services healthy | `docker compose up`, healthchecks |
+| Cold `compose up` → all services healthy | `docker compose up --build`, healthchecks |
 | Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs (all six events) |
 | Six artifacts with FORWARD compat rules | `apicurio-registry:register` + bootstrap workflow |
 | Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
 | Missing/malformed local schema → service fails to start | `LocalSchemaCatalog` eager load, see ADR-0004 |
-| Producer/consumer runtime has zero dependency on Apicurio | `docker compose up rabbitmq postgres` (no Apicurio) still processes messages |
+| Producer/consumer runtime has zero dependency on Apicurio | `docker compose up rabbitmq producer-service consumer-service` (no Apicurio/Postgres) still processes messages |
 | README walkthrough on fresh clone in under 15 min | This file |
 
 ---
@@ -47,13 +47,15 @@ Compiles all seven modules, generates JSON Schemas from the code-first records v
 `schema-gen-tools`, and installs JARs into the local Maven repository. Skip tests for speed;
 run them later with `./mvnw verify`.
 
-### 2. Start infrastructure
+### 2. Start infrastructure and services
 
 ```bash
-docker compose up
+docker compose up --build
 ```
 
-Starts (in dependency order, all with health checks):
+Starts (in dependency order, all with health checks) — the `--build` flag builds the
+`producer-service`/`consumer-service` images from the jars produced in step 1, so run step 1
+again after any code change before re-running this:
 
 | Service | Port(s) | Notes |
 |---|---|---|
@@ -61,6 +63,8 @@ Starts (in dependency order, all with health checks):
 | `apicurio` | 8080 | Registry API |
 | `apicurio-ui` | 8888 | Registry UI |
 | `rabbitmq` | 5672 / 15672 | AMQP + management UI |
+| `producer-service` | 8081 | REST endpoints for all six events |
+| `consumer-service` | 8082 | `@RabbitListener`s + `/actuator/health` |
 
 Schema registration is **not** a compose service — it's a host-Maven step. The contracts modules
 already carry the `apicurio-registry-maven-plugin`, so once Apicurio is healthy you register both
@@ -98,7 +102,9 @@ Step 2 can also be run via the **Schema Governance Bootstrap** GitHub workflow
 
 ### 3. Start the services
 
-Two separate terminals:
+Already running as of step 2 (`producer-service`/`consumer-service` containers). For a faster
+local dev loop — code change → restart without rebuilding an image — run either service directly
+instead, in its own terminal (stop the equivalent compose container first to free the port):
 
 ```bash
 # Terminal 1 — producer (port 8081)
@@ -335,7 +341,10 @@ They are not appropriate for production use as-is.
 ./mvnw -pl customer-contracts verify -Pincompatible-demo \
        -Dapicurio.registry.url=http://localhost:8080
 
-# Run services
+# Run services — all-in-one via docker compose (rebuilds images from target/*.jar above)
+docker compose up --build                          # producer :8081, consumer :8082 + infra
+
+# Run services — fast local dev loop (no image rebuild)
 ./mvnw -pl producer-service spring-boot:run        # port 8081
 ./mvnw -pl consumer-service spring-boot:run        # port 8082
 

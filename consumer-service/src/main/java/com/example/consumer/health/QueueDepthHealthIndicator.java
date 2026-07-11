@@ -1,7 +1,7 @@
 package com.example.consumer.health;
 
 import com.example.amqp.topology.TopologyNaming;
-import com.example.messaging.core.mapping.TypeMapping;
+import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

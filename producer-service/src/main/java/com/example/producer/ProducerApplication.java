@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * Producer service entry point. Demo publishing logic is added in Phases 2/3.
  */
-@SpringBootApplication
+@SpringBootApplication(excludeName = "org.springframework.boot.validation.autoconfigure.ValidationAutoConfiguration")
 public class ProducerApplication {
 
     public static void main(String[] args) {

@@ -4,7 +4,7 @@ import com.example.messaging.core.exception.DeserializationException;
 import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.exception.SerializationException;
 import com.example.messaging.core.model.ResolvedSchema;
-import com.example.messaging.core.model.SchemaType;
+import com.example.amqp.topology.mapping.SchemaType;
 
 /**
  * SPI for format-specific serialization, validation, and deserialization (spec §10.1 / T-1.6).
@@ -46,7 +46,7 @@ public interface SerializationStrategy {
 
     /**
      * Eagerly prepare {@code schema} for use (e.g. compile and cache a parsed representation),
-     * called once per {@link com.example.messaging.core.mapping.TypeMapping} during
+     * called once per {@link com.example.amqp.topology.mapping.TypeMapping} during
      * {@code SchemaAwareMessageConverter} construction so malformed schema content fails fast at
      * application startup rather than on the first message of that type. Default is a no-op;
      * override when the strategy has something worth pre-compiling (see

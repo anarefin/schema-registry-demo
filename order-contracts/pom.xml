@@ -16,8 +16,9 @@
        process-classes phase (via the schema-gen-tools exec-maven-plugin execution below) and
        commits them under resources/schemas/. No victools on the compile classpath — only Jackson
        (records) + Jakarta Validation (annotations read at generation time) +
-       spring-rabbit/spring-boot-autoconfigure + amqp-topology-kit, since this module
-       self-activates its own domain-scoped AMQP topology (OrderTopologyAutoConfiguration). -->
+       spring-rabbit/spring-boot-autoconfigure + event-contract-kit, since this module
+       self-activates its own domain-scoped AMQP topology (OrderTopologyAutoConfiguration) and
+       TypeMapping wiring (OrderTypeMappingAutoConfiguration). -->
   <artifactId>order-contracts</artifactId>
   <packaging>jar</packaging>
 
@@ -51,10 +52,9 @@
     </dependency>
     <dependency>
       <groupId>com.example</groupId>
-      <artifactId>amqp-topology-kit</artifactId>
+      <artifactId>event-contract-kit</artifactId>
       <version>${project.version}</version>
     </dependency>
-
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
@@ -80,10 +80,38 @@
 
   <build>
     <plugins>
-      <!-- Generate this domain's JSON Schemas from its own annotated records at its own
+      <!-- Contracts and core must not depend on each other (spec contract-owned-amqp-topology
+           Principle 2, restored by ADR-0006 now that TypeMapping/SchemaCoordinates/SchemaType
+           live in event-contract-kit instead of core). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>ban-core-module</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>com.example:schema-messaging-core</exclude>
+                  </excludes>
+                  <message>order-contracts must not depend on schema-messaging-core (contracts and core must not depend on each other).</message>
+                </bannedDependencies>
+              </rules>
+              <fail>true</fail>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Generate this domain's JSON Schemas from @GenerateSchema-annotated records at its own
            process-classes phase (ADR-0003). schema-gen-tools is a plugin-level dependency only
            (not a project dependency), so it stays dependency-free with respect to this module
-           while still building first in the reactor.
+           while still building first in the reactor. Discovers types via package scan of
+           ${project.build.outputDirectory} — no hand-listed FQCNs.
            Run standalone via: ./mvnw -pl order-contracts process-classes -->
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
@@ -107,9 +135,8 @@
               <includePluginDependencies>true</includePluginDependencies>
               <arguments>
                 <argument>${project.basedir}/src/main/resources/schemas</argument>
-                <argument>com.example.contracts.orders.OrderCreated</argument>
-                <argument>com.example.contracts.orders.OrderShipped</argument>
-                <argument>com.example.contracts.orders.OrderCancelled</argument>
+                <argument>${project.build.outputDirectory}</argument>
+                <argument>com.example.contracts.orders</argument>
               </arguments>
             </configuration>
           </execution>
@@ -153,31 +180,6 @@
         </configuration>
       </plugin>
 
-      <!-- No contracts <-> core dependency in either direction (spec contract-owned-amqp-topology
-           Principle 2). -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-enforcer-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>ban-core-module</id>
-            <goals>
-              <goal>enforce</goal>
-            </goals>
-            <configuration>
-              <rules>
-                <bannedDependencies>
-                  <excludes>
-                    <exclude>com.example:schema-messaging-core</exclude>
-                  </excludes>
-                  <message>order-contracts must not depend on schema-messaging-core (contracts and core must not depend on each other).</message>
-                </bannedDependencies>
-              </rules>
-              <fail>true</fail>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
     </plugins>
   </build>
 </project>

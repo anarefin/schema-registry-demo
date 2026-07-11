@@ -1,6 +1,7 @@
 package com.example.messaging.core.mapping;
 
-import com.example.messaging.core.model.SchemaCoordinates;
+import com.example.amqp.topology.mapping.SchemaCoordinates;
+import com.example.amqp.topology.mapping.TypeMapping;
 
 import java.util.Collections;
 import java.util.List;

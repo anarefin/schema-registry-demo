@@ -22,15 +22,30 @@ This is a one-shot, clean cutover: a POC with no live production traffic and onl
 
 ## Guiding Principles (supersedes code-first-schema.md Principles 4 & 5)
 
+> **Principle 2 is superseded, twice.** [ADR-0005](../docs/adr/0005-contracts-may-depend-on-core.md)
+> first amended the bidirectional `contracts ↔ core` ban to one-directional, letting contracts
+> depend on `schema-messaging-core` so each `*-contracts` module could register its own
+> `TypeMapping` beans. [ADR-0006](../docs/adr/0006-typemapping-relocated-to-event-contract-kit.md)
+> then closed that edge again by relocating `TypeMapping`/`SchemaCoordinates`/`SchemaType` out of
+> core into the renamed `event-contract-kit` module (formerly `amqp-topology-kit`) — so
+> `contracts ↔ core` is back to zero dependency in either direction, machine-enforced on both
+> sides again, exactly as this principle originally intended. The *other* clause below (core does
+> not depend on the shared kit) is now the part that no longer holds: `schema-messaging-core`
+> depends on `event-contract-kit` as of ADR-0006. Retained below as historical record; see
+> ADR-0006 for the current rule.
+
 1. **Contracts own their transport.** Each `*-contracts` module declares its own domain's
    exchanges, queues, DLQs, and retry ladder directly via Spring AMQP, self-activating through a
    Spring Boot auto-configuration shipped in the jar. Contracts are no longer transport-agnostic —
    they gain `spring-rabbit` + `spring-boot-autoconfigure` on their classpath. (Schema generation
    purity — no victools, code-first records — is unaffected; see `code-first-schema.md` D1/D2.)
-2. **No contracts ↔ core dependency in either direction, and core does not depend on the new
-   shared kit either.** `schema-messaging-core` must not depend on any `*-contracts` module (existing
+2. ~~**No contracts ↔ core dependency in either direction**, and core does not depend on the new
+   shared kit either. `schema-messaging-core` must not depend on any `*-contracts` module (existing
    enforcer rule, unchanged) or on the new `amqp-topology-kit` module (new enforcer rule). Only
-   contracts depend on the kit.
+   contracts depend on the kit.~~ **Superseded, twice** — see note above. As of ADR-0006: the
+   `contracts ↔ core` half is restored (true again, both directions enforced); the
+   core-does-not-depend-on-the-kit half is now false (core depends on `event-contract-kit`,
+   formerly `amqp-topology-kit`).
 3. **Schema-resolution wiring is untouched.** The hand-written `TypeMapping` beans in
    `producer-service`/`consumer-service`'s `*ContractsConfiguration` classes (Java type ↔ registry
    coordinates ↔ routing key, used by `SchemaAwareMessageConverter`/`LocalSchemaCatalog`) stay exactly

@@ -44,7 +44,7 @@ Six event types flow through this system, three per domain:
 ./mvnw clean install -DskipTests
 ```
 
-Builds all six runtime/library modules (`schema-messaging-core`, `amqp-topology-kit`,
+Builds all six runtime/library modules (`schema-messaging-core`, `event-contract-kit`,
 `order-contracts`, `customer-contracts`, `producer-service`, `consumer-service`, plus the
 build-only `schema-gen-tools`, seven total) and, as part of
 `schema-gen-tools`' `process-classes` phase, regenerates all six JSON Schemas from the code-first
@@ -119,13 +119,15 @@ Run a single IT: `./mvnw -pl consumer-service verify -Dit.test=DlxRoutingIT`.
 
 ---
 
-## 5. Start infrastructure
+## 5. Start infrastructure and services
 
 ```bash
-docker compose up
+docker compose up --build
 ```
 
-Wait for all four containers to report healthy:
+`--build` builds the `producer-service`/`consumer-service` images from the jars produced in §2 —
+re-run §2 after any code change before re-running this. Wait for all six containers to report
+healthy:
 
 ```bash
 docker compose ps
@@ -137,9 +139,8 @@ docker compose ps
 | `apicurio` | 8080 (Registry API) | `GET /apis/registry/v3/system/info` (60s start period, 30 retries — Postgres-backed storage takes a moment to initialize) |
 | `apicurio-ui` | 8888 → container 8080 | `GET /` |
 | `rabbitmq` | 5672 (AMQP), 15672 (management UI) | `rabbitmq-diagnostics ping` |
-
-> **Doc note:** `docker-compose.yml`'s inline comment says "BACKWARD for OrderCreated, FORWARD for
-> CustomerRegistered" — this is stale. All six artifacts actually use **FORWARD** (see §6 for why).
+| `producer-service` | 8081 | `GET /actuator/health` |
+| `consumer-service` | 8082 | `GET /actuator/health` |
 
 **What you verified:** cold `compose up` reaches an all-healthy state with no manual intervention
 beyond waiting on health checks.
@@ -194,7 +195,9 @@ coordinates, and the FORWARD rule that gates future evolution (§15–§16) is a
 
 ## 7. Start producer & consumer services
 
-Two terminals:
+Already running as of §5 (`producer-service`/`consumer-service` containers). For a faster local
+dev loop — code change → restart without rebuilding an image — stop the equivalent container
+(`docker compose stop producer-service`) and run it directly instead, in its own terminal:
 
 ```bash
 # Terminal 1 — producer (port 8081)
@@ -309,8 +312,8 @@ directly via `RabbitTemplate`, with **valid** `X-Schema-GroupId`/`ArtifactId`/`T
 routing key `orders.created`. Expect `202 Accepted`.
 
 The consumer fails to parse the JSON before it can even validate → `DeserializationException`,
-which is in the permanent-exception set → routed straight to `orders.created.dlq`, **no retry
-hop**. In the management UI, browse `orders.created.dlq` and inspect the message headers:
+which implements the `PermanentFailure` marker interface → routed straight to `orders.created.dlq`,
+**no retry hop**. In the management UI, browse `orders.created.dlq` and inspect the message headers:
 
 | Header | Expected value |
 |---|---|
@@ -330,8 +333,9 @@ lands on the correct DLQ with the full failure-header set populated.
 
 Not covered in the README — this walks a message through all three retry tiers before it finally
 DLQs. Schema presence is guaranteed at startup (`LocalSchemaCatalog`), so there is no runtime
-"schema unavailable" path. Transient failures are **downstream handler errors** (any exception not
-in the permanent set).
+"schema unavailable" path. Transient failures are **downstream handler errors** — anything that
+doesn't implement `PermanentFailure` and isn't Spring's own `MessageConversionException` (both are
+routed `DLQ_DIRECT` by `EventConsumerSupport.classify()`, no retry).
 
 The reliable way to observe the consumer-side retry ladder is `DlxRoutingIT` (§4) — it spies the
 listener to throw `RuntimeException` and asserts 4 deliveries then DLQ. Manually, once a transient
@@ -516,7 +520,8 @@ Stop both Spring Boot services with `Ctrl-C` in their terminals.
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
 ./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
 ./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
-./mvnw -pl producer-service spring-boot:run                # port 8081
-./mvnw -pl consumer-service spring-boot:run                # port 8082
+docker compose up --build                                  # infra + producer :8081 + consumer :8082
+./mvnw -pl producer-service spring-boot:run                # dev-loop alternative, port 8081
+./mvnw -pl consumer-service spring-boot:run                # dev-loop alternative, port 8082
 docker compose up / down / down -v
 ```

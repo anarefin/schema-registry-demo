@@ -1,21 +1,16 @@
 package com.example.messaging.core.consumer;
 
 import com.example.messaging.core.converter.SchemaMessageHeaders;
-import com.example.messaging.core.exception.DeserializationException;
-import com.example.messaging.core.exception.IncompatibleSchemaTypeException;
-import com.example.messaging.core.exception.MissingSchemaHeadersException;
-import com.example.messaging.core.exception.SchemaValidationException;
-import com.example.messaging.core.exception.SerializationException;
-import com.example.messaging.core.exception.UnknownSchemaArtifactException;
+import com.example.messaging.core.exception.PermanentFailure;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.support.converter.MessageConversionException;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.Instant;
-import java.util.Set;
 
 /**
  * Consumer-side support that wraps handler invocation and owns the failure-routing decision
@@ -30,23 +25,17 @@ public class EventConsumerSupport {
 
     private static final int MAX_STACK_TRACE_BYTES = 4 * 1024; // 4KB (spec §11)
 
-    private static final Set<Class<? extends Exception>> PERMANENT_EXCEPTIONS = Set.of(
-            SchemaValidationException.class,
-            DeserializationException.class,
-            SerializationException.class,
-            IncompatibleSchemaTypeException.class,
-            MissingSchemaHeadersException.class,
-            UnknownSchemaArtifactException.class
-    );
-
     /**
      * Classify an exception into a routing decision (TC-1.14, table-driven).
      * Walks the full cause chain so Spring AMQP wrapper exceptions (e.g.
      * {@code ListenerExecutionFailedException}) do not mask permanent failures.
      *
      * <ul>
-     *   <li>PERMANENT → {@link RoutingDecision#DLQ_DIRECT}: validation, deserialization,
-     *       serialization, type mismatch, missing schema headers, unknown artifact.</li>
+     *   <li>PERMANENT → {@link RoutingDecision#DLQ_DIRECT}: any exception implementing
+     *       {@link PermanentFailure} (validation, deserialization, serialization, type
+     *       mismatch, missing schema headers, unknown artifact), plus Spring's own
+     *       {@link MessageConversionException} — a converter failure can never succeed on
+     *       retry.</li>
      *   <li>TRANSIENT → {@link RoutingDecision#RETRY}: any other exception (conservative
      *       default) — e.g. a downstream handler failure.</li>
      * </ul>
@@ -54,8 +43,8 @@ public class EventConsumerSupport {
     public RoutingDecision classify(Exception e) {
         Throwable current = e;
         while (current != null) {
-            for (Class<? extends Exception> permanentType : PERMANENT_EXCEPTIONS) {
-                if (permanentType.isInstance(current)) return RoutingDecision.DLQ_DIRECT;
+            if (current instanceof PermanentFailure || current instanceof MessageConversionException) {
+                return RoutingDecision.DLQ_DIRECT;
             }
             current = current.getCause();
         }

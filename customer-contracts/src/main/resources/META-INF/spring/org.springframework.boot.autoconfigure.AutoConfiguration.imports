@@ -1,1 +1,2 @@
 com.example.contracts.customers.topology.CustomerTopologyAutoConfiguration
+com.example.contracts.customers.topology.CustomerTypeMappingAutoConfiguration

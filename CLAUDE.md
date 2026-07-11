@@ -2,13 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project status: code-first migration + contract-owned AMQP topology + local schema validation complete
+## Project status: code-first migration + contract-owned AMQP topology + local schema validation + contracts-owned TypeMapping complete
 
 All phases in `spec/code-first-schema.md` and `spec/contract-owned-amqp-topology.md` are done.
 Runtime schema validation no longer calls Apicurio Registry — producer/consumer validate against
 the JSON Schemas already generated at build time, loaded eagerly from the classpath (see
 `docs/adr/0004-local-schema-validation.md`). Apicurio Registry remains the CI/governance tool
-(register + compat-check), unchanged. Planning documents live in `docs/`:
+(register + compat-check), unchanged. `spec/contract-owned-amqp-topology.md` Guiding Principle 2
+(no `contracts ↔ core` dependency in either direction) was amended to one-directional by
+`docs/adr/0005-contracts-may-depend-on-core.md`, which let each domain's `*-contracts` module
+absorb its own `TypeMapping` wiring instead of duplicating it in producer-service/consumer-service.
+`docs/adr/0006-typemapping-relocated-to-event-contract-kit.md` then closed that edge again by
+relocating `TypeMapping`/`SchemaCoordinates`/`SchemaType` into the renamed `event-contract-kit`
+module (formerly `amqp-topology-kit`) — `contracts ↔ core` is zero dependency in either direction
+again, machine-enforced on both sides, while contracts keep their own `TypeMapping` wiring.
+Planning documents live in `docs/`:
 
 - `docs/POC-Implementation-Plan.md` — original POC phase plan (architecture, wire format,
   topology, failure model, acceptance criteria).
@@ -19,11 +27,14 @@ the JSON Schemas already generated at build time, loaded eagerly from the classp
   `docs/adr/0003-contracts-own-schema-generation.md` — read historically for those parts; D1/D2's
   victools config/output-format details and D4/D5/D6 (governance, CI) still apply.
 - `spec/contract-owned-amqp-topology.md` — current source of truth for AMQP topology ownership
-  (each `*-contracts` module owns its domain's exchanges/queues/DLQs/retry ladder).
+  (each `*-contracts` module owns its domain's exchanges/queues/DLQs/retry ladder); its Guiding
+  Principle 2 note reflects the ADR-0005 → ADR-0006 history above.
 - `CONTEXT.md` — glossary; `docs/adr/0001-code-first-schema-generation.md`,
   `docs/adr/0002-contract-owned-amqp-topology.md`,
-  `docs/adr/0003-contracts-own-schema-generation.md`, and
-  `docs/adr/0004-local-schema-validation.md` — ADRs.
+  `docs/adr/0003-contracts-own-schema-generation.md`,
+  `docs/adr/0004-local-schema-validation.md`,
+  `docs/adr/0005-contracts-may-depend-on-core.md` (superseded), and
+  `docs/adr/0006-typemapping-relocated-to-event-contract-kit.md` — ADRs.
 
 ## What this is
 
@@ -91,7 +102,10 @@ Run a single test class/method with the standard Surefire/Failsafe selectors, e.
   daemon JVM may differ from the compile toolchain.
 - **`core ↛ contracts` rule is machine-enforced:** `schema-messaging-core` uses
   `maven-enforcer-plugin` `bannedDependencies` to forbid `*-contracts` modules. The core
-  library is domain-agnostic and must never depend on a contracts module.
+  library is domain-agnostic and must never depend on a contracts module. It **does** legitimately
+  depend on `event-contract-kit` (ADR-0006) — that ban was deliberately removed, since core needs
+  the shared `TypeMapping`/`SchemaCoordinates`/`SchemaType` types and the kit is domain-agnostic.
+  `*-contracts ↛ core` is separately enforced in each contracts module's own POM.
 - **Maven is the POC build by design.** Schema registration/compat-gating use the official
   `apicurio-registry-maven-plugin` (no trusted Gradle equivalent). A Gradle migration is
   explicitly **deferred post-POC** — do not start it (see plan §0.4).
@@ -104,29 +118,38 @@ Eight Maven modules (parent root = this directory):
   All reusable plumbing lives here: converter, local schema catalog, schema-resolution wiring.
   Validates against schemas loaded from the classpath — no runtime Apicurio dependency (ADR-0004).
   Owns **no** AMQP topology — that now lives per-domain in the contracts modules (see
-  `amqp-topology-kit` below) — and is machine-forbidden from depending on either a `*-contracts`
-  module or `amqp-topology-kit`.
-- **`amqp-topology-kit`** — domain-agnostic AMQP topology-building library (naming conventions +
-  retry-ladder factory, `com.example.amqp.topology.*`). A pure leaf module: banned from depending
-  on core or either `*-contracts` module. Depended on only by `order-contracts` /
-  `customer-contracts`.
+  `event-contract-kit` below) — and is machine-forbidden from depending on either `*-contracts`
+  module, but does depend on `event-contract-kit` (ADR-0006) for the shared `TypeMapping`/
+  `SchemaCoordinates`/`SchemaType` data types.
+- **`event-contract-kit`** (formerly `amqp-topology-kit`) — domain-agnostic AMQP topology-building
+  library (naming conventions + retry-ladder factory, `com.example.amqp.topology.*`) plus, since
+  ADR-0006, the shared `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types
+  (`com.example.amqp.topology.mapping.*`) and the build-time `@GenerateSchema` marker used by
+  `schema-gen-tools` to discover event records. A pure leaf module itself: banned from depending on
+  core or either `*-contracts` module. Depended on by `order-contracts`, `customer-contracts`,
+  and `schema-messaging-core`.
 - **`schema-gen-tools`** — build-only schema generator (victools). Dependency-free with respect to
   every `*-contracts` module (ADR-0003): each contracts module declares it as a plugin-level
-  `exec-maven-plugin` dependency and invokes it against its own classes at its own
-  `process-classes`, writing into its own `src/main/resources/schemas/`. **Never** on service
+  `exec-maven-plugin` dependency and invokes it at its own `process-classes`, scanning
+  `${project.build.outputDirectory}` for `@GenerateSchema`-annotated types under the domain
+  package and writing into its own `src/main/resources/schemas/`. **Never** on service
   runtime classpath.
 - **`order-contracts`** — three code-first order event records + generated schemas
   (`com.example.contracts.orders.*`), plus that domain's AMQP topology auto-configuration
-  (`topology.OrderTopologyAutoConfiguration`, self-activating via
-  `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`). Depends on
-  Jackson, jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and
-  `amqp-topology-kit` (plus a test-scope dependency on `schema-gen-tools` for its own determinism
-  test).
+  (`topology.OrderTopologyAutoConfiguration`) and its `TypeMapping` wiring
+  (`topology.OrderTypeMappingAutoConfiguration`, pattern established by ADR-0005) — both
+  self-activating via `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
+  Depends on Jackson, jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and
+  `event-contract-kit` (plus a test-scope dependency on `schema-gen-tools` for its own determinism
+  test) — **no** dependency on `schema-messaging-core` (ADR-0006 moved the types it needed out of
+  core; machine-enforced ban on `schema-messaging-core` as of ADR-0006).
 - **`customer-contracts`** — mirror of `order-contracts` for the three customer events
-  (`com.example.contracts.customers.*`, `topology.CustomerTopologyAutoConfiguration`).
+  (`com.example.contracts.customers.*`, `topology.CustomerTopologyAutoConfiguration` /
+  `topology.CustomerTypeMappingAutoConfiguration`).
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
-  both contracts modules. Their domain AMQP topology (exchanges/queues/DLQs/retry ladder) is
-  wired automatically by the contracts' auto-configurations — no per-service topology glue.
+  both contracts modules. Their domain AMQP topology (exchanges/queues/DLQs/retry ladder) and
+  `TypeMapping` wiring are both wired automatically by the contracts' auto-configurations — no
+  per-service topology or schema-mapping glue.
 
 ### Schema-aware message flow
 
@@ -148,7 +171,9 @@ Supporting pieces in core:
   constructor.
 - **`SerializationStrategy`** SPI with `JsonSchemaStrategy` as the sole built-in strategy
   (the SPI remains for future formats, e.g. Avro). Each event contributes one
-  `TypeMapping` bean (Java type ↔ coordinates ↔ type ↔ routing) in producer/consumer config.
+  `TypeMapping` bean (Java type ↔ coordinates ↔ type ↔ routing), registered by its domain's
+  `*-contracts` module (pattern established by ADR-0005; `TypeMapping` itself lives in
+  `event-contract-kit` as of ADR-0006) rather than by the producer/consumer services.
 - **`EventPublisher`** / **`EventConsumerSupport`** wrap `RabbitTemplate` / `@RabbitListener`
   and own the failure-routing decision.
 - **AMQP topology** — owned per-domain, not by core (spec: `contract-owned-amqp-topology.md`).
@@ -156,7 +181,7 @@ Supporting pieces in core:
   `CustomerTopologyAutoConfiguration`) that declares its own domain-scoped `TopicExchange`s
   (`events.orders.{exchange,dlx,retry.exchange}` / `events.customers.{exchange,dlx,retry.exchange}`)
   and, for each of its routing keys, the main queue/binding, DLQ/binding, and 3 retry
-  queues/bindings — built via `amqp-topology-kit`'s `EventTopologyFactory.declarablesForEvent(...)`
+  queues/bindings — built via `event-contract-kit`'s `EventTopologyFactory.declarablesForEvent(...)`
   and `TopologyNaming`. `DlxMessageRecoverer` (still one shared bean in core, used by every
   domain's listeners) derives the DLX/retry exchange per message from
   `MessageProperties.getReceivedExchange()` rather than a fixed exchange name, so it needs no
@@ -181,13 +206,18 @@ handlers (out of POC scope).
 
 ### Exception taxonomy (drives routing)
 
-**Permanent (DLQ, no retry):** `SchemaValidationException`, `DeserializationException`,
-`SerializationException`, `IncompatibleSchemaTypeException`, `MissingSchemaHeadersException`,
-`UnknownSchemaArtifactException`.
+**Permanent (DLQ, no retry):** any exception implementing the `PermanentFailure` marker
+interface — `SchemaValidationException`, `DeserializationException`, `SerializationException`,
+`IncompatibleSchemaTypeException`, `MissingSchemaHeadersException`,
+`UnknownSchemaArtifactException` — plus Spring's own `MessageConversionException` (a converter
+failure, e.g. an unmapped `SchemaType` in `strategyFor()`, can never succeed on retry).
 **Startup-only (abort context):** `SchemaNotFoundException` (missing classpath schema),
-`InvalidSchemaDefinitionException` (malformed schema at `warm()`).
-The mapping from exception → retry-vs-DLQ decision is the contract `EventConsumerSupport` tests
-table-drive — keep them aligned.
+`InvalidSchemaDefinitionException` (malformed schema at `warm()`) — neither implements
+`PermanentFailure`; they never reach `classify()`.
+`EventConsumerSupport.classify()` expresses this as a cause-chain walk checking
+`instanceof PermanentFailure || instanceof MessageConversionException`, not a hand-maintained
+set — a new permanent exception type self-classifies by implementing the marker interface. The
+contract is table-driven in `EventConsumerSupportTest` — keep new cases aligned.
 
 ### Schema governance
 

@@ -1,5 +1,6 @@
 package com.example.contracts.customers;
 
+import com.example.amqp.topology.mapping.GenerateSchema;
 import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.constraints.NotNull;
@@ -12,6 +13,7 @@ import java.util.UUID;
  * is the contract, and {@code customer-tier-changed.schema.json} is generated from it. Carries the
  * {@link CustomerTier} enum, rendered as a JSON Schema {@code enum}.
  */
+@GenerateSchema
 @JsonClassDescription("Emitted when a customer's loyalty tier changes.")
 public record CustomerTierChanged(
 

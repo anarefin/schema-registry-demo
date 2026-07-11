@@ -1,9 +1,9 @@
 package com.example.consumer;
 
+import com.example.amqp.topology.mapping.SchemaCoordinates;
+import com.example.amqp.topology.mapping.SchemaType;
+import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.exception.SchemaNotFoundException;
-import com.example.messaging.core.mapping.TypeMapping;
-import com.example.messaging.core.model.SchemaCoordinates;
-import com.example.messaging.core.model.SchemaType;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;

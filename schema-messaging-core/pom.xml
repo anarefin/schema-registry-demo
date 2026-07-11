@@ -59,6 +59,15 @@
       <optional>true</optional>
     </dependency>
 
+    <!-- TypeMapping/SchemaCoordinates/SchemaType live in event-contract-kit (ADR-0006), the same
+         leaf module both *-contracts modules already depend on, so contracts never needs a
+         dependency on core (restores spec contract-owned-amqp-topology Principle 2). -->
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>event-contract-kit</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
     <!-- Test -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -69,7 +78,9 @@
 
   <build>
     <plugins>
-      <!-- T-0.10: forbid any dependency on the *-contracts modules (core must stay domain-agnostic). -->
+      <!-- T-0.10: forbid any dependency on the *-contracts modules (core must stay domain-agnostic).
+           event-contract-kit is intentionally NOT banned here as of ADR-0006 — core depends on it
+           for the shared TypeMapping/SchemaCoordinates/SchemaType data types. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
@@ -85,9 +96,8 @@
                   <excludes>
                     <exclude>com.example:order-contracts</exclude>
                     <exclude>com.example:customer-contracts</exclude>
-                    <exclude>com.example:amqp-topology-kit</exclude>
                   </excludes>
-                  <message>schema-messaging-core must not depend on any *-contracts module or amqp-topology-kit (it is domain-agnostic).</message>
+                  <message>schema-messaging-core must not depend on any *-contracts module (it is domain-agnostic).</message>
                 </bannedDependencies>
               </rules>
               <fail>true</fail>

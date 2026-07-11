@@ -31,10 +31,19 @@ which still depends back on contracts) would create a Maven reactor cycle.
   dependency (not a project dependency) and bind the `java` goal to their own `process-classes`
   phase. Maven's reactor sort already accounts for plugin-level dependencies, so `schema-gen-tools`
   still builds first — no cycle.
-- **Explicit args, not classpath scanning.** Each module passes `SchemaGeneratorCli`'s existing
+- **Package scan via `@GenerateSchema` (amends the original “explicit FQCN args” bullet).**
+  Each contracts module passes `SchemaGeneratorCli` three arguments:
+  `<schemasOutputDir> <classesDir> <basePackage>`. The CLI walks
+  `${project.build.outputDirectory}` under that package and generates schemas for every type
+  annotated with `@GenerateSchema` (`com.example.amqp.topology.mapping.GenerateSchema` in
+  `event-contract-kit`). Nested value objects / enums / topology auto-configs stay unmarked.
+  Zero hits fails the build. Ownership model (contracts invoke gen at their own
+  `process-classes`; `schema-gen-tools` stays free of contracts deps) is unchanged.
+- ~~**Explicit args, not classpath scanning.** Each module passes `SchemaGeneratorCli`'s existing
   `FQCN=outputPath` arguments explicitly (three per module, built from `${project.basedir}`) rather
   than having the tool discover event classes via package scanning/reflection. Smallest diff, no
-  new scanning dependency or "what counts as an event class" convention to invent.
+  new scanning dependency or "what counts as an event class" convention to invent.~~
+  **Superseded** by the `@GenerateSchema` package-scan amendment above.
 - **Determinism tests move with the classes they test.** The `SchemaDeterminismTest` that lived in
   `schema-gen-tools` (iterating `GeneratedSchemas.ALL`) could not stay — a test-scope dependency on
   the contracts modules would recreate the very cycle being removed. Each contracts module now has
@@ -51,10 +60,10 @@ which still depends back on contracts) would create a Maven reactor cycle.
 - A contracts module is now a complete, self-sufficient schema-generation unit: running
   `./mvnw -pl order-contracts process-classes` regenerates only that domain's schemas, from its own
   classes, with no reach into a sibling module's source tree.
-- Adding a seventh event to an existing domain means adding one record + one exec-maven-plugin
-  `<argument>` in that module's own pom — not editing a shared list in a different module.
+- Adding a seventh event to an existing domain means adding one `@GenerateSchema`-annotated record
+  (plus TypeMapping / Apicurio wiring) — not editing a shared FQCN list in the POM.
 - Adding a third contracts module still means hand-wiring its own `exec-maven-plugin` execution
-  (copy the pattern) — this ADR does not make onboarding a new *domain* one line; only regeneration
-  ownership for existing domains moved.
+  (copy the pattern, point `basePackage` at the new domain) — this ADR does not make onboarding a
+  new *domain* one line; only regeneration ownership for existing domains moved.
 - CI (`schema-drift-check.yml`) and `CLAUDE.md`'s documented drift command now target
   `order-contracts,customer-contracts` directly instead of `schema-gen-tools`.
