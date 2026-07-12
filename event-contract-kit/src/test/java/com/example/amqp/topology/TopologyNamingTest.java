@@ -34,4 +34,51 @@ class TopologyNamingTest {
     void tierSuffixFallsBackForUnknownTier() {
         assertThat(TopologyNaming.tierSuffix(3)).isEqualTo("t3");
     }
+
+    @Test
+    void serviceQueueNameInsertsServiceNameBeforeQueueSuffix() {
+        assertThat(TopologyNaming.serviceQueueName("orders.created", "consumer-service"))
+                .isEqualTo("orders.created.consumer-service.queue");
+    }
+
+    @Test
+    void serviceDlqNameInsertsServiceNameBeforeDlqSuffix() {
+        assertThat(TopologyNaming.serviceDlqName("orders.created", "consumer-service"))
+                .isEqualTo("orders.created.consumer-service.dlq");
+    }
+
+    @Test
+    void serviceDlqRoutingKeyInsertsServiceName() {
+        assertThat(TopologyNaming.serviceDlqRoutingKey("orders.created", "consumer-service"))
+                .isEqualTo("orders.created.consumer-service");
+    }
+
+    @Test
+    void serviceRoutingKeyInsertsServiceName() {
+        assertThat(TopologyNaming.serviceRoutingKey("orders.created", "consumer-service"))
+                .isEqualTo("orders.created.consumer-service");
+    }
+
+    @Test
+    void serviceDlqRoutingKeyMatchesServiceRoutingKey() {
+        assertThat(TopologyNaming.serviceDlqRoutingKey("orders.created", "consumer-service"))
+                .isEqualTo(TopologyNaming.serviceRoutingKey("orders.created", "consumer-service"));
+    }
+
+    @Test
+    void serviceRetryRoutingKeyInsertsServiceNameAndTierSuffix() {
+        assertThat(TopologyNaming.serviceRetryRoutingKey("orders.created", "consumer-service", 0))
+                .isEqualTo("orders.created.consumer-service.retry.5s");
+    }
+
+    @Test
+    void dlxExchangeNameReplacesExchangeSuffix() {
+        assertThat(TopologyNaming.dlxExchangeName("events.orders.exchange")).isEqualTo("events.orders.dlx");
+    }
+
+    @Test
+    void retryExchangeNameReplacesExchangeSuffix() {
+        assertThat(TopologyNaming.retryExchangeName("events.orders.exchange"))
+                .isEqualTo("events.orders.retry.exchange");
+    }
 }

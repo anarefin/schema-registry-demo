@@ -58,7 +58,7 @@ The parent POM aggregates 7 submodules:
 
 ```mermaid
 graph LR
-    core["schema-messaging-core<br/>(converter, LocalSchemaCatalog, publisher, DLX routing)"]
+    core["schema-messaging-core<br/>(converter, LocalSchemaCatalog, publisher, DLX routing, per-service queue topology)"]
     kit["event-contract-kit<br/>(naming + retry-ladder factory + TypeMapping/SchemaCoordinates/SchemaType, leaf)"]
     oc["order-contracts<br/>(records + schemas + topology + TypeMapping autoconfig)"]
     cc["customer-contracts<br/>(records + schemas + topology + TypeMapping autoconfig)"]
@@ -89,13 +89,18 @@ graph LR
 
 `schema-messaging-core` holds everything reusable and domain-agnostic: the
 `SchemaAwareMessageConverter`, `LocalSchemaCatalog` (classpath schema load), `EventPublisher`,
-and the consumer-side DLX/retry machinery (`EventConsumerSupport`, `DlxMessageRecoverer`,
-`DlxRoutingAdvice`). It knows nothing about orders or customers.
+the consumer-side DLX/retry machinery (`EventConsumerSupport`, `DlxMessageRecoverer`,
+`DlxRoutingAdvice`), and the per-service queue wiring — `ServiceQueueTopologyAutoConfiguration`
+(declares this service's own queues/DLQs/retry ladders) and `BitsEventHandlerScanner` (the shared
+`@BitsEventHandler` discovery those queues, the listener registrar, and the health indicator all
+key off). It knows nothing about orders or customers.
 
 `event-contract-kit` (formerly `amqp-topology-kit`) is a pure leaf module: `EventTopologyFactory`
-(builds the queue/DLQ/retry-ladder `Declarable`s for one routing key) and `TopologyNaming` (the
-naming convention: `<routingKey>.queue`, `<routingKey>.dlq`, retry tier suffixes
-`5s`/`30s`/`5m`). It's a library the contracts modules call, not a Spring auto-config
+(builds the queue/DLQ/retry-ladder `Declarable`s for one routing key **and service name**) and
+`TopologyNaming` (the naming convention: `<routingKey>.<serviceName>.queue`,
+`<routingKey>.<serviceName>.dlq`, retry tier suffixes `5s`/`30s`/`5m`). It's a library that both
+the contracts modules (for exchanges) and `schema-messaging-core` (for per-service queues) call,
+not a Spring auto-config
 itself. Since [ADR-0006](adr/0006-typemapping-relocated-to-event-contract-kit.md) it also carries
 the `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types, which is why
 `schema-messaging-core` now depends on it too.
@@ -115,8 +120,10 @@ is authored by hand.
 event records, the generated JSON Schemas, a
 [ADR-0002](adr/0002-contract-owned-amqp-topology.md) `@AutoConfiguration` class
 (`OrderTopologyAutoConfiguration` / `CustomerTopologyAutoConfiguration`) that declares that
-domain's exchanges, queues, DLQs, and retry ladder, and — a pattern established by
-[ADR-0005](adr/0005-contracts-may-depend-on-core.md) — a second `@AutoConfiguration` class
+domain's three **exchanges** (main / DLX / retry) — the per-service *queues*, DLQs, and retry
+ladders that hang off them are declared separately in `schema-messaging-core` by
+`ServiceQueueTopologyAutoConfiguration` (see Services below and §4.5) — and — a pattern established
+by [ADR-0005](adr/0005-contracts-may-depend-on-core.md) — a second `@AutoConfiguration` class
 (`OrderTypeMappingAutoConfiguration` / `CustomerTypeMappingAutoConfiguration`) that registers
 that domain's `TypeMapping` beans. `TypeMapping` itself lives in `event-contract-kit`, not core
 (see [ADR-0006](adr/0006-typemapping-relocated-to-event-contract-kit.md)), so this needs no
@@ -128,9 +135,14 @@ in the services themselves.
 `producer-service` and `consumer-service` are thin: just controllers (producer) or
 `@BitsEventHandler` methods (consumer). Per [ADR-0005](adr/0005-contracts-may-depend-on-core.md),
 each domain's `*-contracts` module registers its own `TypeMapping` beans (one per event) via a
-`*TypeMappingAutoConfiguration`, alongside its `*TopologyAutoConfiguration`. Topology, converter,
-and `TypeMapping` wiring all arrive automatically via Spring Boot auto-configuration — there is
-no per-service topology, converter, or schema-mapping glue to maintain.
+`*TypeMappingAutoConfiguration`, alongside its `*TopologyAutoConfiguration` (which declares only
+the domain exchanges). Converter and `TypeMapping` wiring arrive automatically via Spring Boot
+auto-configuration; the queues themselves are declared by `schema-messaging-core`'s
+`ServiceQueueTopologyAutoConfiguration`, which scans this service's `@BitsEventHandler` methods and
+provisions one dedicated queue/DLQ/retry-ladder per handled event, named
+`{routingKey}.{serviceName}.queue` (`serviceName` = `spring.application.name`). A service that
+handles no events (e.g. `producer-service`) therefore declares no queues at all — there is still
+no per-service topology, converter, or schema-mapping glue to hand-write.
 
 **Wire format** (see [`spec/code-first-schema.md`](../spec/code-first-schema.md) §6 for
 the full rationale): the AMQP message body is the raw serialized JSON bytes only, no
@@ -158,13 +170,15 @@ naming, so you don't have to keep looking them up mid-trace.
 | `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. |
 | `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), ...)`. Caller supplies only the event (ADR-0007). |
 | `BitsEventHandler` | `schema-messaging-core` (ADR-0008) | Marker on listener methods — no queue name or container factory. Queue resolved from the parameter type's `TypeMapping` at startup. |
-| `BitsEventHandlerRegistrar` | `schema-messaging-core` (ADR-0008) | `RabbitListenerConfigurer` that registers `@BitsEventHandler` methods; derives queue via `TopologyNaming.queueName(mapping.routingKey())`. |
+| `BitsEventHandlerRegistrar` | `schema-messaging-core` (ADR-0008) | `RabbitListenerConfigurer` that registers `@BitsEventHandler` methods; derives queue via `TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName)`. |
+| `BitsEventHandlerScanner` | `schema-messaging-core` | Shared `@BitsEventHandler` discovery: which event types this service handles. Used by the registrar, `ServiceQueueTopologyAutoConfiguration`, and `QueueDepthHealthIndicator` so they can't disagree on the handled set. |
+| `ServiceQueueTopologyAutoConfiguration` | `schema-messaging-core` | Declares this service's per-service queues/DLQs/retry ladders — one per handled event, named `{routingKey}.{serviceName}.queue` — via `EventTopologyFactory`. Nothing declared if the service has no handlers. |
 | `DlxRoutingAdvice` | `schema-messaging-core` | AOP advice wrapped around every listener invocation; catches exceptions and hands them to the recoverer. |
 | `DlxMessageRecoverer` | `schema-messaging-core` | Decides DLQ vs. retry-exchange and actually sends the message there. |
 | `EventConsumerSupport` | `schema-messaging-core` | `classify(Exception)` — the permanent-vs-transient decision, by cause-chain walk — and DLQ failure-header population. |
 | `PermanentFailure` | `schema-messaging-core` | Marker interface implemented by every permanent exception; `classify()` checks `instanceof` this, not a hand-maintained set. |
-| `EventTopologyFactory` / `TopologyNaming` | `event-contract-kit` | Builds the queue/DLQ/retry-tier `Declarable`s for one routing key, and supplies the naming convention. |
-| `OrderTopologyAutoConfiguration` | `order-contracts` | Declares `events.orders.*` exchanges and calls the factory once per order routing key. |
+| `EventTopologyFactory` / `TopologyNaming` | `event-contract-kit` | Builds the per-service queue/DLQ/retry-tier `Declarable`s for one routing key + service name (fan-out binding on the plain key + a private `routingKey.serviceName` binding), and supplies the naming convention. |
+| `OrderTopologyAutoConfiguration` | `order-contracts` | Declares the `events.orders.*` **exchanges** only (main / DLX / retry). The queues are declared per-service by `ServiceQueueTopologyAutoConfiguration`. |
 | `OrderTypeMappingAutoConfiguration` | `order-contracts` | Registers this domain's `TypeMapping` beans (pattern established by ADR-0005) — one per order event. |
 
 ## 4. Deep Dive: `OrderCreated` End-to-End
@@ -296,36 +310,47 @@ sequenceDiagram
 
 ### 4.5 Topology: how the queues got there
 
-This didn't happen at publish time — it happened once, at consumer startup.
-`order-contracts/.../topology/OrderTopologyAutoConfiguration.java:31-67` declares three
-`TopicExchange` beans (`events.orders.exchange`, `.dlx`, `.retry.exchange`, lines 31-47),
-then for each of the four order routing keys calls
-`EventTopologyFactory.declarablesForEvent()` (line 63):
+This didn't happen at publish time — it happened once, at consumer startup, and it's split across
+two auto-configurations: the **exchanges** are owned by the domain contracts module, the
+**queues** by `schema-messaging-core`.
+
+**Exchanges (contracts).** `order-contracts/.../topology/OrderTopologyAutoConfiguration.java`
+declares just the three `TopicExchange` beans for the domain — `events.orders.exchange`, `.dlx`,
+and `.retry.exchange` — and nothing else. It no longer enumerates routing keys or builds queues.
+
+**Per-service queues (core).** `schema-messaging-core/.../config/ServiceQueueTopologyAutoConfiguration.java`
+runs as a `SmartInitializingSingleton` after the converter is wired. It asks
+`BitsEventHandlerScanner.discoverHandledTypeMappings(...)` which event types *this* service actually
+handles (by scanning every bean for `@BitsEventHandler` methods and resolving each parameter type to
+its `TypeMapping`), and for each one calls:
 
 ```java
-for (String routingKey : List.of(
-        OrderEventRouting.CREATED_ROUTING_KEY,
-        OrderEventRouting.SHIPPED_ROUTING_KEY,
-        OrderEventRouting.CANCELLED_ROUTING_KEY,
-        OrderEventRouting.FULFILLED_ROUTING_KEY)) {
-    declarables.addAll(EventTopologyFactory.declarablesForEvent(
-            routingKey, ordersExchange, ordersDlx, ordersRetryExchange, tierTtls));
-}
+List<Declarable> declarables = EventTopologyFactory.declarablesForEvent(
+        mapping.routingKey(), serviceName, mainExchange, dlx, retryExchange, tierTtls);
 ```
 
-`EventTopologyFactory.declarablesForEvent()` (`event-contract-kit/.../EventTopologyFactory.java:36-59`)
-builds, per routing key: the main queue + binding (`TopologyNaming.queueName`, e.g.
-`orders.created.queue`), the DLQ + binding (`TopologyNaming.dlqName`, e.g.
-`orders.created.dlq`), and three TTL retry queues + bindings (5s/30s/5m,
-`TopologyNaming.retryRoutingKey`). This is `@AutoConfiguration` — no service writes any
-topology code itself. The declared beans are picked up and idempotently applied to the
-broker on startup by the shared `RabbitAdmin` bean
-(`SchemaMessagingConsumerAutoConfiguration.java:47-51`).
+`EventTopologyFactory.declarablesForEvent()` (`event-contract-kit/.../EventTopologyFactory.java`)
+builds, per handled routing key + service name:
+
+- the main queue (`TopologyNaming.serviceQueueName`, e.g. `orders.created.consumer-service.queue`)
+  with **two** bindings to the main exchange: the plain routing key `orders.created` (a **fan-out**
+  binding, so every subscribed service gets its own copy of a freshly published event) and a private
+  `orders.created.consumer-service` key (used only for retry redelivery — see §4.8);
+- the DLQ (`orders.created.consumer-service.dlq`) bound to the DLX with the service-scoped key;
+- three TTL retry queues (5s/30s/5m, `orders.created.consumer-service.retry.<tier>`), each of which
+  dead-letters back to the main exchange with the service-scoped key on TTL expiry.
+
+The `serviceName` is `spring.application.name` (`consumer-service` here). Because queues are keyed
+per service and declared only for handled events, `producer-service` (no `@BitsEventHandler`
+methods) declares **no** queues at all — no orphan fan-out copies pile up on the exchange. The
+declared queues/bindings are applied idempotently to the broker via the shared `RabbitAdmin` bean
+(`SchemaMessagingConsumerAutoConfiguration`).
 
 `OrderEventRouting` no longer exposes `*_QUEUE` constants — queue names are derived at
-listener registration time via `TopologyNaming.queueName(routingKey)` (ADR-0008). Adding a
-fifth order event means adding one routing key to that `List.of(...)` — the
-queue/DLQ/retry-ladder for it is generated automatically.
+listener registration time via `TopologyNaming.serviceQueueName(routingKey, serviceName)`
+(ADR-0008). Adding a fifth order event means adding one `@BitsEventHandler` method and one
+`TypeMapping` bean — its per-service queue/DLQ/retry-ladder is provisioned automatically from the
+handler scan, with no topology list to edit.
 
 ### 4.6 Consumer wiring
 
@@ -346,8 +371,10 @@ public void onOrderCreated(OrderCreated event) {
 ```
 
 At startup, `BitsEventHandlerRegistrar` resolves `OrderCreated.class` → `TypeMapping` →
-`TopologyNaming.queueName("orders.created")` → `orders.created.queue`, then registers
-the method against the shared `rabbitListenerContainerFactory`. Spring AMQP calls
+`TopologyNaming.serviceQueueName("orders.created", "consumer-service")` →
+`orders.created.consumer-service.queue` (the exact queue `ServiceQueueTopologyAutoConfiguration`
+declared for it in §4.5 — both go through `BitsEventHandlerScanner`, so they can't disagree), then
+registers the method against the shared `rabbitListenerContainerFactory`. Spring AMQP calls
 `fromMessage()` on the raw bytes *before* this method body ever runs — by the time
 `onOrderCreated` executes, `event` is already a validated, typed `OrderCreated` record.
 
@@ -467,7 +494,14 @@ flowchart TD
 message's *actual received exchange* (`props.getReceivedExchange()`, regex-stripping
 `.exchange` → `.dlx` / `.retry.exchange`) rather than a hardcoded name — this is why the
 one shared `DlxMessageRecoverer` bean in `schema-messaging-core` needs no dependency on
-any `*-contracts` module (see [ADR-0002](adr/0002-contract-owned-amqp-topology.md)).
+any `*-contracts` module (see [ADR-0002](adr/0002-contract-owned-amqp-topology.md)). It's
+injected with this service's `spring.application.name`, and targets the **service-scoped**
+routing key — `serviceRetryRoutingKey(rk, serviceName, tier)` for a retry hop,
+`serviceDlqRoutingKey(rk, serviceName)` for the DLQ — so a failure lands only on this
+service's own retry/DLQ, never fanned out. A message that has already been retried once
+arrives back via its private `rk.serviceName` binding, so `getReceivedRoutingKey()` carries
+that suffix; the recoverer first `TopologyNaming.stripServiceRoutingKey(...)`s it back to the
+plain key before re-deriving the next tier's key, or the `serviceName` would be appended twice.
 
 **Go run it yourself**: section 4 traced the code; to watch this happen against a live
 broker, run [`docs/TESTING-GUIDE.md`](TESTING-GUIDE.md) §8 (happy path), §9 (validation
@@ -495,11 +529,15 @@ exchange group differ:
 see `order-contracts/.../OrderFulfilled.java`.
 
 `CustomerTopologyAutoConfiguration` is the exact mirror of
-`OrderTopologyAutoConfiguration` (section 4.5) for the customer domain. If you
-understand section 4, you understand all seven events — the only new code you'd write
-for an eighth event is a new record (plus nested types if needed), a routing-key constant,
-one `TypeMapping` bean, one line in the topology auto-configuration's routing-key list,
-and one `@BitsEventHandler` method.
+`OrderTopologyAutoConfiguration` (section 4.5) for the customer domain — it declares the
+customer exchanges; the queues are provisioned per-service by
+`ServiceQueueTopologyAutoConfiguration` just as for orders. If you understand section 4, you
+understand all seven events — the only new code you'd write for an eighth event is a new record
+(plus nested types if needed), a routing-key constant, one `TypeMapping` bean, and one
+`@BitsEventHandler` method. There is **no** topology list to touch: the new event's per-service
+queue/DLQ/retry-ladder is provisioned automatically the moment a handler for it exists (and only if
+the exchange group is new do you add three exchange beans to the domain's
+`*TopologyAutoConfiguration`).
 
 ## 6. Where to Go Next
 

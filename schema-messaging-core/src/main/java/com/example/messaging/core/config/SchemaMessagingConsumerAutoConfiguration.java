@@ -43,6 +43,7 @@ public class SchemaMessagingConsumerAutoConfiguration {
     @Value("${events.retry.tier0.ms:5000}")   private long tier0Ms;
     @Value("${events.retry.tier1.ms:30000}")  private long tier1Ms;
     @Value("${events.retry.tier2.ms:300000}") private long tier2Ms;
+    @Value("${spring.application.name}") private String serviceName;
 
     @Bean
     @ConditionalOnMissingBean
@@ -56,7 +57,7 @@ public class SchemaMessagingConsumerAutoConfiguration {
             EventConsumerSupport consumerSupport,
             RabbitTemplate rabbitTemplate) {
         long[] delays = {tier0Ms, tier1Ms, tier2Ms};
-        return new DlxMessageRecoverer(consumerSupport, rabbitTemplate, delays);
+        return new DlxMessageRecoverer(consumerSupport, rabbitTemplate, delays, serviceName);
     }
 
     @Bean
@@ -84,6 +85,6 @@ public class SchemaMessagingConsumerAutoConfiguration {
     public BitsEventHandlerRegistrar bitsEventHandlerRegistrar(
             ApplicationContext applicationContext,
             TypeMappingRegistry typeMappingRegistry) {
-        return new BitsEventHandlerRegistrar(applicationContext, typeMappingRegistry);
+        return new BitsEventHandlerRegistrar(applicationContext, typeMappingRegistry, serviceName);
     }
 }

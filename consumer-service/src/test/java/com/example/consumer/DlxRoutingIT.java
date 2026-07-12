@@ -3,6 +3,7 @@ package com.example.consumer;
 import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
 import com.example.consumer.listener.CustomerEventListener;
+import com.example.amqp.topology.TopologyNaming;
 import com.example.amqp.topology.mapping.SchemaType;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,6 +53,10 @@ import static org.mockito.Mockito.doAnswer;
 })
 class DlxRoutingIT {
 
+    private static final String SERVICE_NAME = "consumer-service";
+    private static final String REGISTERED_DLQ = TopologyNaming.serviceDlqName(
+            CustomerEventRouting.REGISTERED_ROUTING_KEY, SERVICE_NAME);
+
     @Container
     @ServiceConnection
     static final RabbitMQContainer rabbitMQ = new RabbitMQContainer("rabbitmq:3.13-management");
@@ -71,7 +76,7 @@ class DlxRoutingIT {
         Mockito.reset(customerEventListener);
 
         // Drain DLQ so each test starts with an empty queue
-        drainQueue(CustomerEventRouting.REGISTERED_DLQ);
+        drainQueue(REGISTERED_DLQ);
     }
 
     // ---- TC-5.2 / TC-5.3 / TC-5.7 ----------------------------------------
@@ -86,7 +91,7 @@ class DlxRoutingIT {
         sendRaw(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
                 "{INVALID_JSON".getBytes(StandardCharsets.UTF_8));
 
-        Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ);
+        Message dlqMsg = awaitDlq(REGISTERED_DLQ);
 
         // TC-5.2 / TC-5.3: permanent → DLQ, retry count = 0
         assertThat(SchemaMessageHeaders.getRetryCount(dlqMsg.getMessageProperties())).isEqualTo(0);
@@ -115,7 +120,7 @@ class DlxRoutingIT {
         rabbitTemplate.send(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
                 new Message("{}".getBytes(StandardCharsets.UTF_8), props));
 
-        Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ);
+        Message dlqMsg = awaitDlq(REGISTERED_DLQ);
         assertThat(SchemaMessageHeaders.getRetryCount(dlqMsg.getMessageProperties())).isEqualTo(0);
         assertThat(headerStr(dlqMsg.getMessageProperties(), SchemaMessageHeaders.FAILURE_REASON))
                 .isEqualTo("DLQ_DIRECT");
@@ -134,7 +139,7 @@ class DlxRoutingIT {
         rabbitTemplate.send(CustomerEventRouting.EXCHANGE, CustomerEventRouting.REGISTERED_ROUTING_KEY,
                 new Message("{}".getBytes(StandardCharsets.UTF_8), props));
 
-        Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ);
+        Message dlqMsg = awaitDlq(REGISTERED_DLQ);
         assertThat(SchemaMessageHeaders.getRetryCount(dlqMsg.getMessageProperties())).isEqualTo(0);
         assertThat(headerStr(dlqMsg.getMessageProperties(), SchemaMessageHeaders.FAILURE_MESSAGE))
                 .contains("DoesNotExist");
@@ -162,7 +167,7 @@ class DlxRoutingIT {
                .untilAsserted(() -> assertThat(callCount.get()).isGreaterThanOrEqualTo(4));
 
         // TC-5.6: X-Retry-Count=3 in DLQ message
-        Message dlqMsg = awaitDlq(CustomerEventRouting.REGISTERED_DLQ);
+        Message dlqMsg = awaitDlq(REGISTERED_DLQ);
         assertThat(dlqMsg.getMessageProperties()
                 .<Integer>getHeader(SchemaMessageHeaders.FAILURE_RETRY_COUNT)).isEqualTo(3);
     }

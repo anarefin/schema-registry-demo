@@ -266,8 +266,11 @@ For each: confirm `201 Created`, then confirm a matching `INFO` log line in the 
 (`OrderEventListener`/`CustomerEventListener` log every field of the typed record it deserialized).
 
 **Inspect the wire format** in the RabbitMQ management UI (http://localhost:15672, `guest`/`guest`)
-→ Queues → e.g. `orders.created.queue` → Get messages (with "Requeue" unchecked if you want to
-consume it, or leave the consumer running and just watch the queue's message-rate graph blip). The
+→ Queues → e.g. `orders.created.consumer-service.queue` → Get messages (with "Requeue" unchecked if
+you want to consume it, or leave the consumer running and just watch the queue's message-rate graph
+blip). Queues are **per service** — named `{routingKey}.{serviceName}.queue` where `serviceName` is
+`spring.application.name` (here `consumer-service`) — declared only for events the service handles
+with a `@BitsEventHandler`, so `producer-service` (no listeners) declares no queues at all. The
 message properties should show:
 
 | Header | Example value |
@@ -300,7 +303,7 @@ curl -si -X POST http://localhost:8081/api/customers \
 
 Expect `400 Bad Request` with a body starting `Schema validation failed: ...` (from
 `GlobalExceptionHandler` catching `SchemaValidationException`). Confirm in the management UI that
-`customers.registered.queue`'s message count did **not** increase.
+`customers.registered.consumer-service.queue`'s message count did **not** increase.
 
 **What you verified:** schema validation is enforced on the producer side, and validation failure
 is a hard stop — no partial/invalid message is ever published.
@@ -318,8 +321,9 @@ directly via `RabbitTemplate`, with **valid** `X-Schema-GroupId`/`ArtifactId`/`T
 routing key `orders.created`. Expect `202 Accepted`.
 
 The consumer fails to parse the JSON before it can even validate → `DeserializationException`,
-which implements the `PermanentFailure` marker interface → routed straight to `orders.created.dlq`,
-**no retry hop**. In the management UI, browse `orders.created.dlq` and inspect the message headers:
+which implements the `PermanentFailure` marker interface → routed straight to
+`orders.created.consumer-service.dlq`, **no retry hop**. In the management UI, browse
+`orders.created.consumer-service.dlq` and inspect the message headers:
 
 | Header | Expected value |
 |---|---|
@@ -348,15 +352,19 @@ listener to throw `RuntimeException` and asserts 4 deliveries then DLQ. Manually
 failure is triggered, watch the message hop through these queues in the management UI:
 
 ```
-orders.created.queue  →  orders.created.retry.5s  →  orders.created.retry.30s  →  orders.created.retry.5m  →  orders.created.dlq
+orders.created.consumer-service.queue  →  orders.created.consumer-service.retry.5s  →  orders.created.consumer-service.retry.30s  →  orders.created.consumer-service.retry.5m  →  orders.created.consumer-service.dlq
 ```
 
-(Retry queue names have **no** `.queue` suffix — they're named directly `<routingKey>.retry.<tier>`.)
+(Every queue in the ladder carries the `.consumer-service` service segment; the retry queues have
+**no** `.queue` suffix — they're named directly `<routingKey>.<serviceName>.retry.<tier>`.)
 Exact TTLs: **tier 0 = 5000ms (5s)**, **tier 1 = 30000ms (30s)**, **tier 2 = 300000ms (5m)**
 (`events.retry.tier0.ms`/`tier1.ms`/`tier2.ms`). Each retry queue dead-letters back into that
-event's domain exchange with the *original* routing key on TTL expiry; `X-Retry-Count` increments
-(`0`→`1`→`2`→`3`). Once `X-Retry-Count` reaches 3, the next failure is forced to `DLQ_DIRECT` and
-`X-Failure-*` headers are populated (only on final DLQ arrival).
+event's domain exchange on TTL expiry with the *service-scoped* routing key
+(`<routingKey>.<serviceName>`, e.g. `orders.created.consumer-service`) rather than the plain routing
+key, so the redelivery lands **only** on this service's own main queue instead of fanning out to
+every other service subscribed to the event. `X-Retry-Count` increments (`0`→`1`→`2`→`3`). Once
+`X-Retry-Count` reaches 3, the next failure is forced to `DLQ_DIRECT` and `X-Failure-*` headers are
+populated (only on final DLQ arrival).
 
 **What you verified:** transient failures are retried on a TTL ladder rather than DLQ'd immediately,
 retry exhaustion still lands on the DLQ, and the queue-hop sequence matches the declared topology.
@@ -469,13 +477,16 @@ There is no runtime registry health probe (ADR-0004). Remaining scenario:
 **DLQ has messages:**
 
 ```bash
-curl -s -X POST http://localhost:8081/api/orders/poison   # from §10, lands a message on orders.created.dlq
+curl -s -X POST http://localhost:8081/api/orders/poison   # from §10, lands a message on orders.created.consumer-service.dlq
 curl -s localhost:8082/actuator/health | jq '.components.queueDepth'
 ```
 
 Expect `status: DOWN` — `QueueDepthHealthIndicator` is DOWN whenever *any* DLQ has more than zero
-messages (main-queue depth alone is informational, not a health signal). Drain the DLQ (management
-UI → purge, or manually ack the message) and re-check to see it return to `UP`.
+messages (main-queue depth alone is informational, not a health signal). It probes only this
+service's own per-service queues/DLQs — the same `@BitsEventHandler` scan
+`ServiceQueueTopologyAutoConfiguration` uses to declare them — so the `components.queueDepth.details`
+keys are `orders.created.consumer-service.queue` / `.dlq`, not the plain routing-key names. Drain
+the DLQ (management UI → purge, or manually ack the message) and re-check to see it return to `UP`.
 
 **What you verified:** queue-depth health surfaces poison messages piling up through the standard
 actuator surface.

@@ -8,13 +8,9 @@ import org.springframework.amqp.rabbit.listener.MethodRabbitListenerEndpoint;
 import org.springframework.amqp.rabbit.listener.RabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistrar;
 import org.springframework.context.ApplicationContext;
-import org.springframework.core.MethodIntrospector;
-import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.messaging.handler.annotation.support.DefaultMessageHandlerMethodFactory;
-import org.springframework.util.ReflectionUtils;
 
 import java.lang.reflect.Method;
-import java.util.Set;
 
 /**
  * Discovers every {@link BitsEventHandler}-annotated method across all singleton beans and
@@ -24,8 +20,8 @@ import java.util.Set;
  * {@code simplified-publish-and-listen.md} D3).
  *
  * <p>The queue name is derived from the handler's single parameter type via
- * {@link TypeMappingRegistry} + {@link TopologyNaming#queueName(String)} — the same convention
- * the topology auto-configurations already use — and every endpoint is registered against the
+ * {@link TypeMappingRegistry} + {@link TopologyNaming#serviceQueueName(String, String)} —
+ * the same convention the service topology auto-configuration uses — and every endpoint is
  * shared {@code rabbitListenerContainerFactory} bean, so it inherits the same DLQ/retry advice
  * chain and message converter as every other listener.
  */
@@ -35,12 +31,15 @@ public class BitsEventHandlerRegistrar implements RabbitListenerConfigurer {
 
     private final ApplicationContext applicationContext;
     private final TypeMappingRegistry typeMappingRegistry;
+    private final String serviceName;
 
     public BitsEventHandlerRegistrar(
             ApplicationContext applicationContext,
-            TypeMappingRegistry typeMappingRegistry) {
+            TypeMappingRegistry typeMappingRegistry,
+            String serviceName) {
         this.applicationContext = applicationContext;
         this.typeMappingRegistry = typeMappingRegistry;
+        this.serviceName = serviceName;
     }
 
     @Override
@@ -57,11 +56,7 @@ public class BitsEventHandlerRegistrar implements RabbitListenerConfigurer {
             Object bean = applicationContext.getBean(beanName);
             Class<?> targetClass = bean.getClass();
 
-            Set<Method> handlerMethods = MethodIntrospector.selectMethods(targetClass,
-                    (ReflectionUtils.MethodFilter) method ->
-                            AnnotatedElementUtils.hasAnnotation(method, BitsEventHandler.class));
-
-            for (Method method : handlerMethods) {
+            for (Method method : BitsEventHandlerScanner.handlerMethods(targetClass)) {
                 registerEndpoint(registrar, containerFactory, handlerMethodFactory, beanName, bean, method);
             }
         }
@@ -74,16 +69,8 @@ public class BitsEventHandlerRegistrar implements RabbitListenerConfigurer {
             String beanName,
             Object bean,
             Method method) {
-        if (method.getParameterCount() != 1) {
-            throw new IllegalStateException(
-                    "@BitsEventHandler method " + method + " must have exactly one parameter (the event type)");
-        }
-        Class<?> eventType = method.getParameterTypes()[0];
-        TypeMapping mapping = typeMappingRegistry.findByJavaType(eventType)
-                .orElseThrow(() -> new IllegalStateException(
-                        "No TypeMapping for " + eventType.getName()));
-
-        String queue = TopologyNaming.queueName(mapping.routingKey());
+        TypeMapping mapping = BitsEventHandlerScanner.mappingFor(typeMappingRegistry, method);
+        String queue = TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName);
 
         MethodRabbitListenerEndpoint endpoint = new MethodRabbitListenerEndpoint();
         endpoint.setBean(bean);

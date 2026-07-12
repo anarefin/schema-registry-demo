@@ -17,15 +17,12 @@ public final class CustomerEventRouting {
 
     // ---- customers.registered ----
     public static final String REGISTERED_ROUTING_KEY = "customers.registered";
-    public static final String REGISTERED_DLQ         = "customers.registered.dlq";
 
     // ---- customers.address-added ----
     public static final String ADDRESS_ADDED_ROUTING_KEY = "customers.address-added";
-    public static final String ADDRESS_ADDED_DLQ         = "customers.address-added.dlq";
 
     // ---- customers.tier-changed ----
     public static final String TIER_CHANGED_ROUTING_KEY = "customers.tier-changed";
-    public static final String TIER_CHANGED_DLQ         = "customers.tier-changed.dlq";
 
     // ---- domain-scoped exchanges (spec contract-owned-amqp-topology D2) ----
     public static final String EXCHANGE       = "events.customers.exchange";

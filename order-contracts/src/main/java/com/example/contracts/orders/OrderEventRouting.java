@@ -17,19 +17,15 @@ public final class OrderEventRouting {
 
     // ---- orders.created ----
     public static final String CREATED_ROUTING_KEY = "orders.created";
-    public static final String CREATED_DLQ         = "orders.created.dlq";
 
     // ---- orders.shipped ----
     public static final String SHIPPED_ROUTING_KEY = "orders.shipped";
-    public static final String SHIPPED_DLQ         = "orders.shipped.dlq";
 
     // ---- orders.cancelled ----
     public static final String CANCELLED_ROUTING_KEY = "orders.cancelled";
-    public static final String CANCELLED_DLQ         = "orders.cancelled.dlq";
 
     // ---- orders.fulfilled ----
     public static final String FULFILLED_ROUTING_KEY = "orders.fulfilled";
-    public static final String FULFILLED_DLQ         = "orders.fulfilled.dlq";
 
     // ---- domain-scoped exchanges (spec contract-owned-amqp-topology D2) ----
     public static final String EXCHANGE       = "events.orders.exchange";

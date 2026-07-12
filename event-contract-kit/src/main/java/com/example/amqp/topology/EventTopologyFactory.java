@@ -11,49 +11,57 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Builds the full AMQP declarable set for one event (spec contract-owned-amqp-topology D1):
- * main queue + binding, DLQ + binding, and the 3-tier TTL retry queues + bindings. Generalizes
- * the old {@code RetryTopologyFactory} by taking the domain's exchanges as parameters instead of
- * hardcoding a single shared exchange set, so each {@code *-contracts} module can declare its own
- * domain-scoped topology while reusing this logic.
+ * Builds the per-service AMQP declarable set for one event (spec contract-owned-amqp-topology D1):
+ * main queue + binding, DLQ + binding, and the 3-tier TTL retry queues + bindings.
  */
 public final class EventTopologyFactory {
 
     private EventTopologyFactory() {}
 
-    public static Queue retryQueue(String baseRoutingKey, int tier, long ttlMs, String mainExchangeName) {
-        return QueueBuilder.durable(TopologyNaming.retryRoutingKey(baseRoutingKey, tier))
+    public static Queue serviceRetryQueue(
+            String routingKey, String serviceName, int tier, long ttlMs, String mainExchangeName) {
+        return QueueBuilder.durable(TopologyNaming.serviceRetryRoutingKey(routingKey, serviceName, tier))
                 .ttl((int) ttlMs)
                 .deadLetterExchange(mainExchangeName)
-                .deadLetterRoutingKey(baseRoutingKey)
+                .deadLetterRoutingKey(TopologyNaming.serviceRoutingKey(routingKey, serviceName))
                 .build();
     }
 
-    public static Binding retryBinding(Queue queue, TopicExchange retryExchange, String baseRoutingKey, int tier) {
-        return BindingBuilder.bind(queue).to(retryExchange).with(TopologyNaming.retryRoutingKey(baseRoutingKey, tier));
+    public static Binding serviceRetryBinding(
+            Queue queue, TopicExchange retryExchange, String routingKey, String serviceName, int tier) {
+        return BindingBuilder.bind(queue)
+                .to(retryExchange)
+                .with(TopologyNaming.serviceRetryRoutingKey(routingKey, serviceName, tier));
     }
 
     public static List<Declarable> declarablesForEvent(
             String routingKey,
+            String serviceName,
             TopicExchange mainExchange,
             TopicExchange dlx,
             TopicExchange retryExchange,
             long[] tierTtlsMs) {
 
         List<Declarable> declarables = new ArrayList<>();
+        String serviceRoutingKey = TopologyNaming.serviceRoutingKey(routingKey, serviceName);
 
-        Queue mainQueue = QueueBuilder.durable(TopologyNaming.queueName(routingKey)).build();
+        Queue mainQueue = QueueBuilder.durable(TopologyNaming.serviceQueueName(routingKey, serviceName)).build();
         declarables.add(mainQueue);
+        // Plain routing key: fan-out binding so every subscribed service gets its own copy of a
+        // freshly published event. Service-scoped key: private binding so a retry-tier TTL expiry
+        // (dead-lettered with serviceRoutingKey, see serviceRetryQueue) redelivers only to this
+        // service's own queue instead of fanning out to every other subscriber again.
         declarables.add(BindingBuilder.bind(mainQueue).to(mainExchange).with(routingKey));
+        declarables.add(BindingBuilder.bind(mainQueue).to(mainExchange).with(serviceRoutingKey));
 
-        Queue dlq = QueueBuilder.durable(TopologyNaming.dlqName(routingKey)).build();
+        Queue dlq = QueueBuilder.durable(TopologyNaming.serviceDlqName(routingKey, serviceName)).build();
         declarables.add(dlq);
-        declarables.add(BindingBuilder.bind(dlq).to(dlx).with(routingKey));
+        declarables.add(BindingBuilder.bind(dlq).to(dlx).with(serviceRoutingKey));
 
         for (int tier = 0; tier < tierTtlsMs.length; tier++) {
-            Queue retryQueue = retryQueue(routingKey, tier, tierTtlsMs[tier], mainExchange.getName());
+            Queue retryQueue = serviceRetryQueue(routingKey, serviceName, tier, tierTtlsMs[tier], mainExchange.getName());
             declarables.add(retryQueue);
-            declarables.add(retryBinding(retryQueue, retryExchange, routingKey, tier));
+            declarables.add(serviceRetryBinding(retryQueue, retryExchange, routingKey, serviceName, tier));
         }
         return declarables;
     }

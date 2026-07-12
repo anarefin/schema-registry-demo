@@ -154,7 +154,11 @@ curl -s -X POST http://localhost:8081/api/customers/tier \
 ```
 
 Consumer logs confirm receipt and full deserialization. Check `X-Schema-*` headers in RabbitMQ
-management UI → queues → `orders.created.queue` or `customers.registered.queue`.
+management UI → queues → `orders.created.consumer-service.queue` or
+`customers.registered.consumer-service.queue`. Queues are **per service**: each is named
+`{routingKey}.{serviceName}.queue` (`serviceName` = `spring.application.name`) and is declared only
+for events the service actually handles with a `@BitsEventHandler`, so several services can each get
+their own copy of the same event with independent DLQ/retry ladders.
 
 ### 5. Demo: schema validation failure (producer-side)
 
@@ -174,10 +178,10 @@ curl -s -X POST http://localhost:8081/api/customers \
 curl -s -X POST http://localhost:8081/api/orders/poison
 ```
 
-Consumer fails to parse the JSON → `DeserializationException` → **no retry** → `orders.created.dlq`.
-In RabbitMQ management UI (http://localhost:15672, guest/guest) browse `orders.created.dlq` to
-inspect all `X-Failure-*` headers (reason, message, stack trace truncated to 4 KB, original
-routing key, failed-at, retry-count).
+Consumer fails to parse the JSON → `DeserializationException` → **no retry** →
+`orders.created.consumer-service.dlq`. In RabbitMQ management UI (http://localhost:15672,
+guest/guest) browse `orders.created.consumer-service.dlq` to inspect all `X-Failure-*` headers
+(reason, message, stack trace truncated to 4 KB, original routing key, failed-at, retry-count).
 
 ### 7. Demo: schema evolution — accept and reject
 

@@ -1,5 +1,6 @@
 package com.example.messaging.core.consumer;
 
+import com.example.amqp.topology.TopologyNaming;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,14 +32,17 @@ public class DlxMessageRecoverer implements MessageRecoverer {
     private final EventConsumerSupport consumerSupport;
     private final RabbitTemplate rabbitTemplate;
     private final long[] retryDelaysMs;
+    private final String serviceName;
 
     public DlxMessageRecoverer(
             EventConsumerSupport consumerSupport,
             RabbitTemplate rabbitTemplate,
-            long[] retryDelaysMs) {
+            long[] retryDelaysMs,
+            String serviceName) {
         this.consumerSupport = consumerSupport;
         this.rabbitTemplate = rabbitTemplate;
         this.retryDelaysMs = retryDelaysMs;
+        this.serviceName = serviceName;
     }
 
     @Override
@@ -48,37 +52,35 @@ public class DlxMessageRecoverer implements MessageRecoverer {
 
         MessageProperties props = message.getMessageProperties();
         int retryCount = SchemaMessageHeaders.getRetryCount(props);
-        String originalRoutingKey = props.getReceivedRoutingKey() != null
+        String receivedRoutingKey = props.getReceivedRoutingKey() != null
                 ? props.getReceivedRoutingKey() : "unknown";
+        // A message that already failed once arrives here via its private per-service binding
+        // (see EventTopologyFactory.declarablesForEvent), so the received key carries the
+        // ".<serviceName>" suffix — strip it back to the plain key before re-deriving the next
+        // retry/DLQ routing key, or the suffix would be appended again on every subsequent failure.
+        String originalRoutingKey = TopologyNaming.stripServiceRoutingKey(receivedRoutingKey, serviceName);
         String receivedExchange = props.getReceivedExchange();
         if (receivedExchange == null || receivedExchange.isBlank()) {
             throw new IllegalStateException(
                     "Cannot route failure: MessageProperties.receivedExchange is null/blank"
                     + " (routingKey=" + originalRoutingKey + ")");
         }
-        String dlxExchange = receivedExchange.replaceFirst("\\.exchange$", ".dlx");
-        String retryExchange = receivedExchange.replaceFirst("\\.exchange$", ".retry.exchange");
+        String dlxExchange = TopologyNaming.dlxExchangeName(receivedExchange);
+        String retryExchange = TopologyNaming.retryExchangeName(receivedExchange);
 
         if (decision == RoutingDecision.DLQ_DIRECT || retryCount >= retryDelaysMs.length) {
             consumerSupport.populateFailureHeaders(message, ex, RoutingDecision.DLQ_DIRECT);
-            rabbitTemplate.send(dlxExchange, originalRoutingKey, message);
+            String dlqRoutingKey = TopologyNaming.serviceDlqRoutingKey(originalRoutingKey, serviceName);
+            rabbitTemplate.send(dlxExchange, dlqRoutingKey, message);
             log.error("→ DLQ exchange={} routingKey={} retries={} cause={}",
-                    dlxExchange, originalRoutingKey, retryCount, ex.getMessage());
+                    dlxExchange, dlqRoutingKey, retryCount, ex.getMessage());
         } else {
             props.setHeader(SchemaMessageHeaders.RETRY_COUNT, retryCount + 1);
-            String retryRoutingKey = originalRoutingKey + ".retry." + tierSuffix(retryCount);
+            String retryRoutingKey = TopologyNaming.serviceRetryRoutingKey(
+                    originalRoutingKey, serviceName, retryCount);
             rabbitTemplate.send(retryExchange, retryRoutingKey, message);
             log.warn("→ retry exchange={} routingKey={} retryCount={} ttlMs={}",
                     retryExchange, retryRoutingKey, retryCount + 1, retryDelaysMs[retryCount]);
         }
-    }
-
-    private String tierSuffix(int tier) {
-        return switch (tier) {
-            case 0 -> "5s";
-            case 1 -> "30s";
-            case 2 -> "5m";
-            default -> "t" + tier;
-        };
     }
 }
