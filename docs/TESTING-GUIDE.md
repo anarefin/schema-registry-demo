@@ -15,7 +15,7 @@ Work through the sections in order — later sections (evolution, CI) assume the
 services from earlier sections are already up. All commands assume you're running from the repo
 root with `./mvnw` (the Maven Wrapper — never a system `mvn`).
 
-Six event types flow through this system, three per domain:
+Seven event types flow through this system — four orders, three customers:
 
 | Domain | Events | Routing keys |
 |---|---|---|
@@ -47,7 +47,7 @@ Six event types flow through this system, three per domain:
 Builds all six runtime/library modules (`schema-messaging-core`, `event-contract-kit`,
 `order-contracts`, `customer-contracts`, `producer-service`, `consumer-service`, plus the
 build-only `schema-gen-tools`, seven total) and, as part of
-`schema-gen-tools`' `process-classes` phase, regenerates all six JSON Schemas from the code-first
+`schema-gen-tools`' `process-classes` phase, regenerates all seven JSON Schemas from the code-first
 records. Expect `BUILD SUCCESS`.
 
 ```bash
@@ -158,7 +158,7 @@ carry the `apicurio-registry-maven-plugin`.
        -Dapicurio.registry.url=http://localhost:8080
 ```
 
-Then attach the **FORWARD** compatibility rule to all six artifacts (register does not do this
+Then attach the **FORWARD** compatibility rule to all seven artifacts (register does not do this
 itself):
 
 ```bash
@@ -166,6 +166,7 @@ for pair in \
   events.orders/OrderCreated \
   events.orders/OrderShipped \
   events.orders/OrderCancelled \
+  events.orders/OrderFulfilled \
   events.customers/CustomerRegistered \
   events.customers/CustomerAddressAdded \
   events.customers/CustomerTierChanged; do
@@ -186,10 +187,10 @@ Both steps can also be run as one shot via the **Schema Governance Bootstrap** w
 (`.github/workflows/schema-governance-bootstrap.yml`, `workflow_dispatch` — see §17).
 
 **Verify in the Apicurio UI** (http://localhost:8888):
-- Groups `events.orders` and `events.customers` each show three artifacts.
+- Group `events.orders` shows four artifacts; `events.customers` shows three.
 - Each artifact's **Rules** tab shows `COMPATIBILITY = FORWARD`.
 
-**What you verified:** all six code-first schemas are registered under their correct group/artifact
+**What you verified:** all seven code-first schemas are registered under their correct group/artifact
 coordinates, and the FORWARD rule that gates future evolution (§15–§16) is active.
 
 ---
@@ -224,7 +225,7 @@ needed later for governance curls), and queue-depth health is wired before you s
 
 ---
 
-## 8. Happy path — publish all six events
+## 8. Happy path — publish all seven events
 
 Each curl maps a request DTO to the code-first record; `SchemaAwareMessageConverter` validates
 against the resolved schema before the message is sent. Every call should return `201 Created`.
@@ -242,6 +243,10 @@ curl -si -X POST http://localhost:8081/api/orders/ship \
 curl -si -X POST http://localhost:8081/api/orders/cancel \
   -H "Content-Type: application/json" \
   -d '{"orderId":"33333333-3333-3333-3333-333333333333","reason":"Customer request","refundAmount":49.99}'
+
+curl -si -X POST http://localhost:8081/api/orders/fulfill \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"33333333-3333-3333-3333-333333333333","buyer":{"customerId":"11111111-1111-1111-1111-111111111111","email":"buyer@example.com","displayName":"Jane Doe"},"shipping":{"line1":"221B Baker Street","line2":null,"city":"London","postalCode":"NW1 6XE","countryCode":"GB"},"payment":{"method":"CARD","amount":149.99,"currency":"GBP"}}'
 
 # --- Customers (events.customers) ---
 curl -si -X POST http://localhost:8081/api/customers \
@@ -277,7 +282,7 @@ message properties should show:
 
 Body is the **raw JSON only** — no envelope wrapper.
 
-**What you verified:** all six event types round-trip end to end with the correct schema identity
+**What you verified:** all seven event types round-trip end to end with the correct schema identity
 headers and no envelope, matching the wire-format spec.
 
 ---
@@ -440,9 +445,9 @@ All four workflows discover contract modules dynamically (`for d in *-contracts;
 
 | Workflow | Trigger | Runner | What it runs | Pass/fail condition |
 |---|---|---|---|---|
-| `schema-compat-check.yml` | `pull_request`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` (needs the standing registry at `localhost:8080`) | `./mvnw -pl <discovered> verify -Pcompat-check -Dapicurio.registry.url=...` | Fails if the dry-run registration is rejected as incompatible — same command as §16 |
+| `schema-compat-check.yml` | `pull_request`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` (needs the standing registry at `localhost:8080`) | `./mvnw -pl <discovered> verify -Pcompat-check -Dapicurio.registry.url=...` | Fails if the dry-run registration is rejected as incompatible — same command as §15 |
 | `schema-drift-check.yml` | `pull_request`, paths `*-contracts/**`, `schema-gen-tools/**` | `ubuntu-latest` (no registry needed) | regenerate via `schema-gen-tools`, then `git diff --exit-code` on `*-contracts/**/schemas/` | Fails on any byte drift — same command as §3 |
-| `schema-governance-bootstrap.yml` | `workflow_dispatch` only (manual, optional `registry_url` input) | `[self-hosted, apicurio-local]` | re-registers all six artifacts, then POSTs `{"ruleType":"COMPATIBILITY","config":"FORWARD"}` to each of the six `/rules` endpoints (treats `200`/`204`/`409` as success), then re-`GET`s each artifact's rules to confirm | Fails if any rule-attach call returns an unexpected HTTP status — this is §6's manual steps, automated |
+| `schema-governance-bootstrap.yml` | `workflow_dispatch` only (manual, optional `registry_url` input) | `[self-hosted, apicurio-local]` | re-registers all seven artifacts, then POSTs `{"ruleType":"COMPATIBILITY","config":"FORWARD"}` to each of the seven `/rules` endpoints (treats `200`/`204`/`409` as success), then re-`GET`s each artifact's rules to confirm | Fails if any rule-attach call returns an unexpected HTTP status — this is §6's manual steps, automated |
 | `schema-register.yml` | `push` to `main`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` | `apicurio-registry:register` (idempotent `FIND_OR_CREATE_VERSION`) | Fails only on a genuine Maven/plugin error — this is a post-merge publish step, not a gate |
 
 Because `schema-compat-check.yml`, `schema-governance-bootstrap.yml`, and `schema-register.yml` all
@@ -506,6 +511,7 @@ Stop both Spring Boot services with `Ctrl-C` in their terminals.
 {"customerId":"11111111-1111-1111-1111-111111111111","productId":"22222222-2222-2222-2222-222222222222","quantity":2,"totalAmount":99.99,"currency":"USD"}
 {"orderId":"33333333-3333-3333-3333-333333333333","trackingNumber":"1Z999AA10123456784","carrier":"UPS"}
 {"orderId":"33333333-3333-3333-3333-333333333333","reason":"Customer request","refundAmount":49.99}
+{"orderId":"33333333-3333-3333-3333-333333333333","buyer":{"customerId":"11111111-1111-1111-1111-111111111111","email":"buyer@example.com","displayName":"Jane Doe"},"shipping":{"line1":"221B Baker Street","line2":null,"city":"London","postalCode":"NW1 6XE","countryCode":"GB"},"payment":{"method":"CARD","amount":149.99,"currency":"GBP"}}
 {"email":"alice@example.com","firstName":"Alice","lastName":"Smith","phoneNumber":"+15551234567"}
 {"customerId":"44444444-4444-4444-4444-444444444444","address":{"line1":"221B Baker Street","city":"London","postalCode":"NW1 6XE","countryCode":"GB"}}
 {"customerId":"44444444-4444-4444-4444-444444444444","previousTier":"BRONZE","newTier":"GOLD"}

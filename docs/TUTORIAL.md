@@ -13,9 +13,11 @@ how one event actually travels from an HTTP request to a consumer, file by file.
 | [`docs/TESTING-GUIDE.md`](TESTING-GUIDE.md) | How do I manually exercise every scenario end to end? |
 | [`docs/adr/0001-code-first-schema-generation.md`](adr/0001-code-first-schema-generation.md), [`spec/code-first-schema.md`](../spec/code-first-schema.md) | Why is the Java record the source of truth instead of the schema? |
 | [`docs/adr/0002-contract-owned-amqp-topology.md`](adr/0002-contract-owned-amqp-topology.md), [`spec/contract-owned-amqp-topology.md`](../spec/contract-owned-amqp-topology.md) | Why does each `*-contracts` module own its own AMQP topology? |
+| [`docs/adr/0007-typemapping-carries-exchange.md`](adr/0007-typemapping-carries-exchange.md) | Why does `TypeMapping` carry the AMQP exchange, and why is publish single-arg? |
+| [`docs/adr/0008-bitsevenhandler-programmatic-listener-registration.md`](adr/0008-bitsevenhandler-programmatic-listener-registration.md) | Why `@BitsEventHandler` instead of `@RabbitListener(queues = ...)`? |
 
 Read this document once, in order. Section 2 gives you the map; section 4 walks one
-event through every file it touches; section 5 tells you the other five events are the
+event through every file it touches; section 5 tells you the other six events are the
 same walk with different names.
 
 ## 1. Orientation
@@ -38,7 +40,7 @@ Registry is the CI/governance tool (register + compat-check), not a runtime depe
 The rest of this doc: section 2 is the module map (what depends on what, and why some
 dependencies are actually forbidden). Section 4 is the main event — a single event
 (`OrderCreated`) traced through every file it touches, from the controller to the
-consumer's `@RabbitListener`, including what happens when something goes wrong.
+consumer's `@BitsEventHandler`, including what happens when something goes wrong.
 
 ## 2. Module Map
 
@@ -48,7 +50,7 @@ The parent POM aggregates 7 submodules:
 |---|---|---|---|---|
 | `schema-messaging-core` | domain-agnostic library | Spring AMQP, Jackson, networknt, `event-contract-kit` (ADR-0006) | `*-contracts` (enforced by `maven-enforcer-plugin`) | runtime |
 | `event-contract-kit` (formerly `amqp-topology-kit`) | domain-agnostic library (leaf) | Spring AMQP only | `schema-messaging-core`, `*-contracts` | runtime |
-| `schema-gen-tools` | build-only schema generator (victools) | `*-contracts` | — | **build-only**, never on a service classpath |
+| `schema-gen-tools` | build-only schema generator (victools) | victools only (dependency-free w.r.t. `*-contracts`, ADR-0003) | — | **build-only**, never on a service classpath |
 | `order-contracts` | contract module | Jackson, jakarta.validation, `spring-rabbit`, `spring-boot-autoconfigure`, `event-contract-kit` | `schema-messaging-core` (enforced by `maven-enforcer-plugin`, ADR-0006) | runtime |
 | `customer-contracts` | contract module (mirror of `order-contracts`) | same as above | same as above | runtime |
 | `producer-service` | Spring Boot app | `schema-messaging-core`, `order-contracts`, `customer-contracts` | — | runtime |
@@ -100,9 +102,10 @@ the `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types, which is why
 
 ### Build tooling
 
-`schema-gen-tools` is a Maven-plugin-invoked generator (victools) that reads the
-contract modules' Java records and writes their `*.schema.json` files at
-`process-classes` time. It is never a runtime dependency of any service — see
+`schema-gen-tools` is a Maven-plugin-invoked generator (victools) that each `*-contracts`
+module calls at `process-classes` via `exec-maven-plugin` — it has no Maven dependency on
+any contracts module (ADR-0003). It reads compiled `@GenerateSchema`-annotated records and
+writes their `*.schema.json` files. It is never a runtime dependency of any service — see
 [ADR-0001](adr/0001-code-first-schema-generation.md) for why the record, not the schema,
 is authored by hand.
 
@@ -123,7 +126,7 @@ in the services themselves.
 ### Services
 
 `producer-service` and `consumer-service` are thin: just controllers (producer) or
-`@RabbitListener` methods (consumer). Per [ADR-0005](adr/0005-contracts-may-depend-on-core.md),
+`@BitsEventHandler` methods (consumer). Per [ADR-0005](adr/0005-contracts-may-depend-on-core.md),
 each domain's `*-contracts` module registers its own `TypeMapping` beans (one per event) via a
 `*TypeMappingAutoConfiguration`, alongside its `*TopologyAutoConfiguration`. Topology, converter,
 and `TypeMapping` wiring all arrive automatically via Spring Boot auto-configuration — there is
@@ -142,18 +145,20 @@ the DLQ. Section 4.8 shows exactly which code makes that decision.
 
 ## 3. Vocabulary You'll See in the Trace
 
-CONTEXT.md's glossary covers business terms (Order, Customer, the six events). This
+CONTEXT.md's glossary covers business terms (Order, Customer, the seven events). This
 table is the code-level vocabulary for section 4 — the classes the walkthrough keeps
 naming, so you don't have to keep looking them up mid-trace.
 
 | Class | Module | Role |
 |---|---|---|
-| `TypeMapping` / `SchemaCoordinates` / `SchemaType` | `event-contract-kit` (ADR-0006) | `TypeMapping` maps a Java type ↔ `SchemaCoordinates` ↔ `SchemaType` ↔ AMQP routing key. One `TypeMapping` bean per event. `SchemaCoordinates` is group/artifact; `SchemaType` is the wire format. |
+| `TypeMapping` / `SchemaCoordinates` / `SchemaType` | `event-contract-kit` (ADR-0006) | `TypeMapping` maps a Java type ↔ `SchemaCoordinates` ↔ `SchemaType` ↔ AMQP routing key ↔ exchange (ADR-0007). One `TypeMapping` bean per event. `SchemaCoordinates` is group/artifact; `SchemaType` is the wire format. |
 | `TypeMappingRegistry` / `ResolvedSchema` | `schema-messaging-core` | `TypeMappingRegistry` indexes every `TypeMapping` bean for O(1) lookup; `ResolvedSchema` is the classpath-loaded schema bytes + type. |
 | `SchemaAwareMessageConverter` | `schema-messaging-core` | The one Spring AMQP `MessageConverter` that does `toMessage`/`fromMessage` for every event — the single validation authority. |
 | `LocalSchemaCatalog` | `schema-messaging-core` | Eagerly loads every mapping's JSON Schema from the classpath at startup; fails fast if missing. |
 | `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. |
-| `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send()`. |
+| `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), ...)`. Caller supplies only the event (ADR-0007). |
+| `BitsEventHandler` | `schema-messaging-core` (ADR-0008) | Marker on listener methods — no queue name or container factory. Queue resolved from the parameter type's `TypeMapping` at startup. |
+| `BitsEventHandlerRegistrar` | `schema-messaging-core` (ADR-0008) | `RabbitListenerConfigurer` that registers `@BitsEventHandler` methods; derives queue via `TopologyNaming.queueName(mapping.routingKey())`. |
 | `DlxRoutingAdvice` | `schema-messaging-core` | AOP advice wrapped around every listener invocation; catches exceptions and hands them to the recoverer. |
 | `DlxMessageRecoverer` | `schema-messaging-core` | Decides DLQ vs. retry-exchange and actually sends the message there. |
 | `EventConsumerSupport` | `schema-messaging-core` | `classify(Exception)` — the permanent-vs-transient decision, by cause-chain walk — and DLQ failure-header population. |
@@ -165,8 +170,8 @@ naming, so you don't have to keep looking them up mid-trace.
 ## 4. Deep Dive: `OrderCreated` End-to-End
 
 We'll trace one event, `OrderCreated`, from an HTTP POST all the way to the consumer's
-`@RabbitListener`, including the failure path. Every other event in this system
-(`OrderShipped`, `OrderCancelled`, and the three customer events) takes an identical
+`@BitsEventHandler`, including the failure path. Every other event in this system
+(`OrderShipped`, `OrderCancelled`, `OrderFulfilled`, and the three customer events) takes an identical
 code path — see section 5.
 
 Roadmap (each numbered step below is one hop):
@@ -176,56 +181,57 @@ Roadmap (each numbered step below is one hop):
 3. The `TypeMapping` bean itself, registered in `order-contracts` via `OrderTypeMappingAutoConfiguration`.
 4. The converter's produce path (`toMessage`): catalog lookup → validate → serialize → stamp headers.
 5. The AMQP topology that the message lands in — declared once at startup, not per-publish.
-6. The consumer's listener container + `@RabbitListener`.
+6. The consumer's listener container + `@BitsEventHandler`.
 7. The converter's consume path (`fromMessage`): read headers → catalog lookup → validate → deserialize.
 8. What happens when any of the above throws — the DLX/retry routing decision.
 
 ### 4.1 HTTP entrypoint
 
-`producer-service/src/main/java/com/example/producer/controller/OrderController.java:48-59`:
+`producer-service/src/main/java/com/example/producer/controller/OrderController.java:50-62`:
 
 ```java
 public void createOrder(@RequestBody CreateOrderRequest request) {
     ...
-    eventPublisher.publish(OrderEventRouting.EXCHANGE, event);
+    eventPublisher.publish(event);
 }
 ```
 
 The controller builds the `OrderCreated` record from the request body and delegates
 everything else — validation, serialization, header population, sending — to
 `eventPublisher.publish()`. There's no manual field-checking here; validation happens
-against the schema, not in the controller.
+against the schema, not in the controller. The exchange is not passed at the call site —
+`EventPublisher` reads it from the event's `TypeMapping` (ADR-0007).
 
 ### 4.2 Publish
 
 `schema-messaging-core/src/main/java/com/example/messaging/core/publisher/EventPublisher.java:42-53`:
 
 ```java
-public void publish(String exchange, Object event) {
+public void publish(Object event) {
     TypeMapping mapping = typeMappingRegistry.findByJavaType(event.getClass())
             .orElseThrow(...);
 
     MessageProperties props = new MessageProperties();
     Message message = messageConverter.toMessage(event, props);
 
-    rabbitTemplate.send(exchange, mapping.routingKey(), message);
+    rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), message);
 }
 ```
 
 Three steps: look up the `TypeMapping` for this Java type, run it through the converter
-(section 4.4 — this is where validation happens), send it to the exchange using the
-routing key from the `TypeMapping`.
+(section 4.4 — this is where validation happens), send to the exchange and routing key
+both taken from the `TypeMapping`.
 
 ### 4.3 Where the `TypeMapping` bean comes from
 
-`order-contracts/src/main/java/com/example/contracts/orders/topology/OrderTypeMappingAutoConfiguration.java:30-35`:
+`order-contracts/src/main/java/com/example/contracts/orders/topology/OrderTypeMappingAutoConfiguration.java:31-36`:
 
 ```java
 @Bean("orderCreatedMapping")
 @ConditionalOnMissingBean(name = "orderCreatedMapping")
 public TypeMapping orderCreatedMapping() {
     return new TypeMapping(OrderCreated.class, coords("OrderCreated"),
-            SchemaType.JSON, OrderEventRouting.CREATED_ROUTING_KEY);
+            SchemaType.JSON, OrderEventRouting.CREATED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
 }
 ```
 
@@ -272,7 +278,7 @@ sequenceDiagram
     participant JS as JsonSchemaStrategy
     participant RT as RabbitTemplate / Broker
 
-    C->>P: publish(exchange, OrderCreated)
+    C->>P: publish(OrderCreated)
     P->>TM: findByJavaType(OrderCreated.class)
     TM-->>P: TypeMapping
     P->>JS: toMessage(event) [via converter]
@@ -284,7 +290,7 @@ sequenceDiagram
         Note over P: no message sent, publish call fails
     else validation passes
         JS-->>P: Message with X-Schema-* headers
-        P->>RT: send(exchange, routingKey, message)
+        P->>RT: send(mapping.exchange(), routingKey, message)
     end
 ```
 
@@ -293,14 +299,15 @@ sequenceDiagram
 This didn't happen at publish time — it happened once, at consumer startup.
 `order-contracts/.../topology/OrderTopologyAutoConfiguration.java:31-67` declares three
 `TopicExchange` beans (`events.orders.exchange`, `.dlx`, `.retry.exchange`, lines 31-47),
-then for each of the three order routing keys calls
+then for each of the four order routing keys calls
 `EventTopologyFactory.declarablesForEvent()` (line 63):
 
 ```java
 for (String routingKey : List.of(
         OrderEventRouting.CREATED_ROUTING_KEY,
         OrderEventRouting.SHIPPED_ROUTING_KEY,
-        OrderEventRouting.CANCELLED_ROUTING_KEY)) {
+        OrderEventRouting.CANCELLED_ROUTING_KEY,
+        OrderEventRouting.FULFILLED_ROUTING_KEY)) {
     declarables.addAll(EventTopologyFactory.declarablesForEvent(
             routingKey, ordersExchange, ordersDlx, ordersRetryExchange, tierTtls));
 }
@@ -313,31 +320,36 @@ builds, per routing key: the main queue + binding (`TopologyNaming.queueName`, e
 `TopologyNaming.retryRoutingKey`). This is `@AutoConfiguration` — no service writes any
 topology code itself. The declared beans are picked up and idempotently applied to the
 broker on startup by the shared `RabbitAdmin` bean
-(`SchemaMessagingConsumerAutoConfiguration.java:42-46`).
+(`SchemaMessagingConsumerAutoConfiguration.java:47-51`).
 
-Adding a fourth order event means adding one routing key to that `List.of(...)` — the
+`OrderEventRouting` no longer exposes `*_QUEUE` constants — queue names are derived at
+listener registration time via `TopologyNaming.queueName(routingKey)` (ADR-0008). Adding a
+fifth order event means adding one routing key to that `List.of(...)` — the
 queue/DLQ/retry-ladder for it is generated automatically.
 
 ### 4.6 Consumer wiring
 
-`SchemaMessagingConsumerAutoConfiguration.java:63-75` builds the
+`SchemaMessagingConsumerAutoConfiguration.java:68-88` builds the
 `rabbitListenerContainerFactory` bean, wiring in the *same*
 `SchemaAwareMessageConverter` used on the producer side, plus a `DlxRoutingAdvice`
-advice chain (section 4.8).
+advice chain (section 4.8). It also registers `BitsEventHandlerRegistrar`, which
+implements `RabbitListenerConfigurer` and programmatically binds every `@BitsEventHandler`
+method to the queue named by its parameter type's `TypeMapping`.
 
-`consumer-service/src/main/java/com/example/consumer/listener/OrderEventListener.java:23-28`:
+`consumer-service/src/main/java/com/example/consumer/listener/OrderEventListener.java:25-28`:
 
 ```java
-@RabbitListener(queues = OrderEventRouting.CREATED_QUEUE,
-                containerFactory = "rabbitListenerContainerFactory")
+@BitsEventHandler
 public void onOrderCreated(OrderCreated event) {
     log.info("Received OrderCreated orderId={} ...", event.orderId(), ...);
 }
 ```
 
-Spring AMQP calls `fromMessage()` on the raw bytes *before* this method body ever runs —
-by the time `onOrderCreated` executes, `event` is already a validated, typed
-`OrderCreated` record.
+At startup, `BitsEventHandlerRegistrar` resolves `OrderCreated.class` → `TypeMapping` →
+`TopologyNaming.queueName("orders.created")` → `orders.created.queue`, then registers
+the method against the shared `rabbitListenerContainerFactory`. Spring AMQP calls
+`fromMessage()` on the raw bytes *before* this method body ever runs — by the time
+`onOrderCreated` executes, `event` is already a validated, typed `OrderCreated` record.
 
 ### 4.7 Convert: consume path
 
@@ -461,9 +473,9 @@ any `*-contracts` module (see [ADR-0002](adr/0002-contract-owned-amqp-topology.m
 broker, run [`docs/TESTING-GUIDE.md`](TESTING-GUIDE.md) §8 (happy path), §9 (validation
 failure), §10 (DLQ), and §11 (retry ladder).
 
-## 5. The Other Five Events
+## 5. The Other Six Events
 
-`OrderShipped`, `OrderCancelled`, and the three customer events
+`OrderShipped`, `OrderCancelled`, `OrderFulfilled`, and the three customer events
 (`CustomerRegistered`, `CustomerAddressAdded`, `CustomerTierChanged`) all go through
 *exactly* the same classes traced in section 4. Only the record shape, routing key, and
 exchange group differ:
@@ -473,16 +485,21 @@ exchange group differ:
 | `OrderCreated` | `order-contracts` | `orders.created` | `events.orders.exchange` |
 | `OrderShipped` | `order-contracts` | `orders.shipped` | `events.orders.exchange` |
 | `OrderCancelled` | `order-contracts` | `orders.cancelled` | `events.orders.exchange` |
+| `OrderFulfilled` | `order-contracts` | `orders.fulfilled` | `events.orders.exchange` |
 | `CustomerRegistered` | `customer-contracts` | `customers.registered` | `events.customers.exchange` |
 | `CustomerAddressAdded` | `customer-contracts` | `customers.address-added` | `events.customers.exchange` |
 | `CustomerTierChanged` | `customer-contracts` | `customers.tier-changed` | `events.customers.exchange` |
 
+`OrderFulfilled` is the nested-object example: it carries three value objects
+(`OrderBuyer`, `ShippingAddress`, `PaymentDetails`) inlined into the generated schema —
+see `order-contracts/.../OrderFulfilled.java`.
+
 `CustomerTopologyAutoConfiguration` is the exact mirror of
 `OrderTopologyAutoConfiguration` (section 4.5) for the customer domain. If you
-understand section 4, you understand all six events — the only new code you'd write
-for a seventh event is a new record, a routing-key constant, one `TypeMapping` bean, one
-line in the topology auto-configuration's routing-key list, and one `@RabbitListener`
-method.
+understand section 4, you understand all seven events — the only new code you'd write
+for an eighth event is a new record (plus nested types if needed), a routing-key constant,
+one `TypeMapping` bean, one line in the topology auto-configuration's routing-key list,
+and one `@BitsEventHandler` method.
 
 ## 6. Where to Go Next
 

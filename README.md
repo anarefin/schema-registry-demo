@@ -1,10 +1,10 @@
-# Schema Registry POC — Apicurio + RabbitMQ + Spring Boot 4.0
+# Schema Registry POC — Apicurio + RabbitMQ + Spring Boot 4.1
 
 End-to-end schema-governed messaging: **Apicurio Registry 3.2.0** as schema source of truth,
-**RabbitMQ** as transport, two **Spring Boot 4.0** services on **Java 25**. Demonstrates JSON
-Schema message flows (orders + customers), schema-compatibility governance as a CI merge gate
-(FORWARD — see §2 for why JSON Schema artifacts use FORWARD), and a full DLX/DLQ/retry failure
-topology.
+**RabbitMQ** as transport, two **Spring Boot 4.1** services on **Java 25**. Demonstrates JSON
+Schema message flows (four order events + three customer events), schema-compatibility governance
+as a CI merge gate (FORWARD — see §2 for why JSON Schema artifacts use FORWARD), and a full
+DLX/DLQ/retry failure topology.
 
 ---
 
@@ -13,8 +13,8 @@ topology.
 | Spec §18 criterion | Demonstrated by |
 |---|---|
 | Cold `compose up` → all services healthy | `docker compose up --build`, healthchecks |
-| Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs (all six events) |
-| Six artifacts with FORWARD compat rules | `apicurio-registry:register` + bootstrap workflow |
+| Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs (all seven events) |
+| Seven artifacts with FORWARD compat rules | `apicurio-registry:register` + bootstrap workflow |
 | Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
 | Missing/malformed local schema → service fails to start | `LocalSchemaCatalog` eager load, see ADR-0004 |
@@ -63,8 +63,8 @@ again after any code change before re-running this:
 | `apicurio` | 8080 | Registry API |
 | `apicurio-ui` | 8888 | Registry UI |
 | `rabbitmq` | 5672 / 15672 | AMQP + management UI |
-| `producer-service` | 8081 | REST endpoints for all six events |
-| `consumer-service` | 8082 | `@RabbitListener`s + `/actuator/health` |
+| `producer-service` | 8081 | REST endpoints for all seven events |
+| `consumer-service` | 8082 | `@BitsEventHandler` listeners + `/actuator/health` |
 
 Schema registration is **not** a compose service — it's a host-Maven step. The contracts modules
 already carry the `apicurio-registry-maven-plugin`, so once Apicurio is healthy you register both
@@ -76,7 +76,7 @@ JSON Schema checker, adding a property (even an optional/permissive one) is clas
 under FORWARD.
 
 ```bash
-# 1. Register all six schemas (three per domain — generated from code-first records)
+# 1. Register all seven schemas (four orders + three customers — generated from code-first records)
 ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
        -Dapicurio.registry.url=http://localhost:8080
 
@@ -86,6 +86,7 @@ for pair in \
   events.orders/OrderCreated \
   events.orders/OrderShipped \
   events.orders/OrderCancelled \
+  events.orders/OrderFulfilled \
   events.customers/CustomerRegistered \
   events.customers/CustomerAddressAdded \
   events.customers/CustomerTierChanged; do
@@ -116,9 +117,9 @@ instead, in its own terminal (stop the equivalent compose container first to fre
 
 ### 4. Demo: publish messages
 
-All six events have REST endpoints on the producer (:8081). Each maps a request DTO to the
-code-first record and publishes via `EventPublisher`; `SchemaAwareMessageConverter` validates
-before send.
+All seven events have REST endpoints on the producer (:8081). Each maps a request DTO to the
+code-first record and publishes via `EventPublisher.publish(event)` — exchange and routing key
+come from the event's `TypeMapping` (ADR-0007); `SchemaAwareMessageConverter` validates before send.
 
 ```bash
 # --- Orders (events.orders) ---
@@ -133,6 +134,10 @@ curl -s -X POST http://localhost:8081/api/orders/ship \
 curl -s -X POST http://localhost:8081/api/orders/cancel \
   -H "Content-Type: application/json" \
   -d '{"orderId":"33333333-3333-3333-3333-333333333333","reason":"Customer request","refundAmount":49.99}'
+
+curl -s -X POST http://localhost:8081/api/orders/fulfill \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"33333333-3333-3333-3333-333333333333","buyer":{"customerId":"11111111-1111-1111-1111-111111111111","email":"buyer@example.com","displayName":"Jane Doe"},"shipping":{"line1":"221B Baker Street","line2":null,"city":"London","postalCode":"NW1 6XE","countryCode":"GB"},"payment":{"method":"CARD","amount":149.99,"currency":"GBP"}}'
 
 # --- Customers (events.customers) ---
 curl -s -X POST http://localhost:8081/api/customers \
@@ -169,14 +174,14 @@ curl -s -X POST http://localhost:8081/api/customers \
 curl -s -X POST http://localhost:8081/api/orders/poison
 ```
 
-Consumer fails schema validation (unparseable JSON) → `SchemaValidationException` → **no retry** → `orders.created.dlq`.
+Consumer fails to parse the JSON → `DeserializationException` → **no retry** → `orders.created.dlq`.
 In RabbitMQ management UI (http://localhost:15672, guest/guest) browse `orders.created.dlq` to
 inspect all `X-Failure-*` headers (reason, message, stack trace truncated to 4 KB, original
 routing key, failed-at, retry-count).
 
 ### 7. Demo: schema evolution — accept and reject
 
-**Accepted:** add an optional property to a record — FORWARD-compatible for all six artifacts.
+**Accepted:** add an optional property to a record — FORWARD-compatible for all seven artifacts.
 Regenerate the schema (`./mvnw -pl order-contracts,customer-contracts -am process-classes`), commit, then register.
 
 ```bash
@@ -272,15 +277,15 @@ sequenceDiagram
 sequenceDiagram
     participant C as Client
     participant P as ProducerService
-    participant A as ApicurioRegistry
+    participant L as LocalSchemaCatalog
 
     C->>P: POST /api/customers {missing required fields}
-    P->>A: resolve schema
-    A-->>P: JSON Schema
+    P->>L: get(SchemaCoordinates)
+    L-->>P: ResolvedSchema (pre-loaded, in-process)
     P->>P: networknt validate → FAIL
     P->>P: throw SchemaValidationException
     P-->>C: 400 Bad Request (no message emitted)
-    Note over P,A: RabbitMQ never sees the message
+    Note over P: RabbitMQ never sees the message
 ```
 
 ---
