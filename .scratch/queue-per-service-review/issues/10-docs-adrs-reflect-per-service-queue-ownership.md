@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] CLAUDE.md no longer states core "owns no AMQP topology" without qualifying per-service queue ownership
-- [ ] CONTEXT.md and TUTORIAL.md topology sections match the contracts-own-exchanges / core-own-queues split
-- [ ] Dangling references to deleted ADRs (0004–0008) and stale TODO entries are removed or updated
-- [ ] Architecture description is consistent across all touched docs — no contradictory ownership claims
+- [x] CLAUDE.md no longer states core "owns no AMQP topology" without qualifying per-service queue ownership
+- [x] CONTEXT.md and TUTORIAL.md topology sections match the contracts-own-exchanges / core-own-queues split
+- [x] Dangling references to deleted ADRs (0004–0008) and stale TODO entries are removed or updated
+- [x] Architecture description is consistent across all touched docs — no contradictory ownership claims
