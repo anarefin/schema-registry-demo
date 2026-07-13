@@ -50,6 +50,32 @@ class EventTopologyFactoryTest {
     }
 
     @Test
+    void serviceMainQueueDeadLettersToDomainDlxWithDlqRoutingKey() {
+        List<Declarable> declarables = EventTopologyFactory.declarablesForEvent(
+                "orders.created", "consumer-service", MAIN_EXCHANGE, DLX, RETRY_EXCHANGE, TIER_TTLS_MS);
+
+        Queue mainQueue = declarables.stream()
+                .filter(Queue.class::isInstance).map(Queue.class::cast)
+                .filter(q -> q.getName().equals("orders.created.consumer-service.queue"))
+                .findFirst()
+                .orElseThrow();
+
+        String dlqRoutingKey = TopologyNaming.serviceDlqRoutingKey("orders.created", "consumer-service");
+        assertThat(mainQueue.getArguments().get("x-dead-letter-exchange")).isEqualTo("events.orders.dlx");
+        assertThat(mainQueue.getArguments().get("x-dead-letter-routing-key")).isEqualTo(dlqRoutingKey);
+
+        // Broker dead-letter from the main queue must land on the service DLQ — same routing key as
+        // the DLQ binding, so a recover() failure that nacks the message is not silently discarded.
+        Binding dlqBinding = declarables.stream()
+                .filter(Binding.class::isInstance).map(Binding.class::cast)
+                .filter(b -> b.getDestination().equals("orders.created.consumer-service.dlq"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(dlqBinding.getExchange()).isEqualTo("events.orders.dlx");
+        assertThat(dlqBinding.getRoutingKey()).isEqualTo(dlqRoutingKey);
+    }
+
+    @Test
     void serviceRetryQueueDeadLettersBackToMainExchangeWithServiceScopedRoutingKey() {
         Queue retryQueue = EventTopologyFactory.serviceRetryQueue(
                 "orders.created", "consumer-service", 0, 5000L, MAIN_EXCHANGE.getName());

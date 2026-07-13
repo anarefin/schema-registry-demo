@@ -45,7 +45,10 @@ public final class EventTopologyFactory {
         List<Declarable> declarables = new ArrayList<>();
         String serviceRoutingKey = TopologyNaming.serviceRoutingKey(routingKey, serviceName);
 
-        Queue mainQueue = QueueBuilder.durable(TopologyNaming.serviceQueueName(routingKey, serviceName)).build();
+        Queue mainQueue = QueueBuilder.durable(TopologyNaming.serviceQueueName(routingKey, serviceName))
+                .deadLetterExchange(dlx.getName())
+                .deadLetterRoutingKey(TopologyNaming.serviceDlqRoutingKey(routingKey, serviceName))
+                .build();
         declarables.add(mainQueue);
         // Plain routing key: fan-out binding so every subscribed service gets its own copy of a
         // freshly published event. Service-scoped key: private binding so a retry-tier TTL expiry
