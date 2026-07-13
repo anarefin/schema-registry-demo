@@ -45,6 +45,11 @@ public class DlxMessageRecoverer implements MessageRecoverer {
         this.serviceName = serviceName;
     }
 
+    /** Exposed so tests can verify this recoverer shares a single {@code RetryTierProperties} source. */
+    public long[] retryDelaysMs() {
+        return retryDelaysMs.clone();
+    }
+
     @Override
     public void recover(Message message, Throwable cause) {
         Exception ex = cause instanceof Exception e ? e : new RuntimeException(cause);

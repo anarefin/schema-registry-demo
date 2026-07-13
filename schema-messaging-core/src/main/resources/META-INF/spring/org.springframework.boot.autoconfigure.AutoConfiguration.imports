@@ -1,3 +1,4 @@
 com.example.messaging.core.config.SchemaMessagingAutoConfiguration
+com.example.messaging.core.config.RetryTierPropertiesAutoConfiguration
 com.example.messaging.core.config.SchemaMessagingConsumerAutoConfiguration
 com.example.messaging.core.config.ServiceQueueTopologyAutoConfiguration

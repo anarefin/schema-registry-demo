@@ -28,7 +28,7 @@ import java.util.Set;
  * registered handlers are provisioned — producer services with no listeners declare nothing,
  * avoiding accidental fan-out copies on the topic exchange.
  */
-@AutoConfiguration(after = SchemaMessagingConsumerAutoConfiguration.class)
+@AutoConfiguration(after = {SchemaMessagingConsumerAutoConfiguration.class, RetryTierPropertiesAutoConfiguration.class})
 public class ServiceQueueTopologyAutoConfiguration {
 
     @Bean
@@ -37,12 +37,9 @@ public class ServiceQueueTopologyAutoConfiguration {
             TypeMappingRegistry typeMappingRegistry,
             RabbitAdmin rabbitAdmin,
             @Value("${spring.application.name}") String serviceName,
-            @Value("${events.retry.tier0.ms:5000}") long tier0Ms,
-            @Value("${events.retry.tier1.ms:30000}") long tier1Ms,
-            @Value("${events.retry.tier2.ms:300000}") long tier2Ms) {
-        long[] tierTtls = {tier0Ms, tier1Ms, tier2Ms};
+            RetryTierProperties retryTierProperties) {
         return new ServiceQueueTopologyConfigurer(
-                applicationContext, typeMappingRegistry, rabbitAdmin, serviceName, tierTtls);
+                applicationContext, typeMappingRegistry, rabbitAdmin, serviceName, retryTierProperties.toArray());
     }
 
     static class ServiceQueueTopologyConfigurer implements SmartInitializingSingleton {
@@ -64,6 +61,11 @@ public class ServiceQueueTopologyAutoConfiguration {
             this.rabbitAdmin = rabbitAdmin;
             this.serviceName = serviceName;
             this.tierTtls = tierTtls;
+        }
+
+        /** Exposed so tests can verify this configurer shares a single {@code RetryTierProperties} source. */
+        long[] tierTtls() {
+            return tierTtls;
         }
 
         @Override

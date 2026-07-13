@@ -9,6 +9,7 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -22,6 +23,17 @@ class DlxMessageRecovererTest {
 
     @Mock private EventConsumerSupport consumerSupport;
     @Mock private RabbitTemplate rabbitTemplate;
+
+    @Test
+    void retryDelaysMs_returnsDefensiveCopy_mutatingReturnedArrayDoesNotAffectRecoverer() {
+        DlxMessageRecoverer recoverer = new DlxMessageRecoverer(
+                consumerSupport, rabbitTemplate, new long[]{5_000, 30_000, 300_000}, SERVICE_NAME);
+
+        long[] exposed = recoverer.retryDelaysMs();
+        exposed[0] = 999_999;
+
+        assertThat(recoverer.retryDelaysMs()[0]).isEqualTo(5_000);
+    }
 
     @Test
     void recover_nullReceivedExchange_throwsIllegalState() {

@@ -36,13 +36,13 @@ import org.springframework.context.annotation.Bean;
  * declared by that domain's {@code *-contracts} module. There is no single global DLX/retry
  * exchange to configure here — {@code DlxMessageRecoverer} derives the correct per-domain
  * exchange from each message's received exchange instead.
+ *
+ * <p>Retry tier TTLs are bound once by {@link RetryTierPropertiesAutoConfiguration}, not
+ * re-declared here — see {@link RetryTierProperties}.
  */
-@AutoConfiguration(after = SchemaMessagingAutoConfiguration.class)
+@AutoConfiguration(after = {SchemaMessagingAutoConfiguration.class, RetryTierPropertiesAutoConfiguration.class})
 public class SchemaMessagingConsumerAutoConfiguration {
 
-    @Value("${events.retry.tier0.ms:5000}")   private long tier0Ms;
-    @Value("${events.retry.tier1.ms:30000}")  private long tier1Ms;
-    @Value("${events.retry.tier2.ms:300000}") private long tier2Ms;
     @Value("${spring.application.name}") private String serviceName;
 
     @Bean
@@ -55,9 +55,9 @@ public class SchemaMessagingConsumerAutoConfiguration {
     @ConditionalOnMissingBean
     public DlxMessageRecoverer dlxMessageRecoverer(
             EventConsumerSupport consumerSupport,
-            RabbitTemplate rabbitTemplate) {
-        long[] delays = {tier0Ms, tier1Ms, tier2Ms};
-        return new DlxMessageRecoverer(consumerSupport, rabbitTemplate, delays, serviceName);
+            RabbitTemplate rabbitTemplate,
+            RetryTierProperties retryTierProperties) {
+        return new DlxMessageRecoverer(consumerSupport, rabbitTemplate, retryTierProperties.toArray(), serviceName);
     }
 
     @Bean
