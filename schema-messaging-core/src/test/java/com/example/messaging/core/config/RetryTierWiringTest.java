@@ -2,6 +2,7 @@ package com.example.messaging.core.config;
 
 import com.example.messaging.core.consumer.DlxMessageRecoverer;
 import com.example.messaging.core.consumer.EventConsumerSupport;
+import com.example.messaging.core.consumer.HandledEventTypesCache;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.junit.jupiter.api.Test;
@@ -10,7 +11,6 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.context.ApplicationContext;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -32,8 +32,7 @@ class RetryTierWiringTest {
 
         ServiceQueueTopologyAutoConfiguration.ServiceQueueTopologyConfigurer configurer =
                 new ServiceQueueTopologyAutoConfiguration().serviceQueueTopologyConfigurer(
-                        mock(ApplicationContext.class),
-                        mock(TypeMappingRegistry.class),
+                        mock(HandledEventTypesCache.class),
                         mock(RabbitAdmin.class),
                         "consumer-service",
                         sharedProperties);

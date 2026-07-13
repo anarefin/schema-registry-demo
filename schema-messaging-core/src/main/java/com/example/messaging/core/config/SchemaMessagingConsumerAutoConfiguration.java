@@ -4,6 +4,7 @@ import com.example.messaging.core.consumer.BitsEventHandlerRegistrar;
 import com.example.messaging.core.consumer.DlxMessageRecoverer;
 import com.example.messaging.core.consumer.DlxRoutingAdvice;
 import com.example.messaging.core.consumer.EventConsumerSupport;
+import com.example.messaging.core.consumer.HandledEventTypesCache;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
@@ -30,6 +31,8 @@ import org.springframework.context.annotation.Bean;
  *       schema-aware converter and DLX routing advice.</li>
  *   <li>{@code BitsEventHandlerRegistrar} — registers {@code @BitsEventHandler} methods as
  *       listener endpoints, resolving their queue from the event's {@code TypeMapping}.</li>
+ *   <li>{@code HandledEventTypesCache} — computes the handled {@code TypeMapping} set once and
+ *       shares it with topology declaration and the queue depth health indicator.</li>
  * </ul>
  *
  * <p>Each domain now owns its own DLX/retry exchange (spec: contract-owned-amqp-topology.md),
@@ -86,5 +89,13 @@ public class SchemaMessagingConsumerAutoConfiguration {
             ApplicationContext applicationContext,
             TypeMappingRegistry typeMappingRegistry) {
         return new BitsEventHandlerRegistrar(applicationContext, typeMappingRegistry, serviceName);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public HandledEventTypesCache handledEventTypesCache(
+            ApplicationContext applicationContext,
+            TypeMappingRegistry typeMappingRegistry) {
+        return new HandledEventTypesCache(applicationContext, typeMappingRegistry);
     }
 }

@@ -4,8 +4,7 @@ import com.example.amqp.topology.EventTopologyFactory;
 import com.example.amqp.topology.TopologyNaming;
 import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.consumer.BitsEventHandler;
-import com.example.messaging.core.consumer.BitsEventHandlerScanner;
-import com.example.messaging.core.mapping.TypeMappingRegistry;
+import com.example.messaging.core.consumer.HandledEventTypesCache;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.Declarable;
 import org.springframework.amqp.core.Queue;
@@ -14,7 +13,6 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 
 import java.util.List;
@@ -33,31 +31,27 @@ public class ServiceQueueTopologyAutoConfiguration {
 
     @Bean
     ServiceQueueTopologyConfigurer serviceQueueTopologyConfigurer(
-            ApplicationContext applicationContext,
-            TypeMappingRegistry typeMappingRegistry,
+            HandledEventTypesCache handledEventTypesCache,
             RabbitAdmin rabbitAdmin,
             @Value("${spring.application.name}") String serviceName,
             RetryTierProperties retryTierProperties) {
         return new ServiceQueueTopologyConfigurer(
-                applicationContext, typeMappingRegistry, rabbitAdmin, serviceName, retryTierProperties.toArray());
+                handledEventTypesCache, rabbitAdmin, serviceName, retryTierProperties.toArray());
     }
 
     static class ServiceQueueTopologyConfigurer implements SmartInitializingSingleton {
 
-        private final ApplicationContext applicationContext;
-        private final TypeMappingRegistry typeMappingRegistry;
+        private final HandledEventTypesCache handledEventTypesCache;
         private final RabbitAdmin rabbitAdmin;
         private final String serviceName;
         private final long[] tierTtls;
 
         ServiceQueueTopologyConfigurer(
-                ApplicationContext applicationContext,
-                TypeMappingRegistry typeMappingRegistry,
+                HandledEventTypesCache handledEventTypesCache,
                 RabbitAdmin rabbitAdmin,
                 String serviceName,
                 long[] tierTtls) {
-            this.applicationContext = applicationContext;
-            this.typeMappingRegistry = typeMappingRegistry;
+            this.handledEventTypesCache = handledEventTypesCache;
             this.rabbitAdmin = rabbitAdmin;
             this.serviceName = serviceName;
             this.tierTtls = tierTtls;
@@ -70,8 +64,7 @@ public class ServiceQueueTopologyAutoConfiguration {
 
         @Override
         public void afterSingletonsInstantiated() {
-            Set<TypeMapping> handlerMappings =
-                    BitsEventHandlerScanner.discoverHandledTypeMappings(applicationContext, typeMappingRegistry);
+            Set<TypeMapping> handlerMappings = handledEventTypesCache.handledTypeMappings();
             if (handlerMappings.isEmpty()) {
                 return;
             }
