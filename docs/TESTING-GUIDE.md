@@ -8,7 +8,7 @@ exact expected output/assertion for each step, and covers scenarios the README i
 skips for brevity (the retry ladder, DLQ health, startup fail-fast for missing classpath schemas,
 and a structural walkthrough of the four CI workflows).
 
-Runtime validation uses classpath schemas via `LocalSchemaCatalog` (ADR-0004) — producer/consumer
+Runtime validation uses classpath schemas via `LocalSchemaCatalog` — producer/consumer
 never call Apicurio at runtime. Apicurio remains the CI/governance tool (register + compat-check).
 
 Work through the sections in order — later sections (evolution, CI) assume the infrastructure and
@@ -218,7 +218,7 @@ curl -s localhost:8082/actuator/health | jq
 
 With `show-details: always` and `show-components: always`, the consumer shows a
 `components.queueDepth` entry (from `QueueDepthHealthIndicator`) with `status: UP` (no DLQ has
-messages yet). There is no runtime registry health component — Apicurio is CI-only (ADR-0004).
+messages yet). There is no runtime registry health component — Apicurio is CI-only.
 
 **What you verified:** both services start cleanly against RabbitMQ (and a live registry is only
 needed later for governance curls), and queue-depth health is wired before you send any traffic.
@@ -281,7 +281,7 @@ message properties should show:
 | `X-Correlation-Id` | a UUID |
 | content-type | `application/json` |
 
-(No `X-Schema-GlobalId` / `X-Schema-Version` — runtime identity is group + artifact only, ADR-0004.)
+(No `X-Schema-GlobalId` / `X-Schema-Version` — runtime identity is group + artifact only.)
 
 Body is the **raw JSON only** — no envelope wrapper.
 
@@ -373,7 +373,7 @@ retry exhaustion still lands on the DLQ, and the queue-hop sequence matches the 
 
 ## 12. Startup fail-fast — missing classpath schema
 
-Runtime schema pinning / Apicurio auto-register are gone (ADR-0004). Fail-fast is now: every
+Runtime schema pinning / Apicurio auto-register are gone. Fail-fast is now: every
 `TypeMapping` must have a matching `schemas/<kebab-name>.schema.json` on the classpath, or
 `LocalSchemaCatalog` aborts context refresh.
 
@@ -472,7 +472,7 @@ two are operational/one-shot (`schema-governance-bootstrap`, `schema-register`) 
 
 ## 17. Health-indicator failure scenarios
 
-There is no runtime registry health probe (ADR-0004). Remaining scenario:
+There is no runtime registry health probe. Remaining scenario:
 
 **DLQ has messages:**
 

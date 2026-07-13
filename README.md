@@ -17,7 +17,7 @@ DLX/DLQ/retry failure topology.
 | Seven artifacts with FORWARD compat rules | `apicurio-registry:register` + bootstrap workflow |
 | Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
-| Missing/malformed local schema → service fails to start | `LocalSchemaCatalog` eager load, see ADR-0004 |
+| Missing/malformed local schema → service fails to start | `LocalSchemaCatalog` eager load (classpath validation) |
 | Producer/consumer runtime has zero dependency on Apicurio | `docker compose up rabbitmq producer-service consumer-service` (no Apicurio/Postgres) still processes messages |
 | README walkthrough on fresh clone in under 15 min | This file |
 
@@ -119,7 +119,7 @@ instead, in its own terminal (stop the equivalent compose container first to fre
 
 All seven events have REST endpoints on the producer (:8081). Each maps a request DTO to the
 code-first record and publishes via `EventPublisher.publish(event)` — exchange and routing key
-come from the event's `TypeMapping` (ADR-0007); `SchemaAwareMessageConverter` validates before send.
+come from the event's `TypeMapping`; `SchemaAwareMessageConverter` validates before send.
 
 ```bash
 # --- Orders (events.orders) ---
@@ -359,8 +359,8 @@ They are not appropriate for production use as-is.
 | Shortcut | POC rationale | Production path |
 |---|---|---|
 | No consumer-side deduplication (honest at-least-once delivery) | Keeps the consumer stateless; no distributed dedup store | Redis / database deduplication store keyed on a producer-supplied message id |
-| Single-instance Apicurio Registry (no HA) | Simplifies compose topology; Apicurio is CI/governance-only, not a runtime dependency (ADR-0004) | Multi-node Apicurio behind a load balancer, connection pooling |
-| No schema hot-swap without redeploy | Schemas are baked into the contracts JAR at build time (`LocalSchemaCatalog`, ADR-0004) | If live schema updates are needed, reintroduce a registry-backed resolution path with appropriate caching |
+| Single-instance Apicurio Registry (no HA) | Simplifies compose topology; Apicurio is CI/governance-only, not a runtime dependency | Multi-node Apicurio behind a load balancer, connection pooling |
+| No schema hot-swap without redeploy | Schemas are baked into the contracts JAR at build time (`LocalSchemaCatalog`) | If live schema updates are needed, reintroduce a registry-backed resolution path with appropriate caching |
 | Schema registration is a manual host-Maven step after `docker compose up` | Keeps the build single-source (no second Maven toolchain in a container) | CI: run `apicurio-registry:register` + rule attachment as a dedicated post-deploy Maven step with a populated cache layer |
 
 ---

@@ -11,10 +11,7 @@ how one event actually travels from an HTTP request to a consumer, file by file.
 | [`README.md`](../README.md) | How do I build and run it in 15 minutes? |
 | [`CONTEXT.md`](../CONTEXT.md) | What do these domain terms mean? |
 | [`docs/TESTING-GUIDE.md`](TESTING-GUIDE.md) | How do I manually exercise every scenario end to end? |
-| [`docs/adr/0001-code-first-schema-generation.md`](adr/0001-code-first-schema-generation.md), [`spec/code-first-schema.md`](../spec/code-first-schema.md) | Why is the Java record the source of truth instead of the schema? |
-| [`docs/adr/0002-contract-owned-amqp-topology.md`](adr/0002-contract-owned-amqp-topology.md), [`spec/contract-owned-amqp-topology.md`](../spec/contract-owned-amqp-topology.md) | Why does each `*-contracts` module own its own AMQP topology? |
-| [`docs/adr/0007-typemapping-carries-exchange.md`](adr/0007-typemapping-carries-exchange.md) | Why does `TypeMapping` carry the AMQP exchange, and why is publish single-arg? |
-| [`docs/adr/0008-bitsevenhandler-programmatic-listener-registration.md`](adr/0008-bitsevenhandler-programmatic-listener-registration.md) | Why `@BitsEventHandler` instead of `@RabbitListener(queues = ...)`? |
+| [`docs/TUTORIAL.md`](TUTORIAL.md) §2, §4.5 | How is AMQP topology split between contracts (exchanges) and core (per-service queues)? |
 
 Read this document once, in order. Section 2 gives you the map; section 4 walks one
 event through every file it touches; section 5 tells you the other six events are the
@@ -26,7 +23,8 @@ This repo demonstrates **schema-governed messaging**: a producer and a consumer 
 share **no compile-time dependency** on each other, only a runtime contract enforced by
 classpath JSON Schemas (generated at build time) and a shared message converter. Apicurio
 Registry is the CI/governance tool (register + compat-check), not a runtime dependency
-(ADR-0004). Neither service imports the other's code. What keeps them compatible is:
+(local classpath validation via `LocalSchemaCatalog`). Neither service imports the other's code.
+What keeps them compatible is:
 
 1. Both depend on the same `*-contracts` module (e.g. `order-contracts`), which is the
    single source of truth for an event's shape (a Java **record**) and its generated
@@ -48,10 +46,10 @@ The parent POM aggregates 7 submodules:
 
 | Module | Type | Depends on | Forbidden from depending on | Runtime or build-only |
 |---|---|---|---|---|
-| `schema-messaging-core` | domain-agnostic library | Spring AMQP, Jackson, networknt, `event-contract-kit` (ADR-0006) | `*-contracts` (enforced by `maven-enforcer-plugin`) | runtime |
+| `schema-messaging-core` | domain-agnostic library | Spring AMQP, Jackson, networknt, `event-contract-kit` | `*-contracts` (enforced by `maven-enforcer-plugin`) | runtime |
 | `event-contract-kit` (formerly `amqp-topology-kit`) | domain-agnostic library (leaf) | Spring AMQP only | `schema-messaging-core`, `*-contracts` | runtime |
-| `schema-gen-tools` | build-only schema generator (victools) | victools only (dependency-free w.r.t. `*-contracts`, ADR-0003) | — | **build-only**, never on a service classpath |
-| `order-contracts` | contract module | Jackson, jakarta.validation, `spring-rabbit`, `spring-boot-autoconfigure`, `event-contract-kit` | `schema-messaging-core` (enforced by `maven-enforcer-plugin`, ADR-0006) | runtime |
+| `schema-gen-tools` | build-only schema generator (victools) | victools only (dependency-free w.r.t. `*-contracts`) | — | **build-only**, never on a service classpath |
+| `order-contracts` | contract module | Jackson, jakarta.validation, `spring-rabbit`, `spring-boot-autoconfigure`, `event-contract-kit` | `schema-messaging-core` (enforced by `maven-enforcer-plugin`) | runtime |
 | `customer-contracts` | contract module (mirror of `order-contracts`) | same as above | same as above | runtime |
 | `producer-service` | Spring Boot app | `schema-messaging-core`, `order-contracts`, `customer-contracts` | — | runtime |
 | `consumer-service` | Spring Boot app | `schema-messaging-core`, `order-contracts`, `customer-contracts` | — | runtime |
@@ -101,7 +99,7 @@ key off). It knows nothing about orders or customers.
 `<routingKey>.<serviceName>.dlq`, retry tier suffixes `5s`/`30s`/`5m`). It's a library that both
 the contracts modules (for exchanges) and `schema-messaging-core` (for per-service queues) call,
 not a Spring auto-config
-itself. Since [ADR-0006](adr/0006-typemapping-relocated-to-event-contract-kit.md) it also carries
+itself. It also carries
 the `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types, which is why
 `schema-messaging-core` now depends on it too.
 
@@ -109,32 +107,30 @@ the `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types, which is why
 
 `schema-gen-tools` is a Maven-plugin-invoked generator (victools) that each `*-contracts`
 module calls at `process-classes` via `exec-maven-plugin` — it has no Maven dependency on
-any contracts module (ADR-0003). It reads compiled `@GenerateSchema`-annotated records and
-writes their `*.schema.json` files. It is never a runtime dependency of any service — see
-[ADR-0001](adr/0001-code-first-schema-generation.md) for why the record, not the schema,
-is authored by hand.
+any contracts module. It reads compiled `@GenerateSchema`-annotated records and
+writes their `*.schema.json` files. It is never a runtime dependency of any service — the Java
+record, not the schema, is authored by hand.
 
 ### Contracts
 
 `order-contracts` and `customer-contracts` each own four things for their domain: the
-event records, the generated JSON Schemas, a
-[ADR-0002](adr/0002-contract-owned-amqp-topology.md) `@AutoConfiguration` class
+event records, the generated JSON Schemas, a `@AutoConfiguration` class
 (`OrderTopologyAutoConfiguration` / `CustomerTopologyAutoConfiguration`) that declares that
 domain's three **exchanges** (main / DLX / retry) — the per-service *queues*, DLQs, and retry
 ladders that hang off them are declared separately in `schema-messaging-core` by
-`ServiceQueueTopologyAutoConfiguration` (see Services below and §4.5) — and — a pattern established
-by [ADR-0005](adr/0005-contracts-may-depend-on-core.md) — a second `@AutoConfiguration` class
+`ServiceQueueTopologyAutoConfiguration` (see Services below and §4.5) — and a second
+`@AutoConfiguration` class
 (`OrderTypeMappingAutoConfiguration` / `CustomerTypeMappingAutoConfiguration`) that registers
-that domain's `TypeMapping` beans. `TypeMapping` itself lives in `event-contract-kit`, not core
-(see [ADR-0006](adr/0006-typemapping-relocated-to-event-contract-kit.md)), so this needs no
+that domain's `TypeMapping` beans. `TypeMapping` itself lives in `event-contract-kit`, not core,
+so this needs no
 dependency on `schema-messaging-core`. Nothing about AMQP topology or schema-mapping wiring lives
 in the services themselves.
 
 ### Services
 
 `producer-service` and `consumer-service` are thin: just controllers (producer) or
-`@BitsEventHandler` methods (consumer). Per [ADR-0005](adr/0005-contracts-may-depend-on-core.md),
-each domain's `*-contracts` module registers its own `TypeMapping` beans (one per event) via a
+`@BitsEventHandler` methods (consumer). Each domain's `*-contracts` module registers its own
+`TypeMapping` beans (one per event) via a
 `*TypeMappingAutoConfiguration`, alongside its `*TopologyAutoConfiguration` (which declares only
 the domain exchanges). Converter and `TypeMapping` wiring arrive automatically via Spring Boot
 auto-configuration; the queues themselves are declared by `schema-messaging-core`'s
@@ -144,16 +140,13 @@ provisions one dedicated queue/DLQ/retry-ladder per handled event, named
 handles no events (e.g. `producer-service`) therefore declares no queues at all — there is still
 no per-service topology, converter, or schema-mapping glue to hand-write.
 
-**Wire format** (see [`spec/code-first-schema.md`](../spec/code-first-schema.md) §6 for
-the full rationale): the AMQP message body is the raw serialized JSON bytes only, no
+**Wire format:** the AMQP message body is the raw serialized JSON bytes only, no
 envelope. Schema identity travels entirely in `X-Schema-*` headers plus
 `X-Correlation-Id`.
 
-**Failure model** (see [ADR-0002](adr/0002-contract-owned-amqp-topology.md) and
-[`spec/contract-owned-amqp-topology.md`](../spec/contract-owned-amqp-topology.md)):
-transient failures retry through a 5s/30s/5m TTL ladder (max 3 tries) before landing on
-the DLQ; permanent failures (validation, deserialization, type mismatch) go straight to
-the DLQ. Section 4.8 shows exactly which code makes that decision.
+**Failure model:** transient failures retry through a 5s/30s/5m TTL ladder (max 3 tries)
+before landing on the DLQ; permanent failures (validation, deserialization, type mismatch) go
+straight to the DLQ. Section 4.8 shows exactly which code makes that decision.
 
 ## 3. Vocabulary You'll See in the Trace
 
@@ -163,14 +156,14 @@ naming, so you don't have to keep looking them up mid-trace.
 
 | Class | Module | Role |
 |---|---|---|
-| `TypeMapping` / `SchemaCoordinates` / `SchemaType` | `event-contract-kit` (ADR-0006) | `TypeMapping` maps a Java type ↔ `SchemaCoordinates` ↔ `SchemaType` ↔ AMQP routing key ↔ exchange (ADR-0007). One `TypeMapping` bean per event. `SchemaCoordinates` is group/artifact; `SchemaType` is the wire format. |
+| `TypeMapping` / `SchemaCoordinates` / `SchemaType` | `event-contract-kit` | `TypeMapping` maps a Java type ↔ `SchemaCoordinates` ↔ `SchemaType` ↔ AMQP routing key ↔ exchange. One `TypeMapping` bean per event. `SchemaCoordinates` is group/artifact; `SchemaType` is the wire format. |
 | `TypeMappingRegistry` / `ResolvedSchema` | `schema-messaging-core` | `TypeMappingRegistry` indexes every `TypeMapping` bean for O(1) lookup; `ResolvedSchema` is the classpath-loaded schema bytes + type. |
 | `SchemaAwareMessageConverter` | `schema-messaging-core` | The one Spring AMQP `MessageConverter` that does `toMessage`/`fromMessage` for every event — the single validation authority. |
 | `LocalSchemaCatalog` | `schema-messaging-core` | Eagerly loads every mapping's JSON Schema from the classpath at startup; fails fast if missing. |
 | `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. |
-| `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), ...)`. Caller supplies only the event (ADR-0007). |
-| `BitsEventHandler` | `schema-messaging-core` (ADR-0008) | Marker on listener methods — no queue name or container factory. Queue resolved from the parameter type's `TypeMapping` at startup. |
-| `BitsEventHandlerRegistrar` | `schema-messaging-core` (ADR-0008) | `RabbitListenerConfigurer` that registers `@BitsEventHandler` methods; derives queue via `TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName)`. |
+| `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), ...)`. Caller supplies only the event. |
+| `BitsEventHandler` | `schema-messaging-core` | Marker on listener methods — no queue name or container factory. Queue resolved from the parameter type's `TypeMapping` at startup. |
+| `BitsEventHandlerRegistrar` | `schema-messaging-core` | `RabbitListenerConfigurer` that registers `@BitsEventHandler` methods; derives queue via `TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName)`. |
 | `BitsEventHandlerScanner` | `schema-messaging-core` | Shared `@BitsEventHandler` discovery: which event types this service handles. Used by the registrar, `ServiceQueueTopologyAutoConfiguration`, and `QueueDepthHealthIndicator` so they can't disagree on the handled set. |
 | `ServiceQueueTopologyAutoConfiguration` | `schema-messaging-core` | Declares this service's per-service queues/DLQs/retry ladders — one per handled event, named `{routingKey}.{serviceName}.queue` — via `EventTopologyFactory`. Nothing declared if the service has no handlers. |
 | `DlxRoutingAdvice` | `schema-messaging-core` | AOP advice wrapped around every listener invocation; catches exceptions and hands them to the recoverer. |
@@ -179,7 +172,7 @@ naming, so you don't have to keep looking them up mid-trace.
 | `PermanentFailure` | `schema-messaging-core` | Marker interface implemented by every permanent exception; `classify()` checks `instanceof` this, not a hand-maintained set. |
 | `EventTopologyFactory` / `TopologyNaming` | `event-contract-kit` | Builds the per-service queue/DLQ/retry-tier `Declarable`s for one routing key + service name (fan-out binding on the plain key + a private `routingKey.serviceName` binding), and supplies the naming convention. |
 | `OrderTopologyAutoConfiguration` | `order-contracts` | Declares the `events.orders.*` **exchanges** only (main / DLX / retry). The queues are declared per-service by `ServiceQueueTopologyAutoConfiguration`. |
-| `OrderTypeMappingAutoConfiguration` | `order-contracts` | Registers this domain's `TypeMapping` beans (pattern established by ADR-0005) — one per order event. |
+| `OrderTypeMappingAutoConfiguration` | `order-contracts` | Registers this domain's `TypeMapping` beans — one per order event. |
 
 ## 4. Deep Dive: `OrderCreated` End-to-End
 
@@ -214,7 +207,7 @@ The controller builds the `OrderCreated` record from the request body and delega
 everything else — validation, serialization, header population, sending — to
 `eventPublisher.publish()`. There's no manual field-checking here; validation happens
 against the schema, not in the controller. The exchange is not passed at the call site —
-`EventPublisher` reads it from the event's `TypeMapping` (ADR-0007).
+`EventPublisher` reads it from the event's `TypeMapping`.
 
 ### 4.2 Publish
 
@@ -250,9 +243,9 @@ public TypeMapping orderCreatedMapping() {
 ```
 
 One `@Bean` method per event, all in one self-activating `@AutoConfiguration` class shipped in
-the `order-contracts` jar (ADR-0005) — not hand-registered per service. The `coords()` helper
+the `order-contracts` jar — not hand-registered per service. The `coords()` helper
 builds a 2-arg `SchemaCoordinates(groupId, artifactId)` — no version pinning at runtime
-(ADR-0004).
+(local classpath validation only).
 
 ### 4.4 Convert: produce path
 
@@ -347,8 +340,8 @@ declared queues/bindings are applied idempotently to the broker via the shared `
 (`SchemaMessagingConsumerAutoConfiguration`).
 
 `OrderEventRouting` no longer exposes `*_QUEUE` constants — queue names are derived at
-listener registration time via `TopologyNaming.serviceQueueName(routingKey, serviceName)`
-(ADR-0008). Adding a fifth order event means adding one `@BitsEventHandler` method and one
+listener registration time via `TopologyNaming.serviceQueueName(routingKey, serviceName)`.
+Adding a new order event means adding one `@BitsEventHandler` method and one
 `TypeMapping` bean — its per-service queue/DLQ/retry-ladder is provisioned automatically from the
 handler scan, with no topology list to edit.
 
@@ -494,7 +487,7 @@ flowchart TD
 message's *actual received exchange* (`props.getReceivedExchange()`, regex-stripping
 `.exchange` → `.dlx` / `.retry.exchange`) rather than a hardcoded name — this is why the
 one shared `DlxMessageRecoverer` bean in `schema-messaging-core` needs no dependency on
-any `*-contracts` module (see [ADR-0002](adr/0002-contract-owned-amqp-topology.md)). It's
+any `*-contracts` module. It's
 injected with this service's `spring.application.name`, and targets the **service-scoped**
 routing key — `serviceRetryRoutingKey(rk, serviceName, tier)` for a retry hop,
 `serviceDlqRoutingKey(rk, serviceName)` for the DLQ — so a failure lands only on this
@@ -545,6 +538,5 @@ the exchange group is new do you add three exchange beans to the domain's
 |---|---|
 | Actually run the system | [`README.md`](../README.md) |
 | Exercise every scenario manually (happy path, validation failure, DLQ, retry, pinning, evolution) | [`docs/TESTING-GUIDE.md`](TESTING-GUIDE.md) |
-| Look up a domain term | [`CONTEXT.md`](../CONTEXT.md) |
-| Understand why code-first schema generation was chosen | [ADR-0001](adr/0001-code-first-schema-generation.md), [`spec/code-first-schema.md`](../spec/code-first-schema.md) |
-| Understand why contracts modules own their own AMQP topology | [ADR-0002](adr/0002-contract-owned-amqp-topology.md), [`spec/contract-owned-amqp-topology.md`](../spec/contract-owned-amqp-topology.md) |
+| Look up a domain term or topology ownership split | [`CONTEXT.md`](../CONTEXT.md) |
+| Deep dive on exchanges vs per-service queues | This file, §2 and §4.5 |
