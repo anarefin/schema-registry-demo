@@ -310,6 +310,47 @@ correct side — the split is load-bearing.
 
 ---
 
+## Upgrading a persistent RabbitMQ broker (per-service queue migration)
+
+Queue naming moved from **shared per-domain** (`orders.created.queue`) to **per-service**
+(`orders.created.consumer-service.queue`). Docker Compose in this repo uses an ephemeral broker
+with no volume, so a fresh `docker compose up` never carries the old queues. A **persistent**
+broker — staging/production, or any RabbitMQ instance whose data directory survives restarts —
+may still have the old durable queues bound to domain exchanges with plain routing keys.
+
+Those orphaned queues keep absorbing a duplicate copy of every published event. Nothing drains
+them after deploy.
+
+**Automatic decommission (default):** On startup, any service with `@BitsEventHandler` listeners
+deletes the legacy shared-domain queue set for each event type it handles — main queue, DLQ, and
+three retry-tier queues — via `RabbitAdmin.deleteQueue`, **before** declaring its per-service
+topology. The operation is idempotent: missing queues are a no-op on a fresh broker.
+
+Legacy names for one routing key (e.g. `orders.created`):
+
+| Role | Legacy queue name |
+|---|---|
+| Main | `orders.created.queue` |
+| DLQ | `orders.created.dlq` |
+| Retry tier 0 | `orders.created.retry.5s` |
+| Retry tier 1 | `orders.created.retry.30s` |
+| Retry tier 2 | `orders.created.retry.5m` |
+
+**Operator checklist for persistent-broker upgrades:**
+
+1. Deploy the per-service queue build to every service that consumes events (at minimum
+   `consumer-service`). Producer-only services declare no queues and do not run decommission.
+2. Restart consumers so `ServiceQueueTopologyAutoConfiguration` runs against the live broker.
+3. Confirm legacy queues are gone in the RabbitMQ management UI (Queues tab) or via
+   `rabbitmqadmin list queues`.
+4. Optional: disable auto-decommission to drain or archive messages first:
+   `events.topology.decommission-legacy-queues=false` — re-enable after manual cleanup.
+
+**Data loss note:** `deleteQueue` discards any messages still sitting in a legacy queue. Drain or
+replay them before deploy if that matters for your environment.
+
+---
+
 ## POC-only shortcuts
 
 The following design decisions are intentional simplifications for a proof-of-concept.

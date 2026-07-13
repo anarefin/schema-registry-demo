@@ -38,6 +38,7 @@ class RetryTierWiringTest {
                         mock(HandledEventTypesCache.class),
                         mock(RabbitAdmin.class),
                         "consumer-service",
+                        false,
                         sharedProperties,
                         List.of());
 

@@ -97,7 +97,7 @@ class ServiceQueueTopologyExchangeDeduplicationTest {
     private static ServiceQueueTopologyAutoConfiguration.ServiceQueueTopologyConfigurer configurer(
             HandledEventTypesCache cache, RabbitAdmin rabbitAdmin, List<TopicExchange> exchanges) {
         return new ServiceQueueTopologyAutoConfiguration.ServiceQueueTopologyConfigurer(
-                cache, rabbitAdmin, "consumer-service", TIER_TTLS, exchanges);
+                cache, rabbitAdmin, "consumer-service", true, TIER_TTLS, exchanges);
     }
 
     private static HandledEventTypesCache cacheWithMappings(TypeMapping... mappings) {

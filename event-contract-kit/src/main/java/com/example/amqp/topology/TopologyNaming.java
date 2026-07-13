@@ -1,5 +1,9 @@
 package com.example.amqp.topology;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Naming conventions shared by every domain's AMQP topology (spec contract-owned-amqp-topology
  * D1): queue/DLQ names derived from a routing key, and the 3-tier TTL retry-ladder suffixes
@@ -63,6 +67,22 @@ public final class TopologyNaming {
 
     public static String retryRoutingKey(String baseRoutingKey, int tier) {
         return baseRoutingKey + ".retry." + tierSuffix(tier);
+    }
+
+    /**
+     * Queue names from the pre-per-service shared-domain topology ({@link #queueName},
+     * {@link #dlqName}, and one durable retry queue per tier named {@link #retryRoutingKey}).
+     * Used to decommission orphaned queues on persistent brokers during migration to per-service
+     * naming.
+     */
+    public static List<String> legacySharedDomainQueueNames(String routingKey, int retryTierCount) {
+        List<String> names = new ArrayList<>(2 + retryTierCount);
+        names.add(queueName(routingKey));
+        names.add(dlqName(routingKey));
+        for (int tier = 0; tier < retryTierCount; tier++) {
+            names.add(retryRoutingKey(routingKey, tier));
+        }
+        return Collections.unmodifiableList(names);
     }
 
     public static String dlxExchangeName(String mainExchangeName) {

@@ -16,6 +16,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
 
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,10 +39,16 @@ public class ServiceQueueTopologyAutoConfiguration {
             HandledEventTypesCache handledEventTypesCache,
             RabbitAdmin rabbitAdmin,
             @Value("${spring.application.name}") String serviceName,
+            @Value("${events.topology.decommission-legacy-queues:true}") boolean decommissionLegacyQueues,
             RetryTierProperties retryTierProperties,
             List<TopicExchange> topicExchanges) {
         return new ServiceQueueTopologyConfigurer(
-                handledEventTypesCache, rabbitAdmin, serviceName, retryTierProperties.toArray(), topicExchanges);
+                handledEventTypesCache,
+                rabbitAdmin,
+                serviceName,
+                decommissionLegacyQueues,
+                retryTierProperties.toArray(),
+                topicExchanges);
     }
 
     static class ServiceQueueTopologyConfigurer implements SmartInitializingSingleton {
@@ -49,6 +56,7 @@ public class ServiceQueueTopologyAutoConfiguration {
         private final HandledEventTypesCache handledEventTypesCache;
         private final RabbitAdmin rabbitAdmin;
         private final String serviceName;
+        private final boolean decommissionLegacyQueues;
         private final long[] tierTtls;
         private final Map<String, TopicExchange> exchangesByName;
 
@@ -56,11 +64,13 @@ public class ServiceQueueTopologyAutoConfiguration {
                 HandledEventTypesCache handledEventTypesCache,
                 RabbitAdmin rabbitAdmin,
                 String serviceName,
+                boolean decommissionLegacyQueues,
                 long[] tierTtls,
                 List<TopicExchange> topicExchanges) {
             this.handledEventTypesCache = handledEventTypesCache;
             this.rabbitAdmin = rabbitAdmin;
             this.serviceName = serviceName;
+            this.decommissionLegacyQueues = decommissionLegacyQueues;
             this.tierTtls = tierTtls;
             this.exchangesByName = topicExchanges.stream()
                     .collect(Collectors.toUnmodifiableMap(TopicExchange::getName, Function.identity(), (a, b) -> a));
@@ -77,9 +87,23 @@ public class ServiceQueueTopologyAutoConfiguration {
             if (handlerMappings.isEmpty()) {
                 return;
             }
+            if (decommissionLegacyQueues) {
+                decommissionLegacySharedDomainQueues(handlerMappings);
+            }
             Set<String> declaredExchanges = new HashSet<>();
             for (TypeMapping mapping : handlerMappings) {
                 declareForMapping(mapping, declaredExchanges);
+            }
+        }
+
+        private void decommissionLegacySharedDomainQueues(Set<TypeMapping> handlerMappings) {
+            Set<String> legacyQueueNames = new LinkedHashSet<>();
+            for (TypeMapping mapping : handlerMappings) {
+                legacyQueueNames.addAll(
+                        TopologyNaming.legacySharedDomainQueueNames(mapping.routingKey(), tierTtls.length));
+            }
+            for (String queueName : legacyQueueNames) {
+                rabbitAdmin.deleteQueue(queueName);
             }
         }
 

@@ -24,6 +24,17 @@ class TopologyNamingTest {
     }
 
     @Test
+    void legacySharedDomainQueueNamesListsPrePerServiceTopology() {
+        assertThat(TopologyNaming.legacySharedDomainQueueNames("orders.created", 3))
+                .containsExactly(
+                        "orders.created.queue",
+                        "orders.created.dlq",
+                        "orders.created.retry.5s",
+                        "orders.created.retry.30s",
+                        "orders.created.retry.5m");
+    }
+
+    @Test
     void tierSuffixMapsKnownTiers() {
         assertThat(TopologyNaming.tierSuffix(0)).isEqualTo("5s");
         assertThat(TopologyNaming.tierSuffix(1)).isEqualTo("30s");
