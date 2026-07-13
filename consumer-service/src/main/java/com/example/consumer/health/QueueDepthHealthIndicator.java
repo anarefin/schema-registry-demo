@@ -26,7 +26,8 @@ import java.util.Set;
  * longer pays for a full bean/reflection scan on every invocation.
  *
  * <p>Status is DOWN when any DLQ contains messages (signals processing failures). Main-queue depth
- * is reported as info; it never triggers DOWN on its own.
+ * is reported as info; it never triggers DOWN on its own. Probe failures (broker unreachable,
+ * channel error, queue not found) return UNKNOWN with error detail — never UP with a fake zero depth.
  */
 @Component
 public class QueueDepthHealthIndicator implements HealthIndicator {
@@ -56,17 +57,23 @@ public class QueueDepthHealthIndicator implements HealthIndicator {
         try {
             Map<String, Object> details = new LinkedHashMap<>();
             boolean dlqEmpty = true;
+            boolean probeFailed = false;
 
             Set<TypeMapping> handledMappings = handledEventTypesCache.handledTypeMappings();
             for (TypeMapping mapping : handledMappings) {
                 String rk = mapping.routingKey();
                 int dlqDepth = queueDepth(TopologyNaming.serviceDlqName(rk, serviceName), details);
-                queueDepth(TopologyNaming.serviceQueueName(rk, serviceName), details);
-                if (dlqDepth > 0) {
+                int mainDepth = queueDepth(TopologyNaming.serviceQueueName(rk, serviceName), details);
+                if (dlqDepth < 0 || mainDepth < 0) {
+                    probeFailed = true;
+                } else if (dlqDepth > 0) {
                     dlqEmpty = false;
                 }
             }
 
+            if (probeFailed) {
+                return Health.unknown().withDetails(details).build();
+            }
             return (dlqEmpty ? Health.up() : Health.down())
                     .withDetails(details).build();
         } catch (Exception e) {
@@ -75,15 +82,23 @@ public class QueueDepthHealthIndicator implements HealthIndicator {
         }
     }
 
+    /**
+     * Returns message count, or {@code -1} when the probe fails so callers never treat a
+     * query error as an empty queue.
+     */
     private int queueDepth(String queueName, Map<String, Object> details) {
         try {
             var info = rabbitAdmin.getQueueInfo(queueName);
-            int depth = info != null ? (int) info.getMessageCount() : -1;
+            if (info == null) {
+                details.put(queueName + ".depth", "error: queue not found");
+                return -1;
+            }
+            int depth = (int) info.getMessageCount();
             details.put(queueName + ".depth", depth);
             return depth;
         } catch (Exception e) {
             details.put(queueName + ".depth", "error: " + e.getMessage());
-            return 0;
+            return -1;
         }
     }
 }

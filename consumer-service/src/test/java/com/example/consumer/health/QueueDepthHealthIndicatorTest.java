@@ -17,6 +17,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 class QueueDepthHealthIndicatorTest {
 
@@ -79,5 +80,68 @@ class QueueDepthHealthIndicatorTest {
         // The indicator delegates entirely to the cache each call — it never touches an
         // ApplicationContext or performs its own bean/reflection scan.
         verify(cache, times(2)).handledTypeMappings();
+    }
+
+    @Test
+    void health_whenDlqProbeFails_reportsUnknown_notUpWithFakeZeroDepth() {
+        TypeMapping mapping = mapping();
+        HandledEventTypesCache cache = mock(HandledEventTypesCache.class);
+        when(cache.handledTypeMappings()).thenReturn(Set.of(mapping));
+
+        RabbitAdmin rabbitAdmin = mock(RabbitAdmin.class);
+        QueueInformation emptyQueue = mock(QueueInformation.class);
+        when(emptyQueue.getMessageCount()).thenReturn(0L);
+        String dlqName = TopologyNaming.serviceDlqName("demo.event", SERVICE);
+        String mainQueueName = TopologyNaming.serviceQueueName("demo.event", SERVICE);
+        doThrow(new RuntimeException("channel error")).when(rabbitAdmin).getQueueInfo(dlqName);
+        when(rabbitAdmin.getQueueInfo(mainQueueName)).thenReturn(emptyQueue);
+
+        QueueDepthHealthIndicator indicator = new QueueDepthHealthIndicator(rabbitAdmin, cache, SERVICE);
+
+        Health health = indicator.health();
+
+        assertThat(health.getStatus().getCode()).isEqualTo("UNKNOWN");
+        assertThat(health.getDetails()).containsEntry(dlqName + ".depth", "error: channel error");
+        assertThat(health.getDetails().get(dlqName + ".depth")).isNotEqualTo(0);
+    }
+
+    @Test
+    void health_whenDlqEmpty_reportsUp() {
+        TypeMapping mapping = mapping();
+        HandledEventTypesCache cache = mock(HandledEventTypesCache.class);
+        when(cache.handledTypeMappings()).thenReturn(Set.of(mapping));
+
+        RabbitAdmin rabbitAdmin = mock(RabbitAdmin.class);
+        QueueInformation emptyQueue = mock(QueueInformation.class);
+        when(emptyQueue.getMessageCount()).thenReturn(0L);
+        when(rabbitAdmin.getQueueInfo(TopologyNaming.serviceQueueName("demo.event", SERVICE)))
+                .thenReturn(emptyQueue);
+        when(rabbitAdmin.getQueueInfo(TopologyNaming.serviceDlqName("demo.event", SERVICE)))
+                .thenReturn(emptyQueue);
+
+        Health health = new QueueDepthHealthIndicator(rabbitAdmin, cache, SERVICE).health();
+
+        assertThat(health.getStatus().getCode()).isEqualTo("UP");
+    }
+
+    @Test
+    void health_whenDlqHasMessages_reportsDown() {
+        TypeMapping mapping = mapping();
+        HandledEventTypesCache cache = mock(HandledEventTypesCache.class);
+        when(cache.handledTypeMappings()).thenReturn(Set.of(mapping));
+
+        RabbitAdmin rabbitAdmin = mock(RabbitAdmin.class);
+        QueueInformation emptyMain = mock(QueueInformation.class);
+        when(emptyMain.getMessageCount()).thenReturn(0L);
+        QueueInformation dlqWithMessages = mock(QueueInformation.class);
+        when(dlqWithMessages.getMessageCount()).thenReturn(3L);
+        when(rabbitAdmin.getQueueInfo(TopologyNaming.serviceQueueName("demo.event", SERVICE)))
+                .thenReturn(emptyMain);
+        when(rabbitAdmin.getQueueInfo(TopologyNaming.serviceDlqName("demo.event", SERVICE)))
+                .thenReturn(dlqWithMessages);
+
+        Health health = new QueueDepthHealthIndicator(rabbitAdmin, cache, SERVICE).health();
+
+        assertThat(health.getStatus().getCode()).isEqualTo("DOWN");
     }
 }
