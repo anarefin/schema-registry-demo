@@ -1,5 +1,7 @@
 package com.example.contracts.customers;
 
+import com.example.amqp.topology.TopologyNaming;
+
 /**
  * AMQP routing constants for the three customer events (spec §9/§10.4, code-first D3).
  *
@@ -10,6 +12,11 @@ package com.example.contracts.customers;
  * {@code simplified-publish-and-listen.md} D4). The AMQP topology itself lives in
  * {@code CustomerTopologyAutoConfiguration} (this module) via {@code amqp-topology-kit}; these
  * constants follow the same naming convention and are the single source of truth for the names.
+ *
+ * <p>{@link #DLX} and {@link #RETRY_EXCHANGE} are derived from {@link #EXCHANGE} via
+ * {@link TopologyNaming}, the same helper {@code DlxMessageRecoverer} uses at runtime to compute
+ * a message's DLX/retry exchange from its received exchange — so the declared topology and the
+ * failure-routing decision can never name a different exchange (see 03-dlx-retry-exchange-naming-parity-enforced).
  */
 public final class CustomerEventRouting {
 
@@ -26,8 +33,8 @@ public final class CustomerEventRouting {
 
     // ---- domain-scoped exchanges (spec contract-owned-amqp-topology D2) ----
     public static final String EXCHANGE       = "events.customers.exchange";
-    public static final String DLX            = "events.customers.dlx";
-    public static final String RETRY_EXCHANGE = "events.customers.retry.exchange";
+    public static final String DLX            = TopologyNaming.dlxExchangeName(EXCHANGE);
+    public static final String RETRY_EXCHANGE = TopologyNaming.retryExchangeName(EXCHANGE);
 
     public static final String BEAN_EXCHANGE       = "customersExchange";
     public static final String BEAN_DLX            = "customersDlx";
