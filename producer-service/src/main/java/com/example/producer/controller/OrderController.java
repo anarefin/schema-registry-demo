@@ -89,16 +89,22 @@ public class OrderController {
     @PostMapping("/fulfill")
     @ResponseStatus(HttpStatus.CREATED)
     public void fulfillOrder(@RequestBody FulfillOrderRequest request) {
-        OrderFulfilled event = new OrderFulfilled(
-                request.orderId(),
-                new OrderBuyer(request.buyer().customerId(), request.buyer().email(),
-                        request.buyer().displayName()),
-                new ShippingAddress(request.shipping().line1(), request.shipping().line2(),
+        // Pass null nested DTOs through so schema validation (not NPE) owns the 400.
+        OrderBuyer buyer = request.buyer() == null
+                ? null
+                : new OrderBuyer(request.buyer().customerId(), request.buyer().email(),
+                        request.buyer().displayName());
+        ShippingAddress shipping = request.shipping() == null
+                ? null
+                : new ShippingAddress(request.shipping().line1(), request.shipping().line2(),
                         request.shipping().city(), request.shipping().postalCode(),
-                        request.shipping().countryCode()),
-                new PaymentDetails(request.payment().method(), request.payment().amount(),
-                        request.payment().currency()),
-                Instant.now());
+                        request.shipping().countryCode());
+        PaymentDetails payment = request.payment() == null
+                ? null
+                : new PaymentDetails(request.payment().method(), request.payment().amount(),
+                        request.payment().currency());
+        OrderFulfilled event = new OrderFulfilled(
+                request.orderId(), buyer, shipping, payment, Instant.now());
         eventPublisher.publish(event);
         log.info("Published OrderFulfilled orderId={}", event.orderId());
     }

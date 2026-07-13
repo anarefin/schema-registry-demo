@@ -63,4 +63,71 @@ class ProducerValidationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Schema validation failed")));
     }
+
+    @Test
+    void fulfillOmittingBuyer_returns400() throws Exception {
+        OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        doThrow(new SchemaValidationException("events.orders:OrderFulfilled", "buyer required"))
+                .when(eventPublisher).publish(any());
+
+        mockMvc.perform(post("/api/orders/fulfill")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"orderId":"33333333-3333-3333-3333-333333333333",
+                                 "shipping":{"line1":"221B Baker Street","line2":null,"city":"London",
+                                   "postalCode":"NW1 6XE","countryCode":"GB"},
+                                 "payment":{"method":"CARD","amount":149.99,"currency":"GBP"}}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Schema validation failed")));
+    }
+
+    @Test
+    void fulfillOmittingShipping_returns400() throws Exception {
+        OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        doThrow(new SchemaValidationException("events.orders:OrderFulfilled", "shipping required"))
+                .when(eventPublisher).publish(any());
+
+        mockMvc.perform(post("/api/orders/fulfill")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"orderId":"33333333-3333-3333-3333-333333333333",
+                                 "buyer":{"customerId":"11111111-1111-1111-1111-111111111111",
+                                   "email":"buyer@example.com","displayName":"Jane Doe"},
+                                 "payment":{"method":"CARD","amount":149.99,"currency":"GBP"}}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Schema validation failed")));
+    }
+
+    @Test
+    void fulfillOmittingPayment_returns400() throws Exception {
+        OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        doThrow(new SchemaValidationException("events.orders:OrderFulfilled", "payment required"))
+                .when(eventPublisher).publish(any());
+
+        mockMvc.perform(post("/api/orders/fulfill")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"orderId":"33333333-3333-3333-3333-333333333333",
+                                 "buyer":{"customerId":"11111111-1111-1111-1111-111111111111",
+                                   "email":"buyer@example.com","displayName":"Jane Doe"},
+                                 "shipping":{"line1":"221B Baker Street","line2":null,"city":"London",
+                                   "postalCode":"NW1 6XE","countryCode":"GB"}}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Schema validation failed")));
+    }
 }
