@@ -7,6 +7,7 @@ import org.springframework.amqp.rabbit.annotation.RabbitListenerConfigurer;
 import org.springframework.amqp.rabbit.listener.MethodRabbitListenerEndpoint;
 import org.springframework.amqp.rabbit.listener.RabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistrar;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.context.ApplicationContext;
 import org.springframework.messaging.handler.annotation.support.DefaultMessageHandlerMethodFactory;
 
@@ -54,7 +55,7 @@ public class BitsEventHandlerRegistrar implements RabbitListenerConfigurer {
 
         for (String beanName : applicationContext.getBeanDefinitionNames()) {
             Object bean = applicationContext.getBean(beanName);
-            Class<?> targetClass = bean.getClass();
+            Class<?> targetClass = BitsEventHandlerScanner.targetClass(bean);
 
             for (Method method : BitsEventHandlerScanner.handlerMethods(targetClass)) {
                 registerEndpoint(registrar, containerFactory, handlerMethodFactory, beanName, bean, method);
@@ -71,10 +72,11 @@ public class BitsEventHandlerRegistrar implements RabbitListenerConfigurer {
             Method method) {
         TypeMapping mapping = BitsEventHandlerScanner.mappingFor(typeMappingRegistry, method);
         String queue = TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName);
+        Method invocableMethod = AopUtils.selectInvocableMethod(method, bean.getClass());
 
         MethodRabbitListenerEndpoint endpoint = new MethodRabbitListenerEndpoint();
         endpoint.setBean(bean);
-        endpoint.setMethod(method);
+        endpoint.setMethod(invocableMethod);
         endpoint.setId(beanName + "#" + method.getName());
         endpoint.setQueueNames(queue);
         endpoint.setMessageHandlerMethodFactory(handlerMethodFactory);

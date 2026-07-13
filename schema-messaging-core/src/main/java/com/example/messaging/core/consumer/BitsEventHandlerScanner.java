@@ -2,6 +2,7 @@ package com.example.messaging.core.consumer;
 
 import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.MethodIntrospector;
 import org.springframework.core.annotation.AnnotatedElementUtils;
@@ -40,12 +41,22 @@ public final class BitsEventHandlerScanner {
                         "No TypeMapping for " + eventType.getName()));
     }
 
+    /**
+     * Resolves the class to scan for {@link BitsEventHandler} methods. Unwraps Spring AOP
+     * proxies (JDK and CGLIB) so annotations on the real target are visible — same defensive
+     * step Spring's {@code EventListenerMethodProcessor} takes before an equivalent method scan.
+     */
+    public static Class<?> targetClass(Object bean) {
+        return AopUtils.getTargetClass(bean);
+    }
+
     public static Set<TypeMapping> discoverHandledTypeMappings(
             ApplicationContext applicationContext, TypeMappingRegistry typeMappingRegistry) {
         Set<TypeMapping> mappings = new LinkedHashSet<>();
         for (String beanName : applicationContext.getBeanDefinitionNames()) {
-            Class<?> targetClass = applicationContext.getBean(beanName).getClass();
-            for (Method method : handlerMethods(targetClass)) {
+            Object bean = applicationContext.getBean(beanName);
+            Class<?> typeToScan = BitsEventHandlerScanner.targetClass(bean);
+            for (Method method : handlerMethods(typeToScan)) {
                 mappings.add(mappingFor(typeMappingRegistry, method));
             }
         }
