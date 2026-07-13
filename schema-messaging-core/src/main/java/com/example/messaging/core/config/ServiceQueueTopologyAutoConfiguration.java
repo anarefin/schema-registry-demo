@@ -15,8 +15,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Declares per-service dedicated queues, DLQs, and retry ladders for every event type
@@ -34,9 +38,10 @@ public class ServiceQueueTopologyAutoConfiguration {
             HandledEventTypesCache handledEventTypesCache,
             RabbitAdmin rabbitAdmin,
             @Value("${spring.application.name}") String serviceName,
-            RetryTierProperties retryTierProperties) {
+            RetryTierProperties retryTierProperties,
+            List<TopicExchange> topicExchanges) {
         return new ServiceQueueTopologyConfigurer(
-                handledEventTypesCache, rabbitAdmin, serviceName, retryTierProperties.toArray());
+                handledEventTypesCache, rabbitAdmin, serviceName, retryTierProperties.toArray(), topicExchanges);
     }
 
     static class ServiceQueueTopologyConfigurer implements SmartInitializingSingleton {
@@ -45,16 +50,20 @@ public class ServiceQueueTopologyAutoConfiguration {
         private final RabbitAdmin rabbitAdmin;
         private final String serviceName;
         private final long[] tierTtls;
+        private final Map<String, TopicExchange> exchangesByName;
 
         ServiceQueueTopologyConfigurer(
                 HandledEventTypesCache handledEventTypesCache,
                 RabbitAdmin rabbitAdmin,
                 String serviceName,
-                long[] tierTtls) {
+                long[] tierTtls,
+                List<TopicExchange> topicExchanges) {
             this.handledEventTypesCache = handledEventTypesCache;
             this.rabbitAdmin = rabbitAdmin;
             this.serviceName = serviceName;
             this.tierTtls = tierTtls;
+            this.exchangesByName = topicExchanges.stream()
+                    .collect(Collectors.toUnmodifiableMap(TopicExchange::getName, Function.identity(), (a, b) -> a));
         }
 
         /** Exposed so tests can verify this configurer shares a single {@code RetryTierProperties} source. */
@@ -68,30 +77,43 @@ public class ServiceQueueTopologyAutoConfiguration {
             if (handlerMappings.isEmpty()) {
                 return;
             }
+            Set<String> declaredExchanges = new HashSet<>();
             for (TypeMapping mapping : handlerMappings) {
-                declareForMapping(mapping);
+                declareForMapping(mapping, declaredExchanges);
             }
         }
 
-        private void declareForMapping(TypeMapping mapping) {
+        private void declareForMapping(TypeMapping mapping, Set<String> declaredExchanges) {
             String exchangeName = mapping.exchange();
-            TopicExchange mainExchange = new TopicExchange(exchangeName, true, false);
-            TopicExchange dlx = new TopicExchange(TopologyNaming.dlxExchangeName(exchangeName), true, false);
-            TopicExchange retryExchange =
-                    new TopicExchange(TopologyNaming.retryExchangeName(exchangeName), true, false);
+            TopicExchange mainExchange = requireExchange(exchangeName);
+            TopicExchange dlx = requireExchange(TopologyNaming.dlxExchangeName(exchangeName));
+            TopicExchange retryExchange = requireExchange(TopologyNaming.retryExchangeName(exchangeName));
 
-            // Declare the exchanges ourselves rather than relying on the domain contracts module's
-            // exchange @Beans having already auto-declared via Spring AMQP's own ContextRefreshedEvent/
-            // ConnectionListener hook — that ordering relative to this SmartInitializingSingleton isn't
-            // guaranteed, and declareExchange is idempotent so this is safe even if they also declare it.
-            rabbitAdmin.declareExchange(mainExchange);
-            rabbitAdmin.declareExchange(dlx);
-            rabbitAdmin.declareExchange(retryExchange);
+            // Declare each distinct exchange at most once. Properties come from the contracts
+            // module TopicExchange beans — not a second hardcoded copy here. declareExchange is
+            // idempotent, so this is safe even if Spring AMQP's own auto-declare hook also ran.
+            declareExchangeOnce(mainExchange, declaredExchanges);
+            declareExchangeOnce(dlx, declaredExchanges);
+            declareExchangeOnce(retryExchange, declaredExchanges);
 
             List<Declarable> declarables = EventTopologyFactory.declarablesForEvent(
                     mapping.routingKey(), serviceName, mainExchange, dlx, retryExchange, tierTtls);
             for (Declarable declarable : declarables) {
                 declare(rabbitAdmin, declarable);
+            }
+        }
+
+        private TopicExchange requireExchange(String exchangeName) {
+            TopicExchange exchange = exchangesByName.get(exchangeName);
+            if (exchange == null) {
+                throw new IllegalStateException("No TopicExchange bean registered for exchange: " + exchangeName);
+            }
+            return exchange;
+        }
+
+        private void declareExchangeOnce(TopicExchange exchange, Set<String> declaredExchanges) {
+            if (declaredExchanges.add(exchange.getName())) {
+                rabbitAdmin.declareExchange(exchange);
             }
         }
 

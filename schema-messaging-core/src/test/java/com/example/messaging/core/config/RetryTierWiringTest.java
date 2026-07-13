@@ -6,11 +6,14 @@ import com.example.messaging.core.consumer.HandledEventTypesCache;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -35,7 +38,8 @@ class RetryTierWiringTest {
                         mock(HandledEventTypesCache.class),
                         mock(RabbitAdmin.class),
                         "consumer-service",
-                        sharedProperties);
+                        sharedProperties,
+                        List.of());
 
         assertThat(recoverer.retryDelaysMs()).containsExactly(111L, 222L, 333L);
         assertThat(configurer.tierTtls()).containsExactly(111L, 222L, 333L);
