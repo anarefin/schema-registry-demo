@@ -53,12 +53,12 @@ public class BitsEventHandlerRegistrar implements RabbitListenerConfigurer {
         handlerMethodFactory.setBeanFactory(applicationContext.getAutowireCapableBeanFactory());
         handlerMethodFactory.afterPropertiesSet();
 
-        for (String beanName : applicationContext.getBeanDefinitionNames()) {
-            Object bean = applicationContext.getBean(beanName);
-            Class<?> targetClass = BitsEventHandlerScanner.targetClass(bean);
-
-            for (Method method : BitsEventHandlerScanner.handlerMethods(targetClass)) {
-                registerEndpoint(registrar, containerFactory, handlerMethodFactory, beanName, bean, method);
+        for (BitsEventHandlerScanner.HandlerBinding binding :
+                BitsEventHandlerScanner.discoverHandlerBindings(applicationContext)) {
+            Object bean = applicationContext.getBean(binding.beanName());
+            for (Method method : binding.methods()) {
+                registerEndpoint(
+                        registrar, containerFactory, handlerMethodFactory, binding.beanName(), bean, method);
             }
         }
     }

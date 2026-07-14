@@ -6,10 +6,13 @@ import org.springframework.aop.support.AopUtils;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.MethodIntrospector;
 import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.ReflectionUtils;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -21,6 +24,8 @@ import java.util.Set;
  * drift apart on which types count as "handled".
  */
 public final class BitsEventHandlerScanner {
+
+    public record HandlerBinding(String beanName, Set<Method> methods) {}
 
     private BitsEventHandlerScanner() {}
 
@@ -42,6 +47,15 @@ public final class BitsEventHandlerScanner {
     }
 
     /**
+     * Resolves the class to scan for {@link BitsEventHandler} methods from a bean type without
+     * instantiating the bean. Unwraps CGLIB-generated subclasses so annotations on the real
+     * target are visible.
+     */
+    public static Class<?> targetClass(Class<?> beanType) {
+        return ClassUtils.getUserClass(beanType);
+    }
+
+    /**
      * Resolves the class to scan for {@link BitsEventHandler} methods. Unwraps Spring AOP
      * proxies (JDK and CGLIB) so annotations on the real target are visible — same defensive
      * step Spring's {@code EventListenerMethodProcessor} takes before an equivalent method scan.
@@ -50,13 +64,26 @@ public final class BitsEventHandlerScanner {
         return AopUtils.getTargetClass(bean);
     }
 
+    public static List<HandlerBinding> discoverHandlerBindings(ApplicationContext applicationContext) {
+        List<HandlerBinding> bindings = new ArrayList<>();
+        for (String beanName : applicationContext.getBeanDefinitionNames()) {
+            Class<?> beanType = applicationContext.getType(beanName);
+            if (beanType == null) {
+                continue;
+            }
+            Set<Method> methods = handlerMethods(targetClass(beanType));
+            if (!methods.isEmpty()) {
+                bindings.add(new HandlerBinding(beanName, methods));
+            }
+        }
+        return bindings;
+    }
+
     public static Set<TypeMapping> discoverHandledTypeMappings(
             ApplicationContext applicationContext, TypeMappingRegistry typeMappingRegistry) {
         Set<TypeMapping> mappings = new LinkedHashSet<>();
-        for (String beanName : applicationContext.getBeanDefinitionNames()) {
-            Object bean = applicationContext.getBean(beanName);
-            Class<?> typeToScan = BitsEventHandlerScanner.targetClass(bean);
-            for (Method method : handlerMethods(typeToScan)) {
+        for (HandlerBinding binding : discoverHandlerBindings(applicationContext)) {
+            for (Method method : binding.methods()) {
                 mappings.add(mappingFor(typeMappingRegistry, method));
             }
         }

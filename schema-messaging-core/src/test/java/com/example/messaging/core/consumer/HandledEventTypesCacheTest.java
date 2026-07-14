@@ -12,6 +12,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -37,7 +38,7 @@ class HandledEventTypesCacheTest {
     private static ApplicationContext contextWithHandler(TypeMapping mapping) {
         ApplicationContext ctx = mock(ApplicationContext.class);
         when(ctx.getBeanDefinitionNames()).thenReturn(new String[] {"handler"});
-        when(ctx.getBean("handler")).thenReturn(new Handler());
+        when(ctx.getType("handler")).thenAnswer(invocation -> Handler.class);
         return ctx;
     }
 
@@ -56,6 +57,7 @@ class HandledEventTypesCacheTest {
         assertThat(second).isEqualTo(first);
         assertThat(third).isEqualTo(first);
         verify(ctx, times(1)).getBeanDefinitionNames();
+        verify(ctx, never()).getBean("handler");
     }
 
     @Test
@@ -72,5 +74,6 @@ class HandledEventTypesCacheTest {
 
         assertThat(handled).containsExactly(mapping);
         verify(ctx, times(1)).getBeanDefinitionNames();
+        verify(ctx, never()).getBean("handler");
     }
 }

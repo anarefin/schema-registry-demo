@@ -15,6 +15,8 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class BitsEventHandlerScannerTest {
@@ -31,6 +33,13 @@ class BitsEventHandlerScannerTest {
         public void onDemo(DemoEvent event) {}
     }
 
+    static class Handler {
+        @BitsEventHandler
+        public void onDemo(DemoEvent event) {}
+    }
+
+    static class NoiseBean {}
+
     @Test
     void discoverHandledTypeMappings_findsHandlersOnJdkAopProxy() {
         TypeMapping mapping = new TypeMapping(
@@ -46,11 +55,34 @@ class BitsEventHandlerScannerTest {
 
         ApplicationContext ctx = mock(ApplicationContext.class);
         when(ctx.getBeanDefinitionNames()).thenReturn(new String[] {"proxiedHandler"});
-        when(ctx.getBean("proxiedHandler")).thenReturn(proxy);
+        when(ctx.getType("proxiedHandler")).thenAnswer(invocation -> ProxiedHandler.class);
 
         Set<TypeMapping> handled = BitsEventHandlerScanner.discoverHandledTypeMappings(ctx, registry);
 
         assertThat(handled).containsExactly(mapping);
+        verify(ctx, never()).getBean("proxiedHandler");
+    }
+
+    @Test
+    void discoverHandledTypeMappings_doesNotInstantiateNonHandlerBeans() {
+        TypeMapping mapping = new TypeMapping(
+                DemoEvent.class,
+                new SchemaCoordinates("events.demo", "DemoEvent"),
+                SchemaType.JSON,
+                "demo.event",
+                "events.demo.exchange");
+        TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
+
+        ApplicationContext ctx = mock(ApplicationContext.class);
+        when(ctx.getBeanDefinitionNames()).thenReturn(new String[] {"handler", "noiseBean"});
+        when(ctx.getType("handler")).thenAnswer(invocation -> Handler.class);
+        when(ctx.getType("noiseBean")).thenAnswer(invocation -> NoiseBean.class);
+
+        Set<TypeMapping> handled = BitsEventHandlerScanner.discoverHandledTypeMappings(ctx, registry);
+
+        assertThat(handled).containsExactly(mapping);
+        verify(ctx, never()).getBean("handler");
+        verify(ctx, never()).getBean("noiseBean");
     }
 
     private static Object jdkProxy(HandlerApi target) {
