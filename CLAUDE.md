@@ -107,12 +107,12 @@ Eight Maven modules (parent root = this directory):
   Machine-forbidden from depending on either `*-contracts` module; depends on `event-contract-kit`
   for `TypeMapping`/`SchemaCoordinates`/`SchemaType`.
 - **`event-contract-kit`** (formerly `amqp-topology-kit`) — domain-agnostic AMQP topology-building
-  library (naming conventions + retry-ladder factory, `com.example.amqp.topology.*`) plus, since
-  the shared `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types
-  (`com.example.amqp.topology.mapping.*`) and the build-time `@GenerateSchema` marker used by
-  `schema-gen-tools` to discover event records. A pure leaf module itself: banned from depending on
-  core or either `*-contracts` module. Depended on by `order-contracts`, `customer-contracts`,
-  and `schema-messaging-core`.
+  library (naming conventions + retry-ladder factory + `DomainTopology`/`DomainExchanges` exchange
+  factory, `com.example.amqp.topology.*`) plus, since the shared `TypeMapping`/`SchemaCoordinates`/
+  `SchemaType` data types and `Mappings` builder (`com.example.amqp.topology.mapping.*`) and the
+  build-time `@GenerateSchema` marker used by `schema-gen-tools` to discover event records. A pure
+  leaf module itself: banned from depending on core or either `*-contracts` module. Depended on by
+  `order-contracts`, `customer-contracts`, and `schema-messaging-core`.
 - **`schema-gen-tools`** — build-only schema generator (victools). Dependency-free with respect to
   every `*-contracts` module: each contracts module declares it as a plugin-level
   `exec-maven-plugin` dependency and invokes it at its own `process-classes`, scanning
@@ -121,14 +121,15 @@ Eight Maven modules (parent root = this directory):
   runtime classpath.
 - **`order-contracts`** — four code-first order event records + generated schemas
   (`com.example.contracts.orders.*`), plus `OrderTopologyAutoConfiguration` (domain **exchanges**
-  only: main / DLX / retry) and `OrderTypeMappingAutoConfiguration` (`TypeMapping` beans) — both
-  self-activating via `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
+  only: main / DLX / retry, delegating to `DomainTopology`) and `OrderTypeMappingAutoConfiguration`
+  (`TypeMapping` beans via `Mappings`) — both self-activating via
+  `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
   Depends on Jackson, jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and
   `event-contract-kit` (plus a test-scope dependency on `schema-gen-tools` for its own determinism
   test) — **no** dependency on `schema-messaging-core` (machine-enforced).
 - **`customer-contracts`** — mirror of `order-contracts` for the three customer events
   (`com.example.contracts.customers.*`, `topology.CustomerTopologyAutoConfiguration` /
-  `topology.CustomerTypeMappingAutoConfiguration`).
+  `topology.CustomerTypeMappingAutoConfiguration` — same `DomainTopology`/`Mappings` delegation).
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
   both contracts modules. Domain exchanges and `TypeMapping` wiring come from contracts
   auto-config; per-service queues/DLQs/retry ladders come from core's

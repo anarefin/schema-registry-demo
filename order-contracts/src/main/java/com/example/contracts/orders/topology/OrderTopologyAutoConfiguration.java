@@ -1,5 +1,7 @@
 package com.example.contracts.orders.topology;
 
+import com.example.amqp.topology.DomainExchanges;
+import com.example.amqp.topology.DomainTopology;
 import com.example.contracts.orders.OrderEventRouting;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -15,21 +17,23 @@ import org.springframework.context.annotation.Bean;
 @AutoConfiguration
 public class OrderTopologyAutoConfiguration {
 
+    private static final DomainExchanges EX = DomainTopology.of(OrderEventRouting.EXCHANGE);
+
     @Bean(OrderEventRouting.BEAN_EXCHANGE)
     @ConditionalOnMissingBean(name = OrderEventRouting.BEAN_EXCHANGE)
     public TopicExchange ordersExchange() {
-        return new TopicExchange(OrderEventRouting.EXCHANGE, true, false);
+        return EX.main();
     }
 
     @Bean(OrderEventRouting.BEAN_DLX)
     @ConditionalOnMissingBean(name = OrderEventRouting.BEAN_DLX)
     public TopicExchange ordersDlx() {
-        return new TopicExchange(OrderEventRouting.DLX, true, false);
+        return EX.dlx();
     }
 
     @Bean(OrderEventRouting.BEAN_RETRY_EXCHANGE)
     @ConditionalOnMissingBean(name = OrderEventRouting.BEAN_RETRY_EXCHANGE)
     public TopicExchange ordersRetryExchange() {
-        return new TopicExchange(OrderEventRouting.RETRY_EXCHANGE, true, false);
+        return EX.retry();
     }
 }

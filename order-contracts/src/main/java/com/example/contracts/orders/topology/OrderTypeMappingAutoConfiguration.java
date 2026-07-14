@@ -1,13 +1,12 @@
 package com.example.contracts.orders.topology;
 
+import com.example.amqp.topology.mapping.Mappings;
+import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.contracts.orders.OrderCancelled;
 import com.example.contracts.orders.OrderCreated;
 import com.example.contracts.orders.OrderEventRouting;
 import com.example.contracts.orders.OrderFulfilled;
 import com.example.contracts.orders.OrderShipped;
-import com.example.amqp.topology.mapping.SchemaCoordinates;
-import com.example.amqp.topology.mapping.SchemaType;
-import com.example.amqp.topology.mapping.TypeMapping;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -24,35 +23,29 @@ import org.springframework.context.annotation.Bean;
 @AutoConfiguration
 public class OrderTypeMappingAutoConfiguration {
 
-    private static SchemaCoordinates coords(String artifactId) {
-        return new SchemaCoordinates("events.orders", artifactId);
-    }
+    private static final Mappings M = Mappings.forDomain("events.orders", OrderEventRouting.EXCHANGE);
 
     @Bean("orderCreatedMapping")
     @ConditionalOnMissingBean(name = "orderCreatedMapping")
     public TypeMapping orderCreatedMapping() {
-        return new TypeMapping(OrderCreated.class, coords("OrderCreated"),
-                SchemaType.JSON, OrderEventRouting.CREATED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
+        return M.json(OrderCreated.class, OrderEventRouting.CREATED_ROUTING_KEY);
     }
 
     @Bean("orderShippedMapping")
     @ConditionalOnMissingBean(name = "orderShippedMapping")
     public TypeMapping orderShippedMapping() {
-        return new TypeMapping(OrderShipped.class, coords("OrderShipped"),
-                SchemaType.JSON, OrderEventRouting.SHIPPED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
+        return M.json(OrderShipped.class, OrderEventRouting.SHIPPED_ROUTING_KEY);
     }
 
     @Bean("orderCancelledMapping")
     @ConditionalOnMissingBean(name = "orderCancelledMapping")
     public TypeMapping orderCancelledMapping() {
-        return new TypeMapping(OrderCancelled.class, coords("OrderCancelled"),
-                SchemaType.JSON, OrderEventRouting.CANCELLED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
+        return M.json(OrderCancelled.class, OrderEventRouting.CANCELLED_ROUTING_KEY);
     }
 
     @Bean("orderFulfilledMapping")
     @ConditionalOnMissingBean(name = "orderFulfilledMapping")
     public TypeMapping orderFulfilledMapping() {
-        return new TypeMapping(OrderFulfilled.class, coords("OrderFulfilled"),
-                SchemaType.JSON, OrderEventRouting.FULFILLED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
+        return M.json(OrderFulfilled.class, OrderEventRouting.FULFILLED_ROUTING_KEY);
     }
 }

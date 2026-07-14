@@ -1,5 +1,7 @@
 package com.example.contracts.customers.topology;
 
+import com.example.amqp.topology.DomainExchanges;
+import com.example.amqp.topology.DomainTopology;
 import com.example.contracts.customers.CustomerEventRouting;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -15,21 +17,23 @@ import org.springframework.context.annotation.Bean;
 @AutoConfiguration
 public class CustomerTopologyAutoConfiguration {
 
+    private static final DomainExchanges EX = DomainTopology.of(CustomerEventRouting.EXCHANGE);
+
     @Bean(CustomerEventRouting.BEAN_EXCHANGE)
     @ConditionalOnMissingBean(name = CustomerEventRouting.BEAN_EXCHANGE)
     public TopicExchange customersExchange() {
-        return new TopicExchange(CustomerEventRouting.EXCHANGE, true, false);
+        return EX.main();
     }
 
     @Bean(CustomerEventRouting.BEAN_DLX)
     @ConditionalOnMissingBean(name = CustomerEventRouting.BEAN_DLX)
     public TopicExchange customersDlx() {
-        return new TopicExchange(CustomerEventRouting.DLX, true, false);
+        return EX.dlx();
     }
 
     @Bean(CustomerEventRouting.BEAN_RETRY_EXCHANGE)
     @ConditionalOnMissingBean(name = CustomerEventRouting.BEAN_RETRY_EXCHANGE)
     public TopicExchange customersRetryExchange() {
-        return new TopicExchange(CustomerEventRouting.RETRY_EXCHANGE, true, false);
+        return EX.retry();
     }
 }
