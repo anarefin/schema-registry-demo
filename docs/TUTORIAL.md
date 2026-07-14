@@ -89,9 +89,12 @@ graph LR
 `SchemaAwareMessageConverter`, `LocalSchemaCatalog` (classpath schema load), `EventPublisher`,
 the consumer-side DLX/retry machinery (`EventConsumerSupport`, `DlxMessageRecoverer`,
 `DlxRoutingAdvice`), and the per-service queue wiring — `ServiceQueueTopologyAutoConfiguration`
-(declares this service's own queues/DLQs/retry ladders) and `BitsEventHandlerScanner` (the shared
-`@BitsEventHandler` discovery those queues, the listener registrar, and the health indicator all
-key off). It knows nothing about orders or customers.
+(declares this service's own queues/DLQs/retry ladders), `BitsEventHandlerScanner` (shared
+`@BitsEventHandler` discovery via non-instantiating `getType` scan), and
+`HandledEventTypesCache` (runs that scan **once** at startup and shares the memoized handled
+`TypeMapping` set with topology declaration and the queue-depth health indicator). Listener-only
+beans are gated behind `events.consumer.enabled` (see Services below). It knows nothing about
+orders or customers.
 
 `event-contract-kit` (formerly `amqp-topology-kit`) is a pure leaf module: `EventTopologyFactory`
 (builds the queue/DLQ/retry-ladder `Declarable`s for one routing key **and service name**) and
@@ -134,19 +137,31 @@ in the services themselves.
 `*TypeMappingAutoConfiguration`, alongside its `*TopologyAutoConfiguration` (which declares only
 the domain exchanges). Converter and `TypeMapping` wiring arrive automatically via Spring Boot
 auto-configuration; the queues themselves are declared by `schema-messaging-core`'s
-`ServiceQueueTopologyAutoConfiguration`, which scans this service's `@BitsEventHandler` methods and
-provisions one dedicated queue/DLQ/retry-ladder per handled event, named
-`{routingKey}.{serviceName}.queue` (`serviceName` = `spring.application.name`). A service that
-handles no events (e.g. `producer-service`) therefore declares no queues at all — there is still
-no per-service topology, converter, or schema-mapping glue to hand-write.
+`ServiceQueueTopologyAutoConfiguration`, which reads the handled set from
+`HandledEventTypesCache` and provisions one dedicated queue/DLQ/retry-ladder per handled event,
+named `{routingKey}.{serviceName}.queue` (`serviceName` = `spring.application.name`).
+
+Consumer-side auto-config is split by role: `SchemaMessagingConsumerAutoConfiguration` always
+registers `RabbitAdmin` (exchange declaration) and `HandledEventTypesCache`. Listener-only beans
+(`rabbitListenerContainerFactory`, `BitsEventHandlerRegistrar`, `DlxRoutingAdvice`,
+`DlxMessageRecoverer`) live in a gated inner `ListenerConfiguration`, active when
+`events.consumer.enabled=true` (the default). `producer-service` sets
+`events.consumer.enabled: false` — no listener stack, no per-service queues (empty handled set).
+`PureProducerHandlerGuard` aborts startup if a service opts out of consuming yet still declares
+`@BitsEventHandler` methods. There is still no per-service topology, converter, or schema-mapping
+glue to hand-write.
 
 **Wire format:** the AMQP message body is the raw serialized JSON bytes only, no
 envelope. Schema identity travels entirely in `X-Schema-*` headers plus
 `X-Correlation-Id`.
 
-**Failure model:** transient failures retry through a 5s/30s/5m TTL ladder (max 3 tries)
-before landing on the DLQ; permanent failures (validation, deserialization, type mismatch) go
-straight to the DLQ. Section 4.8 shows exactly which code makes that decision.
+**Failure model:** transient failures retry through a 5s/30s/5m TTL ladder (max 3 tries,
+bound once via `RetryTierProperties`) before landing on the DLQ; permanent failures (validation,
+deserialization, type mismatch) go straight to the DLQ. Each per-service main queue also carries
+a DLX argument as a safety net — if `recover()` itself fails or the message is rejected without
+a successful recover, it still dead-letters to the service's DLQ instead of vanishing. On deploy,
+`events.topology.decommission-legacy-queues` (default `true`) deletes the pre-per-service
+shared-domain queue names. Section 4.8 shows exactly which code makes the routing decision.
 
 ## 3. Vocabulary You'll See in the Trace
 
@@ -160,12 +175,13 @@ naming, so you don't have to keep looking them up mid-trace.
 | `TypeMappingRegistry` / `ResolvedSchema` | `schema-messaging-core` | `TypeMappingRegistry` indexes every `TypeMapping` bean for O(1) lookup; `ResolvedSchema` is the classpath-loaded schema bytes + type. |
 | `SchemaAwareMessageConverter` | `schema-messaging-core` | The one Spring AMQP `MessageConverter` that does `toMessage`/`fromMessage` for every event — the single validation authority. |
 | `LocalSchemaCatalog` | `schema-messaging-core` | Eagerly loads every mapping's JSON Schema from the classpath at startup; fails fast if missing. |
-| `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. |
+| `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. Parses each payload once — produce: `valueToTree` → validate → `writeValueAsBytes`; consume: `readTree` → validate → `convertValue`. |
 | `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), ...)`. Caller supplies only the event. |
 | `BitsEventHandler` | `schema-messaging-core` | Marker on listener methods — no queue name or container factory. Queue resolved from the parameter type's `TypeMapping` at startup. |
-| `BitsEventHandlerRegistrar` | `schema-messaging-core` | `RabbitListenerConfigurer` that registers `@BitsEventHandler` methods; derives queue via `TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName)`. |
-| `BitsEventHandlerScanner` | `schema-messaging-core` | Shared `@BitsEventHandler` discovery: which event types this service handles. Used by the registrar, `ServiceQueueTopologyAutoConfiguration`, and `QueueDepthHealthIndicator` so they can't disagree on the handled set. |
-| `ServiceQueueTopologyAutoConfiguration` | `schema-messaging-core` | Declares this service's per-service queues/DLQs/retry ladders — one per handled event, named `{routingKey}.{serviceName}.queue` — via `EventTopologyFactory`. Nothing declared if the service has no handlers. |
+| `BitsEventHandlerRegistrar` | `schema-messaging-core` | `RabbitListenerConfigurer` (gated behind `events.consumer.enabled`) that registers `@BitsEventHandler` methods; uses `BitsEventHandlerScanner.discoverHandlerBindings` (non-instantiating) then `getBean()` only for beans that declare handlers; derives queue via `TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName)`. |
+| `BitsEventHandlerScanner` | `schema-messaging-core` | Shared `@BitsEventHandler` discovery via `applicationContext.getType(beanName)` — no blanket `getBean()`. Unwraps AOP proxies. Used by `HandledEventTypesCache`, `BitsEventHandlerRegistrar`, and `PureProducerHandlerGuard`. |
+| `HandledEventTypesCache` | `schema-messaging-core` | Runs `BitsEventHandlerScanner.discoverHandledTypeMappings(...)` once at startup and memoizes the result. Shared by `ServiceQueueTopologyAutoConfiguration` and `QueueDepthHealthIndicator` so topology and health probes agree on the handled set without re-scanning. |
+| `ServiceQueueTopologyAutoConfiguration` | `schema-messaging-core` | Declares this service's per-service queues/DLQs/retry ladders — one per handled event from `HandledEventTypesCache`, named `{routingKey}.{serviceName}.queue` — via `EventTopologyFactory`. Decommissions legacy shared-domain queues when configured. Nothing declared if the service has no handlers. |
 | `DlxRoutingAdvice` | `schema-messaging-core` | AOP advice wrapped around every listener invocation; catches exceptions and hands them to the recoverer. |
 | `DlxMessageRecoverer` | `schema-messaging-core` | Decides DLQ vs. retry-exchange and actually sends the message there. |
 | `EventConsumerSupport` | `schema-messaging-core` | `classify(Exception)` — the permanent-vs-transient decision, by cause-chain walk — and DLQ failure-header population. |
@@ -265,9 +281,11 @@ public Message toMessage(Object object, MessageProperties messageProperties) {
 
 - `localSchemaCatalog.get()` returns the schema loaded at startup from
   `classpath:schemas/<kebab-name>.schema.json` — no network call.
-- `strategy.serialize()` → `JsonSchemaStrategy.serialize()` Jackson-serializes the record,
-  then validates (networknt, Draft-07). **If validation fails, `SchemaValidationException`
-  is thrown and no message is ever sent** — the producer sees a 400.
+- `strategy.serialize()` → `JsonSchemaStrategy.serialize()` builds a single `JsonNode`
+  (`valueToTree`), validates it (networknt, Draft-07), then writes bytes. **If validation
+  fails, `SchemaValidationException` is thrown and no message is ever sent** — the producer
+  sees a 400. One parse/serialize pass per message (same on consume: `readTree` → validate →
+  `convertValue`).
 - `SchemaMessageHeaders.setSchemaHeaders()` stamps identity headers:
 
   | Header | Purpose |
@@ -312,31 +330,39 @@ declares just the three `TopicExchange` beans for the domain — `events.orders.
 and `.retry.exchange` — and nothing else. It no longer enumerates routing keys or builds queues.
 
 **Per-service queues (core).** `schema-messaging-core/.../config/ServiceQueueTopologyAutoConfiguration.java`
-runs as a `SmartInitializingSingleton` after the converter is wired. It asks
-`BitsEventHandlerScanner.discoverHandledTypeMappings(...)` which event types *this* service actually
-handles (by scanning every bean for `@BitsEventHandler` methods and resolving each parameter type to
-its `TypeMapping`), and for each one calls:
+runs as a `SmartInitializingSingleton` after the converter is wired. It reads the handled set
+from `HandledEventTypesCache` (which already ran `BitsEventHandlerScanner.discoverHandledTypeMappings`
+once — a non-instantiating scan via `applicationContext.getType(beanName)`, no blanket
+`getBean()`), and for each handled `TypeMapping` calls:
 
 ```java
 List<Declarable> declarables = EventTopologyFactory.declarablesForEvent(
         mapping.routingKey(), serviceName, mainExchange, dlx, retryExchange, tierTtls);
 ```
 
+Before declaring new topology, if `events.topology.decommission-legacy-queues` is `true`
+(default), it deletes the pre-per-service shared-domain queue names for each handled routing key
+via `TopologyNaming.legacySharedDomainQueueNames(...)`. Exchanges are declared at most once per
+boot via `declareExchangeOnce` (properties come from the contracts-module `TopicExchange` beans).
+
 `EventTopologyFactory.declarablesForEvent()` (`event-contract-kit/.../EventTopologyFactory.java`)
 builds, per handled routing key + service name:
 
 - the main queue (`TopologyNaming.serviceQueueName`, e.g. `orders.created.consumer-service.queue`)
-  with **two** bindings to the main exchange: the plain routing key `orders.created` (a **fan-out**
-  binding, so every subscribed service gets its own copy of a freshly published event) and a private
-  `orders.created.consumer-service` key (used only for retry redelivery — see §4.8);
+  with a **DLX safety net** (`deadLetterExchange` → domain DLX, `deadLetterRoutingKey` →
+  service-scoped DLQ key) so a reject that bypasses a successful `recover()` still lands on the
+  DLQ, plus **two** bindings to the main exchange: the plain routing key `orders.created` (a
+  **fan-out** binding, so every subscribed service gets its own copy of a freshly published event)
+  and a private `orders.created.consumer-service` key (used only for retry redelivery — see §4.8);
 - the DLQ (`orders.created.consumer-service.dlq`) bound to the DLX with the service-scoped key;
 - three TTL retry queues (5s/30s/5m, `orders.created.consumer-service.retry.<tier>`), each of which
   dead-letters back to the main exchange with the service-scoped key on TTL expiry.
 
 The `serviceName` is `spring.application.name` (`consumer-service` here). Because queues are keyed
-per service and declared only for handled events, `producer-service` (no `@BitsEventHandler`
-methods) declares **no** queues at all — no orphan fan-out copies pile up on the exchange. The
-declared queues/bindings are applied idempotently to the broker via the shared `RabbitAdmin` bean
+per service and declared only for handled events, `producer-service` (`events.consumer.enabled:
+false`, no `@BitsEventHandler` methods) declares **no** queues and carries **no** listener beans —
+no orphan fan-out copies pile up on the exchange. The declared queues/bindings are applied
+idempotently to the broker via the shared `RabbitAdmin` bean
 (`SchemaMessagingConsumerAutoConfiguration`).
 
 `OrderEventRouting` no longer exposes `*_QUEUE` constants — queue names are derived at
@@ -347,12 +373,13 @@ handler scan, with no topology list to edit.
 
 ### 4.6 Consumer wiring
 
-`SchemaMessagingConsumerAutoConfiguration.java:68-88` builds the
-`rabbitListenerContainerFactory` bean, wiring in the *same*
-`SchemaAwareMessageConverter` used on the producer side, plus a `DlxRoutingAdvice`
-advice chain (section 4.8). It also registers `BitsEventHandlerRegistrar`, which
-implements `RabbitListenerConfigurer` and programmatically binds every `@BitsEventHandler`
-method to the queue named by its parameter type's `TypeMapping`.
+`SchemaMessagingConsumerAutoConfiguration.ListenerConfiguration` (gated behind
+`events.consumer.enabled=true`, the default) builds the `rabbitListenerContainerFactory` bean,
+wiring in the *same* `SchemaAwareMessageConverter` used on the producer side, plus a
+`DlxRoutingAdvice` advice chain (section 4.8). It also registers `BitsEventHandlerRegistrar`,
+which implements `RabbitListenerConfigurer` and programmatically binds every `@BitsEventHandler`
+method to the queue named by its parameter type's `TypeMapping`. A pure producer
+(`events.consumer.enabled=false`) never loads this inner configuration.
 
 `consumer-service/src/main/java/com/example/consumer/listener/OrderEventListener.java:25-28`:
 
@@ -366,10 +393,11 @@ public void onOrderCreated(OrderCreated event) {
 At startup, `BitsEventHandlerRegistrar` resolves `OrderCreated.class` → `TypeMapping` →
 `TopologyNaming.serviceQueueName("orders.created", "consumer-service")` →
 `orders.created.consumer-service.queue` (the exact queue `ServiceQueueTopologyAutoConfiguration`
-declared for it in §4.5 — both go through `BitsEventHandlerScanner`, so they can't disagree), then
-registers the method against the shared `rabbitListenerContainerFactory`. Spring AMQP calls
-`fromMessage()` on the raw bytes *before* this method body ever runs — by the time
-`onOrderCreated` executes, `event` is already a validated, typed `OrderCreated` record.
+declared for it in §4.5 — both agree via the shared `BitsEventHandlerScanner` algorithm and
+`HandledEventTypesCache`), then registers the method against the shared
+`rabbitListenerContainerFactory`. Spring AMQP calls `fromMessage()` on the raw bytes *before* this
+method body ever runs — by the time `onOrderCreated` executes, `event` is already a validated,
+typed `OrderCreated` record.
 
 ### 4.7 Convert: consume path
 
@@ -403,7 +431,8 @@ Notable details:
   `IncompatibleSchemaTypeException` (permanent).
 - **Unknown artifact:** no TypeMapping → `UnknownSchemaArtifactException` (permanent).
 - Schema comes from `LocalSchemaCatalog` (already loaded at startup).
-- `JsonSchemaStrategy.deserialize()` validates (default) then Jackson-deserializes.
+- `JsonSchemaStrategy.deserialize()` parses once (`readTree`), validates (default), then
+  `convertValue`s to the target type.
 
 ```mermaid
 sequenceDiagram
@@ -495,6 +524,10 @@ service's own retry/DLQ, never fanned out. A message that has already been retri
 arrives back via its private `rk.serviceName` binding, so `getReceivedRoutingKey()` carries
 that suffix; the recoverer first `TopologyNaming.stripServiceRoutingKey(...)`s it back to the
 plain key before re-deriving the next tier's key, or the `serviceName` would be appended twice.
+
+**DLX safety net:** the main queue's broker-side DLX argument (§4.5) is the belt-and-suspenders
+path — if `recover()` itself throws, or the container rejects the message without a successful
+recover, RabbitMQ dead-letters it to the service-scoped DLQ key anyway instead of dropping it.
 
 **Go run it yourself**: section 4 traced the code; to watch this happen against a live
 broker, run [`docs/TESTING-GUIDE.md`](TESTING-GUIDE.md) §8 (happy path), §9 (validation
