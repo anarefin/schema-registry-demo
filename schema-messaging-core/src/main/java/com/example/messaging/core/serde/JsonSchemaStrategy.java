@@ -39,6 +39,9 @@ import java.util.stream.Collectors;
  * that structurally invalid inbound JSON (wrong field types, missing required fields from
  * a mis-deployed producer) is caught and routed to DLQ rather than silently deserializing
  * into a partial POJO.
+ *
+ * <p>Each message is parsed once: produce uses {@code valueToTree} → validate →
+ * {@code writeValueAsBytes}; consume uses {@code readTree} → validate → {@code convertValue}.
  */
 public class JsonSchemaStrategy implements SerializationStrategy {
 
@@ -68,9 +71,9 @@ public class JsonSchemaStrategy implements SerializationStrategy {
     public byte[] serialize(Object payload, ResolvedSchema schema)
             throws SchemaValidationException, SerializationException {
         try {
-            byte[] jsonBytes = objectMapper.writeValueAsBytes(payload);
-            validate(jsonBytes, schema);
-            return jsonBytes;
+            JsonNode node = objectMapper.valueToTree(payload);
+            validate(node, schema);
+            return objectMapper.writeValueAsBytes(node);
         } catch (SchemaValidationException e) {
             throw e;
         } catch (Exception e) {
@@ -84,7 +87,9 @@ public class JsonSchemaStrategy implements SerializationStrategy {
         String ctx = targetType.getSimpleName();
         try {
             if (validateOnDeserialize) {
-                validate(bytes, schema);
+                JsonNode node = readTreeOrThrow(bytes, schema);
+                validate(node, schema);
+                return objectMapper.convertValue(node, targetType);
             }
             return objectMapper.readValue(bytes, targetType);
         } catch (SchemaValidationException e) {
@@ -107,10 +112,18 @@ public class JsonSchemaStrategy implements SerializationStrategy {
 
     // ---- private -----------------------------------------------------------
 
-    private void validate(byte[] jsonBytes, ResolvedSchema resolvedSchema) throws SchemaValidationException {
+    private JsonNode readTreeOrThrow(byte[] bytes, ResolvedSchema schema) throws SchemaValidationException {
+        try {
+            return objectMapper.readTree(bytes);
+        } catch (Exception e) {
+            throw new SchemaValidationException(schema.coordinates().toString(),
+                    "Failed to compile/validate JSON schema: " + e.getMessage(), e);
+        }
+    }
+
+    private void validate(JsonNode node, ResolvedSchema resolvedSchema) throws SchemaValidationException {
         try {
             JsonSchema jsonSchema = compile(resolvedSchema);
-            JsonNode node = objectMapper.readTree(jsonBytes);
             Set<ValidationMessage> errors = jsonSchema.validate(node);
             if (!errors.isEmpty()) {
                 List<String> errorMessages = errors.stream()

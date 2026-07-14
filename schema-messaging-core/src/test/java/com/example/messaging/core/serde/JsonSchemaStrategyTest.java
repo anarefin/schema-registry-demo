@@ -7,6 +7,7 @@ import com.example.messaging.core.model.ResolvedSchema;
 import com.example.amqp.topology.mapping.SchemaCoordinates;
 import com.example.amqp.topology.mapping.SchemaType;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,12 @@ import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
  * TC-serde-5 valid JSON round-trip · TC-serde-6 invalid JSON → structured errors ·
@@ -144,6 +151,38 @@ class JsonSchemaStrategyTest {
     void schemaType_isJson() {
         assertThat(strategy.schemaType()).isEqualTo(SchemaType.JSON);
         assertThat(strategy.contentType()).isEqualTo("application/json");
+    }
+
+    /** PERF-001: consume path parses bytes once (readTree → validate → convertValue). */
+    @Test
+    void deserialize_validateEnabled_parsesOnce() throws Exception {
+        ObjectMapper mapper = spy(new ObjectMapper()
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false));
+        JsonSchemaStrategy strat = new JsonSchemaStrategy(mapper, true);
+        strat.warm(schema);
+        byte[] bytes = "{\"name\":\"Alice\",\"age\":30}".getBytes(StandardCharsets.UTF_8);
+
+        strat.deserialize(bytes, Person.class, schema);
+
+        verify(mapper, times(1)).readTree(any(byte[].class));
+        verify(mapper, never()).readValue(any(byte[].class), eq(Person.class));
+        verify(mapper, times(1)).convertValue(any(JsonNode.class), eq(Person.class));
+    }
+
+    /** PERF-001: produce path serializes once (valueToTree → validate → writeValueAsBytes). */
+    @Test
+    void serialize_parsesOnce() throws Exception {
+        ObjectMapper mapper = spy(new ObjectMapper()
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false));
+        JsonSchemaStrategy strat = new JsonSchemaStrategy(mapper, true);
+        strat.warm(schema);
+        Person p = new Person("Alice", 30);
+
+        strat.serialize(p, schema);
+
+        verify(mapper, times(1)).valueToTree(p);
+        verify(mapper, never()).readTree(any(byte[].class));
+        verify(mapper, times(1)).writeValueAsBytes(any(JsonNode.class));
     }
 
     /** Malformed schema bytes fail at warm() with InvalidSchemaDefinitionException (ADR-0004). */
