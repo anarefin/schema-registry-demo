@@ -38,6 +38,16 @@ Production-readiness is a different bar, and the project — by its own `CLAUDE.
 | Medium | 8 |
 | Low | 8 |
 
+> ### Remediation Status (updated 2026-07-14, post-review)
+> **4 of 19 findings resolved** by commits landed on `improve/queue-per-service` after this
+> review was generated: `fe02add` (parse-once JSON), `b8e5709` (non-eager handler bean
+> resolution), `3f01b5b` (gate consumer listener beans out of a pure producer).
+> Remaining open: **High 3** (SPRING-001, QUAL-001, SCAL-001 — none resolved), **Medium 6**,
+> **Low 6**.
+> Resolved: [ARCH-001] (Low), [PERF-001] (Medium), [PERF-002] (Medium), [GC-001] (Low) — see
+> per-finding status lines below and the Prioritized Fix List in §4. All other findings are
+> unchanged and still apply.
+
 ---
 
 ## 3. Findings
@@ -45,6 +55,11 @@ Production-readiness is a different bar, and the project — by its own `CLAUDE.
 ## 1. Overall Architecture Review
 
 ### [ARCH-001] [Low] Consumer listener infrastructure auto-configures in the producer service
+**Status: ✅ RESOLVED** — commit `3f01b5b`. Listener-only beans (`rabbitListenerContainerFactory`,
+`BitsEventHandlerRegistrar`, `DlxMessageRecoverer`, `DlxRoutingAdvice`) now live in a nested
+`ListenerConfiguration` gated by `@ConditionalOnProperty("events.consumer.enabled",
+matchIfMissing = true)`; producer-service sets it `false`, consumer-service `true`.
+Proven by `ConsumerListenerGatingTest`.
 - Location: `schema-messaging-core/.../config/SchemaMessagingConsumerAutoConfiguration.java` — Module: schema-messaging-core
 - Review: This `@AutoConfiguration` is unconditional, so a pure producer (no `@BitsEventHandler` methods) still instantiates `rabbitListenerContainerFactory`, `BitsEventHandlerRegistrar`, `DlxMessageRecoverer`, and `DlxRoutingAdvice` that it never uses. `RabbitAdmin` is legitimately needed by the producer to declare exchanges, but the listener stack is dead weight and blurs the producer/consumer boundary.
 - Fix: Gate the listener-only beans behind a condition — e.g. `@ConditionalOnClass(RabbitListenerConfigurer.class)` is already true, so prefer a `@ConditionalOnProperty("events.consumer.enabled")` or split a `...ProducerAutoConfiguration` (RabbitAdmin only) from the consumer one. Keeps a producer's context free of unused listener machinery.
@@ -90,11 +105,18 @@ The module graph is exemplary — leaf `event-contract-kit`, domain-agnostic `co
 ## 8. Performance Review
 
 ### [PERF-001] [Medium] JSON is parsed twice per message on both produce and consume paths
+**Status: ✅ RESOLVED** — commit `fe02add`. `serialize()`/`deserialize()` now parse once
+(`valueToTree`/`readTree` → validate the resulting `JsonNode` → `writeValueAsBytes`/`convertValue`).
+New tests assert single-parse via Mockito spies.
 - Location: `schema-messaging-core/.../serde/JsonSchemaStrategy.java` (`serialize`, `deserialize`, `validate`) — Module: schema-messaging-core
 - Review: On consume with `validateOnDeserialize=true` (the default), `validate()` calls `objectMapper.readTree(bytes)` and then `deserialize()` calls `objectMapper.readValue(bytes, type)` — the payload is fully parsed twice. On produce, `serialize()` does `writeValueAsBytes(payload)` then `validate()` re-parses those bytes with `readTree`. That doubles parse CPU and allocation for every message.
 - Fix: Parse once. On consume, `JsonNode node = readTree(bytes)`, validate `node`, then `objectMapper.convertValue(node, targetType)`. On produce, `JsonNode node = objectMapper.valueToTree(payload)`, validate `node`, then `objectMapper.writeValueAsBytes(node)`. Eliminates the redundant parse without changing semantics.
 
 ### [PERF-002] [Medium] Startup scans call `getBean()` on every bean definition, forcing eager instantiation
+**Status: ✅ RESOLVED** — commit `b8e5709`. `BitsEventHandlerScanner`/`BitsEventHandlerRegistrar`
+now resolve bean types via `applicationContext.getType(beanName)` and only call `getBean()` on
+beans that actually declare a `@BitsEventHandler` method. Proven by a new test asserting
+non-handler beans are never instantiated.
 - Location: `schema-messaging-core/.../consumer/BitsEventHandlerRegistrar.java` (`configureRabbitListeners`) and `BitsEventHandlerScanner.discoverHandledTypeMappings` — Module: schema-messaging-core
 - Review: Both loops iterate `applicationContext.getBeanDefinitionNames()` and call `getBean(beanName)` on each to reflectively inspect for `@BitsEventHandler`. This forces instantiation of *every* bean (defeating any `@Lazy`), creates-and-discards prototype-scoped beans, and can trigger side effects on beans that were never meant to be eagerly resolved. Cost scales with total bean count, not handler count.
 - Fix: Iterate bean definitions and resolve types without instantiating — use `applicationContext.getType(beanName)` / `ConfigurableListableBeanFactory.getBeanNamesForType`, or restrict the scan to `@Component`-annotated candidates, and only `getBean()` the beans that actually declare a handler method.
@@ -106,6 +128,8 @@ No issues found. Caches are fixed-size and bounded to the registered `TypeMappin
 ## 10. Garbage Collection Review
 
 ### [GC-001] [Low] Elevated allocation churn from double JSON parsing under load
+**Status: ✅ RESOLVED** — direct consequence of [PERF-001] (commit `fe02add`); no separate fix
+was needed since the redundant parse no longer exists.
 - Location: `schema-messaging-core/.../serde/JsonSchemaStrategy.java` — Module: schema-messaging-core
 - Review: The redundant parse in [PERF-001] roughly doubles short-lived `JsonNode`/token allocation per message, raising young-gen churn proportionally to throughput. No long-lived allocation concern exists.
 - Fix: Resolving [PERF-001] removes the extra allocation. The default G1 collector is appropriate for this workload; no collector change is warranted at current scale.
@@ -178,17 +202,17 @@ Rough capacity read against the module's target tiers, given the current single-
 3. [SCAL-001][High] Single-consumer throughput ceiling — `schema-messaging-core/.../config/SchemaMessagingConsumerAutoConfiguration.java` — make concurrency/prefetch configurable and load-test.
 4. [SPRING-002][Medium] `@Value`-scattered retry/topology config — `schema-messaging-core/.../config/RetryTierPropertiesAutoConfiguration.java` — migrate to validated `@ConfigurationProperties`.
 5. [JDK-001][Medium] Virtual threads not enabled on Java 25 — `*/application.yml` — set `spring.threads.virtual.enabled=true` and validate.
-6. [PERF-001][Medium] Double JSON parse per message — `schema-messaging-core/.../serde/JsonSchemaStrategy.java` — parse once, validate the `JsonNode`, then convert.
-7. [PERF-002][Medium] Startup `getBean()` over all definitions — `schema-messaging-core/.../consumer/BitsEventHandlerRegistrar.java` — resolve types without instantiating beans.
+6. ✅ RESOLVED — [PERF-001][Medium] Double JSON parse per message — `schema-messaging-core/.../serde/JsonSchemaStrategy.java` — parse once, validate the `JsonNode`, then convert. (commit `fe02add`)
+7. ✅ RESOLVED — [PERF-002][Medium] Startup `getBean()` over all definitions — `schema-messaging-core/.../consumer/BitsEventHandlerRegistrar.java` — resolve types without instantiating beans. (commit `b8e5709`)
 8. [CONC-001][Medium] Listener concurrency/prefetch at defaults — `schema-messaging-core/.../config/SchemaMessagingConsumerAutoConfiguration.java` — expose and set container concurrency/prefetch.
 9. [MAINT-001][Medium] Retry tiers hard-coded to 3 — `schema-messaging-core/.../config/RetryTierProperties.java` — model tiers as a `List<Duration>`.
 10. [SCAL-002][Medium] DLQ backlog drives service DOWN — `consumer-service/.../health/QueueDepthHealthIndicator.java` — keep DLQ depth as metric/alert, don't flip liveness/readiness.
 11. [SCAL-003][Medium] Broker RPCs per health probe — `consumer-service/.../health/QueueDepthHealthIndicator.java` — cache/sample queue depths; keep liveness broker-free.
-12. [ARCH-001][Low] Consumer infra active in producer — `schema-messaging-core/.../config/SchemaMessagingConsumerAutoConfiguration.java` — gate listener-only beans.
+12. ✅ RESOLVED — [ARCH-001][Low] Consumer infra active in producer — `schema-messaging-core/.../config/SchemaMessagingConsumerAutoConfiguration.java` — gate listener-only beans. (commit `3f01b5b`)
 13. [ARCH-002][Low] `SchemaFileNaming` duplicated — `schema-messaging-core` + `schema-gen-tools` — no action while parity tests hold; revisit if a third copy appears.
 14. [SPRING-003][Low] Field-injected `serviceName` — `schema-messaging-core/.../config/SchemaMessagingConsumerAutoConfiguration.java:49` — use bean-method parameter injection with a default.
 15. [JDK-002][Low] `Collectors.toList()` → `Stream.toList()` — `schema-messaging-core/.../serde/JsonSchemaStrategy.java:119`.
-16. [GC-001][Low] Allocation churn from double parse — `schema-messaging-core/.../serde/JsonSchemaStrategy.java` — resolved by [PERF-001]; keep G1.
+16. ✅ RESOLVED — [GC-001][Low] Allocation churn from double parse — `schema-messaging-core/.../serde/JsonSchemaStrategy.java` — resolved by [PERF-001]; keep G1. (commit `fe02add`)
 17. [QUAL-002][Low] `long`→`int` TTL truncation — `event-contract-kit/.../topology/EventTopologyFactory.java:24` — `Math.toIntExact` / validate.
 18. [QUAL-003][Low] Magic `512` truncation literal — `schema-messaging-core/.../consumer/EventConsumerSupport.java:66` — extract a constant.
 19. [MAINT-002][Low] Decommission flag defaults on permanently — `schema-messaging-core/.../config/ServiceQueueTopologyAutoConfiguration.java:42` — flip default to `false` post-migration.
