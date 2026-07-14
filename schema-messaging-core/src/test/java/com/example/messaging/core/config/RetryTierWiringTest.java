@@ -6,7 +6,6 @@ import com.example.messaging.core.consumer.HandledEventTypesCache;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -30,7 +29,7 @@ class RetryTierWiringTest {
     void bothConsumers_receiveIdenticalTierArrayFromSharedRetryTierProperties() {
         RetryTierProperties sharedProperties = new RetryTierProperties(111L, 222L, 333L);
 
-        DlxMessageRecoverer recoverer = new SchemaMessagingConsumerAutoConfiguration()
+        DlxMessageRecoverer recoverer = new SchemaMessagingConsumerAutoConfiguration.ListenerConfiguration()
                 .dlxMessageRecoverer(mock(EventConsumerSupport.class), mock(RabbitTemplate.class), sharedProperties);
 
         ServiceQueueTopologyAutoConfiguration.ServiceQueueTopologyConfigurer configurer =
