@@ -7,6 +7,8 @@ import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
@@ -81,20 +83,25 @@ class LegacyQueueDecommissionIT {
                 Instant.parse("2026-05-31T00:00:00Z"));
         byte[] body = objectMapper.writeValueAsBytes(event);
 
-        rabbitTemplate.convertAndSend(
+        // Send the pre-serialized bytes with X-Schema-* headers set directly. Using send() with a
+        // pre-built Message bypasses the RabbitTemplate's SchemaAwareMessageConverter — convertAndSend
+        // would run the byte[] through toMessage and fail with "No TypeMapping registered for [B".
+        MessageProperties props = new MessageProperties();
+        props.setContentType("application/json");
+        props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
+        props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
+        props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
+        rabbitTemplate.send(
                 OrderEventRouting.EXCHANGE,
                 OrderEventRouting.CREATED_ROUTING_KEY,
-                body,
-                message -> {
-                    message.getMessageProperties().setContentType("application/json");
-                    message.getMessageProperties().setHeader(SchemaMessageHeaders.GROUP_ID, "events.orders");
-                    message.getMessageProperties().setHeader(SchemaMessageHeaders.ARTIFACT_ID, "OrderCreated");
-                    message.getMessageProperties().setHeader(SchemaMessageHeaders.TYPE, "JSON");
-                    return message;
-                });
+                new Message(body, props));
 
+        // The legacy queue was decommissioned at startup; publishing to the exchange never
+        // recreates a queue, so the event routes only to the per-service queue and the legacy
+        // name stays absent. Asserting non-existence (rather than receive(), which would throw
+        // 404 NOT_FOUND on the missing queue) is the honest check that nothing accumulates there.
         await().atMost(5, TimeUnit.SECONDS).untilAsserted(() ->
-                assertThat(rabbitTemplate.receive(LEGACY_MAIN_QUEUE, 200)).isNull());
+                assertThat(rabbitAdmin.getQueueProperties(LEGACY_MAIN_QUEUE)).isNull());
     }
 
     private static void seedLegacySharedDomainTopology() {

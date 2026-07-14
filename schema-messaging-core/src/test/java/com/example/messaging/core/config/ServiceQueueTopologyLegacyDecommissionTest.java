@@ -36,14 +36,17 @@ class ServiceQueueTopologyLegacyDecommissionTest {
 
         configurer(cache, rabbitAdmin, true).afterSingletonsInstantiated();
 
-        InOrder inOrder = inOrder(rabbitAdmin);
-        for (String queueName : TopologyNaming.legacySharedDomainQueueNames("orders.created", 3)) {
-            inOrder.verify(rabbitAdmin).deleteQueue(queueName);
+        // handledTypeMappings() is an unordered Set, so cross-event deletion order is not
+        // specified. The contract is per-event: every legacy queue for a handled event (in
+        // tier order) is deleted before any per-service queue is declared. Verify each event
+        // with its own InOrder so the assertion holds regardless of set iteration order.
+        for (String routingKey : List.of("orders.created", "orders.shipped")) {
+            InOrder inOrder = inOrder(rabbitAdmin);
+            for (String queueName : TopologyNaming.legacySharedDomainQueueNames(routingKey, 3)) {
+                inOrder.verify(rabbitAdmin).deleteQueue(queueName);
+            }
+            inOrder.verify(rabbitAdmin).declareQueue(org.mockito.ArgumentMatchers.any());
         }
-        for (String queueName : TopologyNaming.legacySharedDomainQueueNames("orders.shipped", 3)) {
-            inOrder.verify(rabbitAdmin).deleteQueue(queueName);
-        }
-        inOrder.verify(rabbitAdmin).declareQueue(org.mockito.ArgumentMatchers.any());
         verify(rabbitAdmin, org.mockito.Mockito.times(10)).deleteQueue(org.mockito.ArgumentMatchers.anyString());
         verify(rabbitAdmin, org.mockito.Mockito.atLeastOnce()).declareQueue(org.mockito.ArgumentMatchers.any());
     }
