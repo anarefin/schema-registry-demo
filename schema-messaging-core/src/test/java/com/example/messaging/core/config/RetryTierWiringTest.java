@@ -1,5 +1,9 @@
 package com.example.messaging.core.config;
 
+import com.example.amqp.topology.mapping.SchemaCoordinates;
+import com.example.amqp.topology.mapping.SchemaType;
+import com.example.amqp.topology.mapping.TypeMapping;
+import com.example.messaging.core.consumer.BitsEventHandler;
 import com.example.messaging.core.consumer.DlxMessageRecoverer;
 import com.example.messaging.core.consumer.EventConsumerSupport;
 import com.example.messaging.core.consumer.HandledEventTypesCache;
@@ -12,6 +16,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -52,6 +57,13 @@ class RetryTierWiringTest {
      */
     @Test
     void bothConsumers_resolveTheSameSpringManagedRetryTierPropertiesBean() {
+        TypeMappingRegistry registry = new TypeMappingRegistry(List.of(new TypeMapping(
+                TestEvent.class,
+                new SchemaCoordinates("events.test", "TestEvent"),
+                SchemaType.JSON,
+                "test.event",
+                "events.test.exchange")));
+
         new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(
                         RetryTierPropertiesAutoConfiguration.class,
@@ -60,8 +72,10 @@ class RetryTierWiringTest {
                 .withBean(EventConsumerSupport.class, () -> mock(EventConsumerSupport.class))
                 .withBean(RabbitTemplate.class, () -> mock(RabbitTemplate.class))
                 .withBean(ConnectionFactory.class, () -> mock(ConnectionFactory.class))
+                .withBean(RabbitAdmin.class, () -> mock(RabbitAdmin.class))
                 .withBean(SchemaAwareMessageConverter.class, () -> mock(SchemaAwareMessageConverter.class))
-                .withBean(TypeMappingRegistry.class, () -> mock(TypeMappingRegistry.class))
+                .withBean(TypeMappingRegistry.class, () -> registry)
+                .withBean("consumerWithHandler", ConsumerWithHandler.class)
                 .withPropertyValues(
                         "spring.application.name=consumer-service",
                         "events.retry.tier0.ms=111",
@@ -77,5 +91,14 @@ class RetryTierWiringTest {
                     assertThat(recoverer.retryDelaysMs()).containsExactly(111L, 222L, 333L);
                     assertThat(configurer.tierTtls()).containsExactly(111L, 222L, 333L);
                 });
+    }
+
+    record TestEvent(String id) {}
+
+    static class ConsumerWithHandler {
+        @BitsEventHandler
+        public void onTestEvent(TestEvent event) {
+            // no-op
+        }
     }
 }

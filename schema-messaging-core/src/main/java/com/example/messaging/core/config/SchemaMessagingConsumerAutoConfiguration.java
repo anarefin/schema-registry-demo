@@ -1,7 +1,6 @@
 package com.example.messaging.core.config;
 
 import com.example.messaging.core.consumer.BitsEventHandlerRegistrar;
-import com.example.messaging.core.consumer.BitsEventHandlerScanner;
 import com.example.messaging.core.consumer.DlxMessageRecoverer;
 import com.example.messaging.core.consumer.DlxRoutingAdvice;
 import com.example.messaging.core.consumer.EventConsumerSupport;
@@ -12,16 +11,13 @@ import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFacto
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
-
-import java.util.List;
 
 /**
  * Auto-configuration for consumer-side AMQP infrastructure (spec §9 / T-5.1).
@@ -35,18 +31,15 @@ import java.util.List;
  *       set once (empty for a pure producer) and shares it with topology declaration and the
  *       queue depth health indicator.</li>
  *   <li><b>Listener-only</b> ({@link ListenerConfiguration}, gated behind
- *       {@code events.consumer.enabled}, default {@code true}): {@code DlxMessageRecoverer},
+ *       {@link OnBitsEventHandlerPresentCondition}): {@code DlxMessageRecoverer},
  *       {@code DlxRoutingAdvice}, {@code rabbitListenerContainerFactory}, and
- *       {@code BitsEventHandlerRegistrar}. A pure producer sets {@code events.consumer.enabled=false}
- *       and carries none of this dead weight.</li>
+ *       {@code BitsEventHandlerRegistrar}. A pure producer with no {@code @BitsEventHandler}
+ *       methods carries none of this dead weight.</li>
  * </ul>
  *
- * <p>The flag is a service-level consumer-role toggle, not per-domain: publishing is unaffected
- * (it lives in {@link SchemaMessagingAutoConfiguration}), and which domains/queues a consumer
- * declares stays driven by {@code @BitsEventHandler} discovery. To keep that discovery the single
- * source of truth for what a service handles, {@link PureProducerHandlerGuard} fails startup fast
- * if a service asserts {@code events.consumer.enabled=false} yet declares handler methods —
- * turning silent consumption loss into a clear boot error.
+ * <p>Publishing is unaffected (it lives in {@link SchemaMessagingAutoConfiguration}), and which
+ * domains/queues a consumer declares stays driven by {@code @BitsEventHandler} discovery — the
+ * same signal that gates the listener stack.
  *
  * <p>Each domain now owns its own DLX/retry exchange (spec: contract-owned-amqp-topology.md),
  * declared by that domain's {@code *-contracts} module. There is no single global DLX/retry
@@ -80,23 +73,11 @@ public class SchemaMessagingConsumerAutoConfiguration {
     }
 
     /**
-     * Only instantiated when a service <em>explicitly</em> opts out of consuming
-     * ({@code events.consumer.enabled=false}); the default/consumer path pays nothing for it.
-     * Fails fast if such a "pure producer" nonetheless declares {@code @BitsEventHandler}
-     * methods, so a stale/wrong flag can never silently disable real handlers.
-     */
-    @Bean
-    @ConditionalOnProperty(name = "events.consumer.enabled", havingValue = "false")
-    public PureProducerHandlerGuard pureProducerHandlerGuard(ApplicationContext applicationContext) {
-        return new PureProducerHandlerGuard(applicationContext);
-    }
-
-    /**
-     * Listener-only beans, gated behind {@code events.consumer.enabled} (default {@code true}).
+     * Listener-only beans, gated on {@code @BitsEventHandler} presence.
      * Absent entirely in a pure producer.
      */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(name = "events.consumer.enabled", havingValue = "true", matchIfMissing = true)
+    @Conditional(OnBitsEventHandlerPresentCondition.class)
     public static class ListenerConfiguration {
 
         @Value("${spring.application.name}") private String serviceName;
@@ -136,34 +117,6 @@ public class SchemaMessagingConsumerAutoConfiguration {
                 ApplicationContext applicationContext,
                 TypeMappingRegistry typeMappingRegistry) {
             return new BitsEventHandlerRegistrar(applicationContext, typeMappingRegistry, serviceName);
-        }
-    }
-
-    /**
-     * Enforces that {@code events.consumer.enabled=false} (pure-producer intent) is consistent
-     * with the code: aborts context refresh if any {@code @BitsEventHandler} method is present.
-     * Uses the non-instantiating {@link BitsEventHandlerScanner#discoverHandlerBindings} scan, so
-     * it never eagerly resolves beans just to check.
-     */
-    public static class PureProducerHandlerGuard implements SmartInitializingSingleton {
-
-        private final ApplicationContext applicationContext;
-
-        public PureProducerHandlerGuard(ApplicationContext applicationContext) {
-            this.applicationContext = applicationContext;
-        }
-
-        @Override
-        public void afterSingletonsInstantiated() {
-            List<String> handlerBeans = BitsEventHandlerScanner.discoverHandlerBindings(applicationContext).stream()
-                    .map(binding -> binding.beanName())
-                    .toList();
-            if (!handlerBeans.isEmpty()) {
-                throw new IllegalStateException(
-                        "events.consumer.enabled=false declares a pure producer, but found "
-                        + handlerBeans.size() + " @BitsEventHandler binding(s): " + handlerBeans
-                        + ". Remove events.consumer.enabled=false or remove the handler methods.");
-            }
         }
     }
 }

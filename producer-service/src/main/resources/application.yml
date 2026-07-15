@@ -10,13 +10,6 @@ spring:
 server:
   port: 8081
 
-# Spec 09 / ARCH-001: pure producer — no @BitsEventHandler methods, so gate out the
-# consumer listener stack (DlxMessageRecoverer, DlxRoutingAdvice, rabbitListenerContainerFactory,
-# BitsEventHandlerRegistrar). RabbitAdmin stays available for exchange declaration.
-events:
-  consumer:
-    enabled: false
-
 # T-6.5: Actuator — expose health endpoints
 management:
   endpoints:

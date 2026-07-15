@@ -26,12 +26,17 @@ import static org.mockito.Mockito.mock;
 
 /**
  * Proves the producer/consumer boundary of {@link SchemaMessagingConsumerAutoConfiguration}
- * (spec 09 / ARCH-001): the listener stack is gated behind {@code events.consumer.enabled}, the
- * producer-safe beans ({@code RabbitAdmin}, {@code HandledEventTypesCache}) stay always-on, and a
- * service that asserts {@code events.consumer.enabled=false} while declaring {@code @BitsEventHandler}
- * methods fails fast instead of silently dropping its handlers.
+ * (spec 09 / ARCH-001): the listener stack is gated on {@code @BitsEventHandler} presence, the
+ * producer-safe beans ({@code RabbitAdmin}, {@code HandledEventTypesCache}) stay always-on.
  */
 class ConsumerListenerGatingTest {
+
+    private static final TypeMapping TEST_EVENT_MAPPING = new TypeMapping(
+            TestEvent.class,
+            new SchemaCoordinates("events.test", "TestEvent"),
+            SchemaType.JSON,
+            "test.event",
+            "events.test.exchange");
 
     private ApplicationContextRunner baseRunner(TypeMappingRegistry registry) {
         return new ApplicationContextRunner()
@@ -49,7 +54,6 @@ class ConsumerListenerGatingTest {
     @Test
     void pureProducer_hasNoListenerBeans_butKeepsRabbitAdminAndHandledEventTypesCache() {
         baseRunner(new TypeMappingRegistry(List.of()))
-                .withPropertyValues("events.consumer.enabled=false")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(SimpleRabbitListenerContainerFactory.class);
@@ -64,8 +68,9 @@ class ConsumerListenerGatingTest {
     }
 
     @Test
-    void consumer_default_wiresFullListenerStack() {
-        baseRunner(new TypeMappingRegistry(List.of()))
+    void consumer_withHandler_wiresFullListenerStack() {
+        baseRunner(new TypeMappingRegistry(List.of(TEST_EVENT_MAPPING)))
+                .withBean("consumerWithHandler", ConsumerWithHandler.class)
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasBean("rabbitListenerContainerFactory");
@@ -78,33 +83,9 @@ class ConsumerListenerGatingTest {
                 });
     }
 
-    @Test
-    void pureProducerAssertion_withHandlerPresent_failsFast() {
-        // events.consumer.enabled=false declares a pure producer, but a @BitsEventHandler is present.
-        // A real TypeMapping for the handler's event type is supplied so the always-on
-        // HandledEventTypesCache does not throw first — leaving PureProducerHandlerGuard as the
-        // deterministic failure (SmartInitializingSingleton ordering is otherwise unspecified).
-        TypeMappingRegistry registry = new TypeMappingRegistry(List.of(new TypeMapping(
-                TestEvent.class,
-                new SchemaCoordinates("events.test", "TestEvent"),
-                SchemaType.JSON,
-                "test.event",
-                "events.test.exchange")));
-
-        baseRunner(registry)
-                .withPropertyValues("events.consumer.enabled=false")
-                .withBean("producerWithHandler", ProducerWithHandler.class)
-                .run(context -> {
-                    assertThat(context.getStartupFailure())
-                            .isInstanceOf(IllegalStateException.class)
-                            .hasMessageContaining("producerWithHandler")
-                            .hasMessageContaining("events.consumer.enabled=false");
-                });
-    }
-
     record TestEvent(String id) {}
 
-    static class ProducerWithHandler {
+    static class ConsumerWithHandler {
         @BitsEventHandler
         public void onTestEvent(TestEvent event) {
             // no-op

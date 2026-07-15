@@ -93,8 +93,8 @@ the consumer-side DLX/retry machinery (`EventConsumerSupport`, `DlxMessageRecove
 `@BitsEventHandler` discovery via non-instantiating `getType` scan), and
 `HandledEventTypesCache` (runs that scan **once** at startup and shares the memoized handled
 `TypeMapping` set with topology declaration and the queue-depth health indicator). Listener-only
-beans are gated behind `events.consumer.enabled` (see Services below). It knows nothing about
-orders or customers.
+beans are gated on `@BitsEventHandler` presence via `OnBitsEventHandlerPresentCondition` (see
+Services below). It knows nothing about orders or customers.
 
 `event-contract-kit` (formerly `amqp-topology-kit`) is a pure leaf module: `EventTopologyFactory`
 (builds the queue/DLQ/retry-ladder `Declarable`s for one routing key **and service name**) and
@@ -157,12 +157,10 @@ Consumer-side auto-config is split by role: `SchemaMessagingConsumerAutoConfigur
 registers `RabbitAdmin` (applies queue/binding declarations from
 `ServiceQueueTopologyAutoConfiguration`) and `HandledEventTypesCache`. Listener-only beans
 (`rabbitListenerContainerFactory`, `BitsEventHandlerRegistrar`, `DlxRoutingAdvice`,
-`DlxMessageRecoverer`) live in a gated inner `ListenerConfiguration`, active when
-`events.consumer.enabled=true` (the default). `producer-service` sets
-`events.consumer.enabled: false` — no listener stack, no per-service queues (empty handled set).
-`PureProducerHandlerGuard` aborts startup if a service opts out of consuming yet still declares
-`@BitsEventHandler` methods. There is still no per-service topology, converter, or schema-mapping
-glue to hand-write.
+`DlxMessageRecoverer`) live in a gated inner `ListenerConfiguration`, active only when
+`@BitsEventHandler` methods are present (`OnBitsEventHandlerPresentCondition`). `producer-service`
+has no handlers — no listener stack, no per-service queues (empty handled set). There is still no
+per-service topology, converter, or schema-mapping glue to hand-write.
 
 **Wire format:** the AMQP message body is the raw serialized JSON bytes only, no
 envelope. Schema identity travels entirely in `X-Schema-*` headers plus
@@ -191,8 +189,8 @@ naming, so you don't have to keep looking them up mid-trace.
 | `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. Parses each payload once — produce: `valueToTree` → validate → `writeValueAsBytes`; consume: `readTree` → validate → `convertValue`. |
 | `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), ...)`. Caller supplies only the event. |
 | `BitsEventHandler` | `schema-messaging-core` | Marker on listener methods — no queue name or container factory. Queue resolved from the parameter type's `TypeMapping` at startup. |
-| `BitsEventHandlerRegistrar` | `schema-messaging-core` | `RabbitListenerConfigurer` (gated behind `events.consumer.enabled`) that registers `@BitsEventHandler` methods; uses `BitsEventHandlerScanner.discoverHandlerBindings` (non-instantiating) then `getBean()` only for beans that declare handlers; derives queue via `TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName)`. |
-| `BitsEventHandlerScanner` | `schema-messaging-core` | Shared `@BitsEventHandler` discovery via `applicationContext.getType(beanName)` — no blanket `getBean()`. Unwraps AOP proxies. Used by `HandledEventTypesCache`, `BitsEventHandlerRegistrar`, and `PureProducerHandlerGuard`. |
+| `BitsEventHandlerRegistrar` | `schema-messaging-core` | `RabbitListenerConfigurer` (gated on `@BitsEventHandler` presence) that registers `@BitsEventHandler` methods; uses `BitsEventHandlerScanner.discoverHandlerBindings` (non-instantiating) then `getBean()` only for beans that declare handlers; derives queue via `TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName)`. |
+| `BitsEventHandlerScanner` | `schema-messaging-core` | Shared `@BitsEventHandler` discovery via `applicationContext.getType(beanName)` — no blanket `getBean()`. Unwraps AOP proxies. Used by `HandledEventTypesCache`, `BitsEventHandlerRegistrar`, and `OnBitsEventHandlerPresentCondition`. |
 | `HandledEventTypesCache` | `schema-messaging-core` | Runs `BitsEventHandlerScanner.discoverHandledTypeMappings(...)` once at startup and memoizes the result. Shared by `ServiceQueueTopologyAutoConfiguration` and `QueueDepthHealthIndicator` so topology and health probes agree on the handled set without re-scanning. |
 | `ServiceQueueTopologyAutoConfiguration` | `schema-messaging-core` | Declares this service's per-service queues/DLQs/retry ladders — one per handled event from `HandledEventTypesCache`, named `{routingKey}.{serviceName}.queue` — via `EventTopologyFactory`, binding to (never declaring) the publisher-owned exchanges. Decommissions legacy shared-domain queues when configured. Nothing declared if the service has no handlers. |
 | `DlxRoutingAdvice` | `schema-messaging-core` | AOP advice wrapped around every listener invocation; catches exceptions and hands them to the recoverer. |
@@ -379,9 +377,9 @@ builds, per handled routing key + service name:
   dead-letters back to the main exchange with the service-scoped key on TTL expiry.
 
 The `serviceName` is `spring.application.name` (`consumer-service` here). Because queues are keyed
-per service and declared only for handled events, `producer-service` (`events.consumer.enabled:
-false`, no `@BitsEventHandler` methods) declares **no** queues and carries **no** listener beans —
-no orphan fan-out copies pile up on the exchange. The declared queues/bindings are applied
+per service and declared only for handled events, `producer-service` (no `@BitsEventHandler`
+methods) declares **no** queues and carries **no** listener beans — no orphan fan-out copies pile
+up on the exchange. The declared queues/bindings are applied
 idempotently to the broker via the shared `RabbitAdmin` bean
 (`SchemaMessagingConsumerAutoConfiguration`).
 
@@ -412,13 +410,13 @@ ADR-0008.
 
 ### 4.6 Consumer wiring
 
-`SchemaMessagingConsumerAutoConfiguration.ListenerConfiguration` (gated behind
-`events.consumer.enabled=true`, the default) builds the `rabbitListenerContainerFactory` bean,
-wiring in the *same* `SchemaAwareMessageConverter` used on the producer side, plus a
+`SchemaMessagingConsumerAutoConfiguration.ListenerConfiguration` (gated on `@BitsEventHandler`
+presence via `OnBitsEventHandlerPresentCondition`) builds the `rabbitListenerContainerFactory`
+bean, wiring in the *same* `SchemaAwareMessageConverter` used on the producer side, plus a
 `DlxRoutingAdvice` advice chain (section 4.8). It also registers `BitsEventHandlerRegistrar`,
 which implements `RabbitListenerConfigurer` and programmatically binds every `@BitsEventHandler`
-method to the queue named by its parameter type's `TypeMapping`. A pure producer
-(`events.consumer.enabled=false`) never loads this inner configuration.
+method to the queue named by its parameter type's `TypeMapping`. A pure producer with no handlers
+never loads this inner configuration.
 
 `consumer-service/src/main/java/com/example/consumer/listener/OrderEventListener.java:25-28`:
 

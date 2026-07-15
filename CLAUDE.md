@@ -150,7 +150,10 @@ Eight Maven modules (parent root = this directory):
   imports no topology and binds its queues to those publisher-owned exchanges. `TypeMapping` wiring
   comes from contracts auto-config; per-service queues/DLQs/retry ladders come from core's
   `ServiceQueueTopologyAutoConfiguration` (nothing declared if the service has no
-  `@BitsEventHandler` methods). No hand-written topology or schema-mapping glue.
+  `@BitsEventHandler` methods). The consumer listener stack (`rabbitListenerContainerFactory`,
+  `BitsEventHandlerRegistrar`, DLX/retry advice) is likewise gated on `@BitsEventHandler` presence
+  via `OnBitsEventHandlerPresentCondition` — no manual producer/consumer flag. No hand-written
+  topology or schema-mapping glue.
 
 ### Schema-aware message flow
 
