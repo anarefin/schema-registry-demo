@@ -117,15 +117,22 @@ record, not the schema, is authored by hand.
 ### Contracts
 
 `order-contracts` and `customer-contracts` each own four things for their domain: the
-event records, the generated JSON Schemas, a `@AutoConfiguration` class
-(`OrderTopologyAutoConfiguration` / `CustomerTopologyAutoConfiguration`) that declares that
-domain's three **exchanges** (main / DLX / retry) — the per-service *queues*, DLQs, and retry
-ladders that hang off them are declared separately in `schema-messaging-core` by
-`ServiceQueueTopologyAutoConfiguration` (see Services below and §4.5) — and a second
-`@AutoConfiguration` class
+event records, the generated JSON Schemas, an **opt-in** `@Configuration` class
+(`OrderPublisherTopology` / `CustomerPublisherTopology`) that declares that
+domain's three **exchanges** (main / DLX / retry), and an auto-loaded `@AutoConfiguration` class
 (`OrderTypeMappingAutoConfiguration` / `CustomerTypeMappingAutoConfiguration`) that registers
-that domain's `TypeMapping` beans. `TypeMapping` itself lives in `event-contract-kit`, not core,
-so this needs no
+that domain's `TypeMapping` beans.
+
+Exchange ownership follows domain cardinality: only the **single service that publishes** a domain
+declares its exchanges, by `@Import`-ing that domain's `*PublisherTopology`. These classes are
+deliberately **not** in `AutoConfiguration.imports`, so a contracts jar on the classpath no longer
+forces any service to declare exchanges. Consumers declare only their private *queues* and *bind*
+to the publisher-owned exchanges — those per-service queues, DLQs, and retry ladders are declared
+in `schema-messaging-core` by `ServiceQueueTopologyAutoConfiguration` from the `@BitsEventHandler`
+scan (see Services below and §4.5).
+
+The `*TypeMappingAutoConfiguration` classes stay auto-loaded — `TypeMapping` beans are plain data
+both roles need, and `TypeMapping` itself lives in `event-contract-kit`, not core, so this needs no
 dependency on `schema-messaging-core`. Nothing about AMQP topology or schema-mapping wiring lives
 in the services themselves.
 
@@ -133,13 +140,18 @@ in the services themselves.
 
 `producer-service` and `consumer-service` are thin: just controllers (producer) or
 `@BitsEventHandler` methods (consumer). Each domain's `*-contracts` module registers its own
-`TypeMapping` beans (one per event) via a
-`*TypeMappingAutoConfiguration`, alongside its `*TopologyAutoConfiguration` (which declares only
-the domain exchanges). Converter and `TypeMapping` wiring arrive automatically via Spring Boot
-auto-configuration; the queues themselves are declared by `schema-messaging-core`'s
-`ServiceQueueTopologyAutoConfiguration`, which reads the handled set from
+`TypeMapping` beans (one per event) via an auto-loaded `*TypeMappingAutoConfiguration`. Converter
+and `TypeMapping` wiring therefore arrive automatically via Spring Boot auto-configuration.
+
+`producer-service`, as the sole publisher of both domains, `@Import`s both
+`*PublisherTopology` classes on its `@SpringBootApplication` and so declares all six exchanges at
+startup. `consumer-service` imports no topology in production code — its queues are declared by
+`schema-messaging-core`'s `ServiceQueueTopologyAutoConfiguration`, which reads the handled set from
 `HandledEventTypesCache` and provisions one dedicated queue/DLQ/retry-ladder per handled event,
-named `{routingKey}.{serviceName}.queue` (`serviceName` = `spring.application.name`).
+named `{routingKey}.{serviceName}.queue` (`serviceName` = `spring.application.name`), each bound to
+the publisher-owned exchanges. A consumer that boots before the producer self-heals: its
+`RabbitAdmin` is set to `ignoreDeclarationExceptions(true)`, so bindings to a not-yet-declared
+exchange are retried on the next broker reconnect rather than failing context refresh.
 
 Consumer-side auto-config is split by role: `SchemaMessagingConsumerAutoConfiguration` always
 registers `RabbitAdmin` (exchange declaration) and `HandledEventTypesCache`. Listener-only beans
@@ -187,7 +199,7 @@ naming, so you don't have to keep looking them up mid-trace.
 | `EventConsumerSupport` | `schema-messaging-core` | `classify(Exception)` — the permanent-vs-transient decision, by cause-chain walk — and DLQ failure-header population. |
 | `PermanentFailure` | `schema-messaging-core` | Marker interface implemented by every permanent exception; `classify()` checks `instanceof` this, not a hand-maintained set. |
 | `EventTopologyFactory` / `TopologyNaming` | `event-contract-kit` | Builds the per-service queue/DLQ/retry-tier `Declarable`s for one routing key + service name (fan-out binding on the plain key + a private `routingKey.serviceName` binding), and supplies the naming convention. |
-| `OrderTopologyAutoConfiguration` | `order-contracts` | Declares the `events.orders.*` **exchanges** only (main / DLX / retry). The queues are declared per-service by `ServiceQueueTopologyAutoConfiguration`. |
+| `OrderPublisherTopology` | `order-contracts` | **Opt-in** (`@Import`-ed by the publisher, not auto-loaded). Declares the `events.orders.*` **exchanges** only (main / DLX / retry). The queues are declared per-service by `ServiceQueueTopologyAutoConfiguration`. |
 | `OrderTypeMappingAutoConfiguration` | `order-contracts` | Registers this domain's `TypeMapping` beans — one per order event. |
 
 ## 4. Deep Dive: `OrderCreated` End-to-End
@@ -325,9 +337,10 @@ This didn't happen at publish time — it happened once, at consumer startup, an
 two auto-configurations: the **exchanges** are owned by the domain contracts module, the
 **queues** by `schema-messaging-core`.
 
-**Exchanges (contracts).** `order-contracts/.../topology/OrderTopologyAutoConfiguration.java`
+**Exchanges (contracts, opt-in).** `order-contracts/.../topology/OrderPublisherTopology.java`
 declares just the three `TopicExchange` beans for the domain — `events.orders.exchange`, `.dlx`,
-and `.retry.exchange` — and nothing else. It no longer enumerates routing keys or builds queues.
+and `.retry.exchange` — and nothing else. It is `@Import`-ed only by the publisher
+(`producer-service`), not auto-loaded, so a contracts jar alone declares no exchanges.
 
 **Per-service queues (core).** `schema-messaging-core/.../config/ServiceQueueTopologyAutoConfiguration.java`
 runs as a `SmartInitializingSingleton` after the converter is wired. It reads the handled set
@@ -554,16 +567,16 @@ exchange group differ:
 (`OrderBuyer`, `ShippingAddress`, `PaymentDetails`) inlined into the generated schema —
 see `order-contracts/.../OrderFulfilled.java`.
 
-`CustomerTopologyAutoConfiguration` is the exact mirror of
-`OrderTopologyAutoConfiguration` (section 4.5) for the customer domain — it declares the
-customer exchanges; the queues are provisioned per-service by
+`CustomerPublisherTopology` is the exact mirror of
+`OrderPublisherTopology` (section 4.5) for the customer domain — it declares the
+customer exchanges (and is `@Import`-ed by the publisher); the queues are provisioned per-service by
 `ServiceQueueTopologyAutoConfiguration` just as for orders. If you understand section 4, you
 understand all seven events — the only new code you'd write for an eighth event is a new record
 (plus nested types if needed), a routing-key constant, one `TypeMapping` bean, and one
 `@BitsEventHandler` method. There is **no** topology list to touch: the new event's per-service
 queue/DLQ/retry-ladder is provisioned automatically the moment a handler for it exists (and only if
 the exchange group is new do you add three exchange beans to the domain's
-`*TopologyAutoConfiguration`).
+`*PublisherTopology`).
 
 ## 6. Where to Go Next
 

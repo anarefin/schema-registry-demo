@@ -16,9 +16,9 @@
        process-classes phase (via the schema-gen-tools exec-maven-plugin execution below) and
        commits them under resources/schemas/. No victools on the compile classpath — only Jackson
        (records) + Jakarta Validation (annotations read at generation time) +
-       spring-rabbit/spring-boot-autoconfigure + event-contract-kit, since this module
-       self-activates its own domain-scoped AMQP topology (CustomerTopologyAutoConfiguration) and
-       TypeMapping wiring (CustomerTypeMappingAutoConfiguration). -->
+       spring-rabbit/spring-boot-autoconfigure + event-contract-kit, since this module provides
+       an opt-in domain-scoped AMQP topology (CustomerPublisherTopology, @Import-ed by the
+       publisher) and auto-activated TypeMapping wiring (CustomerTypeMappingAutoConfiguration). -->
   <artifactId>customer-contracts</artifactId>
   <packaging>jar</packaging>
 

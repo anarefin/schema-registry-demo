@@ -5,12 +5,14 @@ import com.example.consumer.listener.CustomerEventListener;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.publisher.EventPublisher;
+import com.example.consumer.support.PublisherOwnedExchanges;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.RabbitMQContainer;
@@ -36,6 +38,7 @@ import static org.mockito.Mockito.verify;
  */
 @SpringBootTest
 @Testcontainers
+@Import(PublisherOwnedExchanges.class)
 class CustomerRegisteredIT {
 
     @Container

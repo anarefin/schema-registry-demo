@@ -17,8 +17,10 @@ import org.springframework.context.annotation.Bean;
  * self-activates this wiring rather than duplicating it in producer-service/consumer-service
  * (pattern established by ADR-0005); {@link TypeMapping} itself lives in {@code event-contract-kit},
  * not core, so this module needs no dependency on schema-messaging-core (ADR-0006).
- * Self-contained, like {@link OrderTopologyAutoConfiguration}: enumerates its own events directly
- * rather than iterating a shared registry it has no visibility into.
+ * Self-contained, like {@link OrderPublisherTopology}: enumerates its own events directly
+ * rather than iterating a shared registry it has no visibility into. Unlike the exchange beans
+ * (opt-in via {@code OrderPublisherTopology}), these plain-data mappings both roles need still
+ * auto-load — a publisher and a consumer alike must resolve Java type ↔ schema coordinates.
  */
 @AutoConfiguration
 public class OrderTypeMappingAutoConfiguration {

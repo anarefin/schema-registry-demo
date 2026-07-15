@@ -120,19 +120,26 @@ Eight Maven modules (parent root = this directory):
   package and writing into its own `src/main/resources/schemas/`. **Never** on service
   runtime classpath.
 - **`order-contracts`** — four code-first order event records + generated schemas
-  (`com.example.contracts.orders.*`), plus `OrderTopologyAutoConfiguration` (domain **exchanges**
+  (`com.example.contracts.orders.*`), plus `OrderPublisherTopology` (domain **exchanges**
   only: main / DLX / retry, delegating to `DomainTopology`) and `OrderTypeMappingAutoConfiguration`
-  (`TypeMapping` beans via `Mappings`) — both self-activating via
+  (`TypeMapping` beans via `Mappings`). Exchange ownership follows domain cardinality: only the
+  domain's single publisher declares its exchanges, by `@Import`-ing the **opt-in**
+  `OrderPublisherTopology` (`@Configuration`, deliberately **not** in `AutoConfiguration.imports`) —
+  a contracts jar alone forces no exchanges. `OrderTypeMappingAutoConfiguration` (plain-data beans
+  both roles need) **stays** self-activating via
   `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
   Depends on Jackson, jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and
   `event-contract-kit` (plus a test-scope dependency on `schema-gen-tools` for its own determinism
   test) — **no** dependency on `schema-messaging-core` (machine-enforced).
 - **`customer-contracts`** — mirror of `order-contracts` for the three customer events
-  (`com.example.contracts.customers.*`, `topology.CustomerTopologyAutoConfiguration` /
-  `topology.CustomerTypeMappingAutoConfiguration` — same `DomainTopology`/`Mappings` delegation).
+  (`com.example.contracts.customers.*`, opt-in `topology.CustomerPublisherTopology` /
+  auto-loaded `topology.CustomerTypeMappingAutoConfiguration` — same `DomainTopology`/`Mappings`
+  delegation).
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
-  both contracts modules. Domain exchanges and `TypeMapping` wiring come from contracts
-  auto-config; per-service queues/DLQs/retry ladders come from core's
+  both contracts modules. `producer-service` is the sole publisher of both domains and `@Import`s
+  both `*PublisherTopology` classes, declaring all six exchanges at startup; `consumer-service`
+  imports no topology and binds its queues to those publisher-owned exchanges. `TypeMapping` wiring
+  comes from contracts auto-config; per-service queues/DLQs/retry ladders come from core's
   `ServiceQueueTopologyAutoConfiguration` (nothing declared if the service has no
   `@BitsEventHandler` methods). No hand-written topology or schema-mapping glue.
 
@@ -165,12 +172,16 @@ Supporting pieces in core:
   per-service queues/DLQs/retry ladders for every event type handled by `@BitsEventHandler`
   methods (`{routingKey}.{serviceName}.queue`); the scanner is the single source of truth for
   which event types a service handles (registrar, topology, health indicator all use it).
-- **AMQP topology** — split ownership:
+- **AMQP topology** — split ownership by role, tracking domain cardinality:
   - `*-contracts`: domain exchanges (`events.{orders,customers}.{exchange,dlx,retry.exchange}`)
-    via `OrderTopologyAutoConfiguration` / `CustomerTopologyAutoConfiguration`.
-  - `schema-messaging-core`: per-service queues/DLQs/retry ladders via
-    `ServiceQueueTopologyAutoConfiguration`, built with `event-contract-kit`'s
-    `EventTopologyFactory.declarablesForEvent(...)` and `TopologyNaming`.
+    via the **opt-in** `OrderPublisherTopology` / `CustomerPublisherTopology`, `@Import`-ed only by
+    the domain's single publisher (`producer-service`). Not auto-loaded — a contracts jar alone
+    declares no exchanges.
+  - `schema-messaging-core`: per-service queues/DLQs/retry ladders (and their bindings to the
+    publisher-owned exchanges) via `ServiceQueueTopologyAutoConfiguration`, built with
+    `event-contract-kit`'s `EventTopologyFactory.declarablesForEvent(...)` and `TopologyNaming`.
+    Core declares no exchanges; the consumer's `RabbitAdmin` uses `ignoreDeclarationExceptions(true)`
+    so a consumer that boots before its publisher self-heals on reconnect.
   - `DlxMessageRecoverer` derives the DLX/retry exchange per message from
     `MessageProperties.getReceivedExchange()` rather than a fixed exchange name, so it needs no
     contracts dependency.

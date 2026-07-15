@@ -1,2 +1,1 @@
-com.example.contracts.orders.topology.OrderTopologyAutoConfiguration
 com.example.contracts.orders.topology.OrderTypeMappingAutoConfiguration

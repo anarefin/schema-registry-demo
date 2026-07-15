@@ -4,6 +4,7 @@ import com.example.contracts.orders.OrderCreated;
 import com.example.contracts.orders.OrderEventRouting;
 import com.example.amqp.topology.TopologyNaming;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
+import com.example.consumer.support.PublisherOwnedExchanges;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.BindingBuilder;
@@ -18,6 +19,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.RabbitMQContainer;
@@ -38,6 +40,7 @@ import static org.awaitility.Awaitility.await;
  */
 @SpringBootTest
 @Testcontainers
+@Import(PublisherOwnedExchanges.class)
 class LegacyQueueDecommissionIT {
 
     private static final String SERVICE_NAME = "consumer-service";

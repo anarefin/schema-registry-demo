@@ -6,6 +6,7 @@ import com.example.consumer.listener.CustomerEventListener;
 import com.example.amqp.topology.TopologyNaming;
 import com.example.amqp.topology.mapping.SchemaType;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
+import com.example.consumer.support.PublisherOwnedExchanges;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.RabbitMQContainer;
@@ -51,6 +53,7 @@ import static org.mockito.Mockito.doAnswer;
         "events.retry.tier1.ms=400",
         "events.retry.tier2.ms=600"
 })
+@Import(PublisherOwnedExchanges.class)
 class DlxRoutingIT {
 
     private static final String SERVICE_NAME = "consumer-service";
