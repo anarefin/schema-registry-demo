@@ -1,5 +1,7 @@
 package com.example.messaging.core.config;
 
+import com.example.amqp.topology.DomainExchanges;
+import com.example.amqp.topology.DomainTopology;
 import com.example.amqp.topology.EventTopologyFactory;
 import com.example.amqp.topology.TopologyNaming;
 import com.example.amqp.topology.mapping.TypeMapping;
@@ -8,20 +10,15 @@ import com.example.messaging.core.consumer.HandledEventTypesCache;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.Declarable;
 import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
 
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * Declares per-service dedicated queues, DLQs, and retry ladders for every event type
@@ -40,15 +37,13 @@ public class ServiceQueueTopologyAutoConfiguration {
             RabbitAdmin rabbitAdmin,
             @Value("${spring.application.name}") String serviceName,
             @Value("${events.topology.decommission-legacy-queues:true}") boolean decommissionLegacyQueues,
-            RetryTierProperties retryTierProperties,
-            List<TopicExchange> topicExchanges) {
+            RetryTierProperties retryTierProperties) {
         return new ServiceQueueTopologyConfigurer(
                 handledEventTypesCache,
                 rabbitAdmin,
                 serviceName,
                 decommissionLegacyQueues,
-                retryTierProperties.toArray(),
-                topicExchanges);
+                retryTierProperties.toArray());
     }
 
     static class ServiceQueueTopologyConfigurer implements SmartInitializingSingleton {
@@ -58,22 +53,18 @@ public class ServiceQueueTopologyAutoConfiguration {
         private final String serviceName;
         private final boolean decommissionLegacyQueues;
         private final long[] tierTtls;
-        private final Map<String, TopicExchange> exchangesByName;
 
         ServiceQueueTopologyConfigurer(
                 HandledEventTypesCache handledEventTypesCache,
                 RabbitAdmin rabbitAdmin,
                 String serviceName,
                 boolean decommissionLegacyQueues,
-                long[] tierTtls,
-                List<TopicExchange> topicExchanges) {
+                long[] tierTtls) {
             this.handledEventTypesCache = handledEventTypesCache;
             this.rabbitAdmin = rabbitAdmin;
             this.serviceName = serviceName;
             this.decommissionLegacyQueues = decommissionLegacyQueues;
             this.tierTtls = tierTtls;
-            this.exchangesByName = topicExchanges.stream()
-                    .collect(Collectors.toUnmodifiableMap(TopicExchange::getName, Function.identity(), (a, b) -> a));
         }
 
         /** Exposed so tests can verify this configurer shares a single {@code RetryTierProperties} source. */
@@ -90,9 +81,8 @@ public class ServiceQueueTopologyAutoConfiguration {
             if (decommissionLegacyQueues) {
                 decommissionLegacySharedDomainQueues(handlerMappings);
             }
-            Set<String> declaredExchanges = new HashSet<>();
             for (TypeMapping mapping : handlerMappings) {
-                declareForMapping(mapping, declaredExchanges);
+                declareForMapping(mapping);
             }
         }
 
@@ -107,37 +97,19 @@ public class ServiceQueueTopologyAutoConfiguration {
             }
         }
 
-        private void declareForMapping(TypeMapping mapping, Set<String> declaredExchanges) {
-            String exchangeName = mapping.exchange();
-            TopicExchange mainExchange = requireExchange(exchangeName);
-            TopicExchange dlx = requireExchange(TopologyNaming.dlxExchangeName(exchangeName));
-            TopicExchange retryExchange = requireExchange(TopologyNaming.retryExchangeName(exchangeName));
-
-            // Declare each distinct exchange at most once. Properties come from the contracts
-            // module TopicExchange beans — not a second hardcoded copy here. declareExchange is
-            // idempotent, so this is safe even if Spring AMQP's own auto-declare hook also ran.
-            declareExchangeOnce(mainExchange, declaredExchanges);
-            declareExchangeOnce(dlx, declaredExchanges);
-            declareExchangeOnce(retryExchange, declaredExchanges);
+        private void declareForMapping(TypeMapping mapping) {
+            // Build the domain's main/DLX/retry TopicExchange objects locally from the mapping's
+            // exchange name — solely to feed the topology factory. Core never declares these
+            // exchanges: a Binding only needs the exchange name, and exchange ownership belongs to
+            // the domain's *-contracts module. Declaring only queues + bindings keeps core's reach
+            // to the exchange-name string.
+            DomainExchanges exchanges = DomainTopology.of(mapping.exchange());
 
             List<Declarable> declarables = EventTopologyFactory.declarablesForEvent(
-                    mapping.routingKey(), serviceName, mainExchange, dlx, retryExchange, tierTtls);
+                    mapping.routingKey(), serviceName,
+                    exchanges.main(), exchanges.dlx(), exchanges.retry(), tierTtls);
             for (Declarable declarable : declarables) {
                 declare(rabbitAdmin, declarable);
-            }
-        }
-
-        private TopicExchange requireExchange(String exchangeName) {
-            TopicExchange exchange = exchangesByName.get(exchangeName);
-            if (exchange == null) {
-                throw new IllegalStateException("No TopicExchange bean registered for exchange: " + exchangeName);
-            }
-            return exchange;
-        }
-
-        private void declareExchangeOnce(TopicExchange exchange, Set<String> declaredExchanges) {
-            if (declaredExchanges.add(exchange.getName())) {
-                rabbitAdmin.declareExchange(exchange);
             }
         }
 

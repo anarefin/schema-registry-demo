@@ -12,7 +12,6 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -38,8 +37,7 @@ class RetryTierWiringTest {
                         mock(RabbitAdmin.class),
                         "consumer-service",
                         false,
-                        sharedProperties,
-                        List.of());
+                        sharedProperties);
 
         assertThat(recoverer.retryDelaysMs()).containsExactly(111L, 222L, 333L);
         assertThat(configurer.tierTtls()).containsExactly(111L, 222L, 333L);

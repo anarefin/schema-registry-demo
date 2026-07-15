@@ -62,7 +62,13 @@ public class SchemaMessagingConsumerAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public RabbitAdmin rabbitAdmin(ConnectionFactory connectionFactory) {
-        return new RabbitAdmin(connectionFactory);
+        RabbitAdmin rabbitAdmin = new RabbitAdmin(connectionFactory);
+        // A consumer that boots before its publisher has declared the domain exchanges would
+        // otherwise fail context refresh when its queue bindings reference a not-yet-existent
+        // exchange. Ignoring declaration exceptions lets Spring AMQP self-heal the topology on
+        // the next broker reconnect instead — see publisher-owned-topology spec, ticket 01.
+        rabbitAdmin.setIgnoreDeclarationExceptions(true);
+        return rabbitAdmin;
     }
 
     @Bean

@@ -7,7 +7,6 @@ import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.consumer.HandledEventTypesCache;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
-import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 
 import java.util.List;
@@ -80,21 +79,13 @@ class ServiceQueueTopologyLegacyDecommissionTest {
                 rabbitAdmin,
                 "consumer-service",
                 decommissionLegacyQueues,
-                TIER_TTLS,
-                orderContractExchanges());
+                TIER_TTLS);
     }
 
     private static HandledEventTypesCache cacheWithMappings(TypeMapping... mappings) {
         HandledEventTypesCache cache = mock(HandledEventTypesCache.class);
         when(cache.handledTypeMappings()).thenReturn(Set.copyOf(java.util.Arrays.asList(mappings)));
         return cache;
-    }
-
-    private static List<TopicExchange> orderContractExchanges() {
-        return List.of(
-                new TopicExchange(ORDERS_EXCHANGE, true, false),
-                new TopicExchange(TopologyNaming.dlxExchangeName(ORDERS_EXCHANGE), true, false),
-                new TopicExchange(TopologyNaming.retryExchangeName(ORDERS_EXCHANGE), true, false));
     }
 
     private static TypeMapping orderMapping(String routingKey) {
