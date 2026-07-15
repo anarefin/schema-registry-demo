@@ -4,7 +4,6 @@ import com.example.amqp.topology.mapping.Mappings;
 import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.contracts.orders.OrderCancelled;
 import com.example.contracts.orders.OrderCreated;
-import com.example.contracts.orders.OrderEventRouting;
 import com.example.contracts.orders.OrderFulfilled;
 import com.example.contracts.orders.OrderShipped;
 import org.springframework.boot.autoconfigure.AutoConfiguration;

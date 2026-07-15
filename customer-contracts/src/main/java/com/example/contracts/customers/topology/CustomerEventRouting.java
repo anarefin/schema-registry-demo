@@ -1,4 +1,4 @@
-package com.example.contracts.customers;
+package com.example.contracts.customers.topology;
 
 import com.example.amqp.topology.TopologyNaming;
 

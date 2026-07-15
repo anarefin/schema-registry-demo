@@ -1,4 +1,4 @@
-package com.example.contracts.orders;
+package com.example.contracts.orders.topology;
 
 import com.example.amqp.topology.TopologyNaming;
 

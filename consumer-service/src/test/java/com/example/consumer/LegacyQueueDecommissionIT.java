@@ -1,7 +1,7 @@
 package com.example.consumer;
 
 import com.example.contracts.orders.OrderCreated;
-import com.example.contracts.orders.OrderEventRouting;
+import com.example.contracts.orders.topology.OrderEventRouting;
 import com.example.amqp.topology.TopologyNaming;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.consumer.support.PublisherOwnedExchanges;

@@ -3,7 +3,6 @@ package com.example.contracts.customers.topology;
 import com.example.amqp.topology.mapping.Mappings;
 import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.contracts.customers.CustomerAddressAdded;
-import com.example.contracts.customers.CustomerEventRouting;
 import com.example.contracts.customers.CustomerRegistered;
 import com.example.contracts.customers.CustomerTierChanged;
 import org.springframework.boot.autoconfigure.AutoConfiguration;

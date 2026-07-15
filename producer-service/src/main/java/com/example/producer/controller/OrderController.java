@@ -2,12 +2,12 @@ package com.example.producer.controller;
 
 import com.example.contracts.orders.OrderCancelled;
 import com.example.contracts.orders.OrderCreated;
-import com.example.contracts.orders.OrderEventRouting;
 import com.example.contracts.orders.OrderFulfilled;
 import com.example.contracts.orders.OrderShipped;
 import com.example.contracts.orders.OrderBuyer;
 import com.example.contracts.orders.PaymentDetails;
 import com.example.contracts.orders.ShippingAddress;
+import com.example.contracts.orders.topology.OrderEventRouting;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
 import com.example.messaging.core.publisher.EventPublisher;
 import org.slf4j.Logger;

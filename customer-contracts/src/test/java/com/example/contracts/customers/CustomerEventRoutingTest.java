@@ -1,6 +1,8 @@
 package com.example.contracts.customers;
 
 import com.example.amqp.topology.TopologyNaming;
+import com.example.contracts.customers.topology.CustomerEventRouting;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

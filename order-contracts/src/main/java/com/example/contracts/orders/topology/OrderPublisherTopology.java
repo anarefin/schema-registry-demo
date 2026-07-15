@@ -2,7 +2,7 @@ package com.example.contracts.orders.topology;
 
 import com.example.amqp.topology.DomainExchanges;
 import com.example.amqp.topology.DomainTopology;
-import com.example.contracts.orders.OrderEventRouting;
+
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;

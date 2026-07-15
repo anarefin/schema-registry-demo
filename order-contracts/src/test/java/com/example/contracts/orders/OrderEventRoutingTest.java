@@ -1,6 +1,8 @@
 package com.example.contracts.orders;
 
 import com.example.amqp.topology.TopologyNaming;
+import com.example.contracts.orders.topology.OrderEventRouting;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
