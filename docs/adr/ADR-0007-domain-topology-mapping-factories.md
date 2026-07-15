@@ -1,9 +1,15 @@
 # ADR-0007: Domain topology and mapping factories in `event-contract-kit`
 
-**Status:** Accepted  
+**Status:** Accepted (superseded in part by [ADR-0008](ADR-0008-publisher-owned-messaging-topology.md))  
 **Date:** 2026-07-14  
 **Spec:** `spec/10-domain-topology-mapping-factories.md`  
 **Related findings:** ARCH-006 (extract now), QUAL-002 (wait for third domain — rejected)
+
+> **Note (ADR-0008):** the `DomainTopology` / `Mappings` factories introduced here are unchanged and
+> still used. What ADR-0008 reverses is *who declares the exchange beans and whether they auto-load*:
+> the `*TopologyAutoConfiguration` classes described below (auto-declared for every dependent) were
+> replaced by opt-in `*PublisherTopology` configs declared only by the domain's single publisher.
+> Read the "Each `*TopologyAutoConfiguration`…" passages below as historical.
 
 ## Context
 

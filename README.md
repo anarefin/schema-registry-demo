@@ -294,6 +294,35 @@ sequenceDiagram
 
 ---
 
+## Topology ownership & broker permissions
+
+AMQP topology declaration is split by **ownership cardinality** — each domain is published by
+exactly one service and consumed by many, so ownership is unambiguous (see
+[ADR-0008](docs/adr/ADR-0008-publisher-owned-messaging-topology.md)):
+
+| Topology | Owner | Declared by |
+|---|---|---|
+| Domain **exchanges** (main / `.dlx` / `.retry.exchange`) | the **one** publisher | the opt-in `*PublisherTopology` config, `@Import`-ed only by `producer-service` — **not** auto-loaded, so a contracts jar alone declares no exchanges |
+| Per-service **queues** + DLQs + retry ladders + **bindings** | **each** consumer | `ServiceQueueTopologyAutoConfiguration` in `schema-messaging-core`, from the `@BitsEventHandler` scan — binds to (never declares) the publisher-owned exchanges |
+
+This maps onto **least-privilege broker credentials**. RabbitMQ grants three per-vhost permission
+verbs (`configure` = declare/delete a resource, `write` = publish / bind-destination, `read` =
+consume / bind-source), so each role can be scoped to exactly what it touches:
+
+| Principal | Domain exchanges | Own private queues (`{routingKey}.{service}.queue` / `.dlq` / `.retry.*`) |
+|---|---|---|
+| **Publisher** (`producer-service`) | `configure` + `write` (declare + publish) | — declares no queues |
+| **Consumer** (`consumer-service`) | `read` only (bind source) — **no `configure`, no `write`** | `configure` + `write` + `read` (declare + bind + consume) |
+
+The consumer never needs `configure` on any exchange; the publisher never needs `read`. This POC
+runs on `guest`/`guest` (full access), so the split is not *enforced* here — it is what makes such
+scoped credentials **expressible**. Because ownership is split, a consumer may boot before its
+publisher; its `RabbitAdmin` uses `ignoreDeclarationExceptions(true)`, so a binding to a
+not-yet-declared exchange self-heals on reconnect instead of failing startup (no message loss — the
+publisher cannot emit before declaring its own exchanges).
+
+---
+
 ## Running the test suite
 
 ```bash

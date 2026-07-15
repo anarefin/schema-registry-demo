@@ -154,7 +154,8 @@ the publisher-owned exchanges. A consumer that boots before the producer self-he
 exchange are retried on the next broker reconnect rather than failing context refresh.
 
 Consumer-side auto-config is split by role: `SchemaMessagingConsumerAutoConfiguration` always
-registers `RabbitAdmin` (exchange declaration) and `HandledEventTypesCache`. Listener-only beans
+registers `RabbitAdmin` (applies queue/binding declarations from
+`ServiceQueueTopologyAutoConfiguration`) and `HandledEventTypesCache`. Listener-only beans
 (`rabbitListenerContainerFactory`, `BitsEventHandlerRegistrar`, `DlxRoutingAdvice`,
 `DlxMessageRecoverer`) live in a gated inner `ListenerConfiguration`, active when
 `events.consumer.enabled=true` (the default). `producer-service` sets
@@ -193,7 +194,7 @@ naming, so you don't have to keep looking them up mid-trace.
 | `BitsEventHandlerRegistrar` | `schema-messaging-core` | `RabbitListenerConfigurer` (gated behind `events.consumer.enabled`) that registers `@BitsEventHandler` methods; uses `BitsEventHandlerScanner.discoverHandlerBindings` (non-instantiating) then `getBean()` only for beans that declare handlers; derives queue via `TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName)`. |
 | `BitsEventHandlerScanner` | `schema-messaging-core` | Shared `@BitsEventHandler` discovery via `applicationContext.getType(beanName)` — no blanket `getBean()`. Unwraps AOP proxies. Used by `HandledEventTypesCache`, `BitsEventHandlerRegistrar`, and `PureProducerHandlerGuard`. |
 | `HandledEventTypesCache` | `schema-messaging-core` | Runs `BitsEventHandlerScanner.discoverHandledTypeMappings(...)` once at startup and memoizes the result. Shared by `ServiceQueueTopologyAutoConfiguration` and `QueueDepthHealthIndicator` so topology and health probes agree on the handled set without re-scanning. |
-| `ServiceQueueTopologyAutoConfiguration` | `schema-messaging-core` | Declares this service's per-service queues/DLQs/retry ladders — one per handled event from `HandledEventTypesCache`, named `{routingKey}.{serviceName}.queue` — via `EventTopologyFactory`. Decommissions legacy shared-domain queues when configured. Nothing declared if the service has no handlers. |
+| `ServiceQueueTopologyAutoConfiguration` | `schema-messaging-core` | Declares this service's per-service queues/DLQs/retry ladders — one per handled event from `HandledEventTypesCache`, named `{routingKey}.{serviceName}.queue` — via `EventTopologyFactory`, binding to (never declaring) the publisher-owned exchanges. Decommissions legacy shared-domain queues when configured. Nothing declared if the service has no handlers. |
 | `DlxRoutingAdvice` | `schema-messaging-core` | AOP advice wrapped around every listener invocation; catches exceptions and hands them to the recoverer. |
 | `DlxMessageRecoverer` | `schema-messaging-core` | Decides DLQ vs. retry-exchange and actually sends the message there. |
 | `EventConsumerSupport` | `schema-messaging-core` | `classify(Exception)` — the permanent-vs-transient decision, by cause-chain walk — and DLQ failure-header population. |
@@ -333,9 +334,11 @@ sequenceDiagram
 
 ### 4.5 Topology: how the queues got there
 
-This didn't happen at publish time — it happened once, at consumer startup, and it's split across
-two auto-configurations: the **exchanges** are owned by the domain contracts module, the
-**queues** by `schema-messaging-core`.
+This didn't happen at publish time — it happened once, at consumer startup, and topology
+declaration is **split by ownership cardinality**: the domain's **exchanges** are declared by its
+single **publisher** (via the opt-in `*PublisherTopology` config that ships in the contracts
+module), while each consumer declares only its own **queues** + bindings (via
+`schema-messaging-core`).
 
 **Exchanges (contracts, opt-in).** `order-contracts/.../topology/OrderPublisherTopology.java`
 declares just the three `TopicExchange` beans for the domain — `events.orders.exchange`, `.dlx`,
@@ -355,8 +358,12 @@ List<Declarable> declarables = EventTopologyFactory.declarablesForEvent(
 
 Before declaring new topology, if `events.topology.decommission-legacy-queues` is `true`
 (default), it deletes the pre-per-service shared-domain queue names for each handled routing key
-via `TopologyNaming.legacySharedDomainQueueNames(...)`. Exchanges are declared at most once per
-boot via `declareExchangeOnce` (properties come from the contracts-module `TopicExchange` beans).
+via `TopologyNaming.legacySharedDomainQueueNames(...)`. The `mainExchange`/`dlx`/`retryExchange`
+objects above are built **locally** from the mapping's exchange *name*
+(`DomainTopology.of(mapping.exchange())`) purely to feed the binding factory — core declares only
+the resulting queues and bindings and **never** declares an exchange (`declareExchange` is called
+zero times). A `Binding` holds only the exchange name, so binding to the publisher-owned exchange
+needs no bean and no `configure` right on it.
 
 `EventTopologyFactory.declarablesForEvent()` (`event-contract-kit/.../EventTopologyFactory.java`)
 builds, per handled routing key + service name:
@@ -383,6 +390,25 @@ listener registration time via `TopologyNaming.serviceQueueName(routingKey, serv
 Adding a new order event means adding one `@BitsEventHandler` method and one
 `TypeMapping` bean — its per-service queue/DLQ/retry-ladder is provisioned automatically from the
 handler scan, with no topology list to edit.
+
+**Why the split — least privilege + boot order.** Declaring exchanges only in the one publisher and
+queues only in each consumer maps cleanly onto RabbitMQ's three permission verbs (`configure` =
+declare, `write` = publish / bind-destination, `read` = consume / bind-source), so each role can run
+on credentials scoped to exactly what it touches:
+
+| Principal | Domain exchanges (`events.orders.exchange` / `.dlx` / `.retry.exchange`) | Own queues (`orders.created.consumer-service.queue` / `.dlq` / `.retry.*`) |
+|---|---|---|
+| **Publisher** (`producer-service`) | `configure` + `write` | — declares no queues |
+| **Consumer** (`consumer-service`) | `read` only — **no `configure`, no `write`** | `configure` + `write` + `read` |
+
+The consumer never needs `configure` on an exchange, and the publisher never needs `read`. (This
+POC runs `guest`/`guest` with full access — the split is what makes such credentials *expressible*,
+not something enforced here.) Because ownership is now split, boot order is no longer guaranteed: a
+consumer can start before its publisher has declared the exchanges. The consumer `RabbitAdmin` is
+set `ignoreDeclarationExceptions(true)`, so a binding that references a not-yet-declared exchange
+does not fail context refresh — it self-heals on the next reconnect once the publisher is up. No
+message can be lost, since the publisher cannot emit before declaring its own exchanges. See
+ADR-0008.
 
 ### 4.6 Consumer wiring
 

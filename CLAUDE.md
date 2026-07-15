@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 All planned POC phases are done. Runtime schema validation uses classpath JSON Schemas
 (`LocalSchemaCatalog`) — no runtime Apicurio calls. Apicurio Registry remains the CI/governance
-tool (register + compat-check), unchanged. Each `*-contracts` module owns its domain's
-**exchanges** and `TypeMapping` beans; `schema-messaging-core` owns **per-service
-queues/DLQs/retry ladders** via `ServiceQueueTopologyAutoConfiguration`, driven by
-`@BitsEventHandler` discovery. `TypeMapping`/`SchemaCoordinates`/`SchemaType` live in
+tool (register + compat-check), unchanged. Domain **exchanges** are publisher-owned (opt-in
+`*PublisherTopology` in `*-contracts`, `@Import`-ed only by the sole publisher); `TypeMapping`
+beans auto-load from contracts. `schema-messaging-core` owns **per-service queues/DLQs/retry
+ladders** via `ServiceQueueTopologyAutoConfiguration`, driven by `@BitsEventHandler` discovery —
+consumers bind to publisher-owned exchanges and never declare them (see ADR-0008). `TypeMapping`/`SchemaCoordinates`/`SchemaType` live in
 `event-contract-kit`; `contracts ↔ core` is zero dependency in either direction
 (machine-enforced on both sides).
 
@@ -103,9 +104,14 @@ Eight Maven modules (parent root = this directory):
   `@BitsEventHandler` listener registration, and `ServiceQueueTopologyAutoConfiguration`
   (per-service queue/DLQ/retry-ladder declaration). Validates against classpath schemas — no
   runtime Apicurio dependency. Does **not** own domain **exchanges** (those live in
-  `*-contracts`), but **does** declare per-service queues for every handled event type.
-  Machine-forbidden from depending on either `*-contracts` module; depends on `event-contract-kit`
-  for `TypeMapping`/`SchemaCoordinates`/`SchemaType`.
+  `*-contracts`), but **does** declare per-service queues for every handled event type and *binds*
+  them to the publisher-owned exchanges — it never declares an exchange (`declareExchange` is called
+  zero times; it builds the exchange objects locally via `DomainTopology.of(mapping.exchange())`
+  only to feed the binding factory). This is the **consumer** half of the least-privilege split:
+  a consumer needs `configure`+`write`+`read` on its own queues plus `read` on the exchanges to
+  bind, and **no `configure` on any exchange** (see ADR-0008). Machine-forbidden from depending on
+  either `*-contracts` module; depends on `event-contract-kit` for
+  `TypeMapping`/`SchemaCoordinates`/`SchemaType`.
 - **`event-contract-kit`** (formerly `amqp-topology-kit`) — domain-agnostic AMQP topology-building
   library (naming conventions + retry-ladder factory + `DomainTopology`/`DomainExchanges` exchange
   factory, `com.example.amqp.topology.*`) plus, since the shared `TypeMapping`/`SchemaCoordinates`/
@@ -125,7 +131,10 @@ Eight Maven modules (parent root = this directory):
   (`TypeMapping` beans via `Mappings`). Exchange ownership follows domain cardinality: only the
   domain's single publisher declares its exchanges, by `@Import`-ing the **opt-in**
   `OrderPublisherTopology` (`@Configuration`, deliberately **not** in `AutoConfiguration.imports`) —
-  a contracts jar alone forces no exchanges. `OrderTypeMappingAutoConfiguration` (plain-data beans
+  a contracts jar alone forces no exchanges. That publisher is the **only** role needing
+  `configure`+`write` on the domain's exchanges (the **publisher** half of the least-privilege
+  split; consumers get no exchange `configure` — see ADR-0008).
+  `OrderTypeMappingAutoConfiguration` (plain-data beans
   both roles need) **stays** self-activating via
   `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
   Depends on Jackson, jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and
