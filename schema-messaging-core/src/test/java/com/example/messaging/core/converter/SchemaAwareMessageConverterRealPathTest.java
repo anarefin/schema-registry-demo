@@ -6,13 +6,12 @@ import com.example.amqp.topology.mapping.SchemaCoordinates;
 import com.example.amqp.topology.mapping.SchemaType;
 import com.example.messaging.core.schema.LocalSchemaCatalog;
 import com.example.messaging.core.serde.JsonSchemaStrategy;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,10 +37,8 @@ class SchemaAwareMessageConverterRealPathTest {
                 "events.test.exchange");
         TypeMappingRegistry registry = new TypeMappingRegistry(List.of(mapping));
         LocalSchemaCatalog catalog = new LocalSchemaCatalog(registry);
-        ObjectMapper mapper = new ObjectMapper()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         converter = new SchemaAwareMessageConverter(
-                registry, catalog, List.of(new JsonSchemaStrategy(mapper)));
+                registry, catalog, List.of(new JsonSchemaStrategy()));
     }
 
     @Test
@@ -57,5 +54,24 @@ class SchemaAwareMessageConverterRealPathTest {
         assertThat((Object) props.getHeader(SchemaMessageHeaders.ARTIFACT_ID)).isEqualTo("FixtureEvent");
         assertThat((Object) props.getHeader(SchemaMessageHeaders.TYPE)).isEqualTo("JSON");
         assertThat(props.getContentType()).isEqualTo("application/json");
+    }
+
+    /**
+     * Defends the tolerant-reader contract through the real, unmocked catalog + strategy +
+     * converter chain: an unmapped field in the wire payload must not break consumption.
+     */
+    @Test
+    void fromMessage_extraUnknownField_toleratedByRealConverter() {
+        byte[] bodyWithExtraField =
+                "{\"id\":\"evt-1\",\"extra\":\"nope\"}".getBytes(StandardCharsets.UTF_8);
+        MessageProperties props = new MessageProperties();
+        props.setHeader(SchemaMessageHeaders.GROUP_ID, "events.test");
+        props.setHeader(SchemaMessageHeaders.ARTIFACT_ID, "FixtureEvent");
+        props.setHeader(SchemaMessageHeaders.TYPE, "JSON");
+        props.setContentType("application/json");
+
+        Object result = converter.fromMessage(new Message(bodyWithExtraField, props));
+
+        assertThat(result).isEqualTo(new FixtureEvent("evt-1"));
     }
 }

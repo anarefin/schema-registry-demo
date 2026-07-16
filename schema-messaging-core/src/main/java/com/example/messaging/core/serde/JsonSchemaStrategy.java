@@ -7,8 +7,11 @@ import com.example.messaging.core.exception.SerializationException;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.amqp.topology.mapping.SchemaCoordinates;
 import com.example.amqp.topology.mapping.SchemaType;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
@@ -42,6 +45,12 @@ import java.util.stream.Collectors;
  *
  * <p>Each message is parsed once: produce uses {@code valueToTree} → validate →
  * {@code writeValueAsBytes}; consume uses {@code readTree} → validate → {@code convertValue}.
+ *
+ * <p>Owns a dedicated tolerant {@link ObjectMapper} it builds for itself — never a bean, never
+ * accepted from the application context. A service is free to register its own strict
+ * {@code @Bean ObjectMapper} (e.g. {@code FAIL_ON_UNKNOWN_PROPERTIES=true} for its REST layer)
+ * without that choice silently breaking FORWARD-compatible schema evolution on the messaging
+ * path (adding an optional field to an event must stay a no-op for existing consumers).
  */
 public class JsonSchemaStrategy implements SerializationStrategy {
 
@@ -53,13 +62,34 @@ public class JsonSchemaStrategy implements SerializationStrategy {
     // Compiled JsonSchema objects are immutable and thread-safe; cache by coordinates.
     private final Map<SchemaCoordinates, JsonSchema> compiledSchemaCache = new ConcurrentHashMap<>();
 
-    public JsonSchemaStrategy(ObjectMapper objectMapper, boolean validateOnDeserialize) {
+    public JsonSchemaStrategy() {
+        this(defaultObjectMapper(), true);
+    }
+
+    JsonSchemaStrategy(ObjectMapper objectMapper, boolean validateOnDeserialize) {
         this.objectMapper = objectMapper;
         this.validateOnDeserialize = validateOnDeserialize;
     }
 
-    public JsonSchemaStrategy(ObjectMapper objectMapper) {
-        this(objectMapper, true);
+    /**
+     * Builds the tolerant mapper messaging deserialization uses: unknown JSON properties are
+     * ignored (spec §01 — forward-compatible event evolution), dates serialize as ISO-8601
+     * strings (matching the generated schemas' {@code "format":"date-time"}), and null optionals
+     * are omitted so they don't fail a field's {@code type} check when absent.
+     *
+     * <p>Also the baseline {@code SchemaMessagingAutoConfiguration.objectMapper()} fallback bean
+     * builds on: sharing this builder avoids hand-copying the same config twice, without
+     * reintroducing the coupling this class exists to avoid — each caller still gets its own,
+     * independently constructed {@link ObjectMapper} instance (never a shared bean reference),
+     * and remains free to layer further config on top for its own purposes.
+     */
+    public static ObjectMapper defaultObjectMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        return mapper;
     }
 
     @Override

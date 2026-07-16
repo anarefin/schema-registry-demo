@@ -6,7 +6,6 @@ import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.amqp.topology.mapping.SchemaCoordinates;
 import com.example.amqp.topology.mapping.SchemaType;
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,11 +48,23 @@ class JsonSchemaStrategyTest {
 
     @BeforeEach
     void setUp() {
-        ObjectMapper mapper = new ObjectMapper()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        strategy = new JsonSchemaStrategy(mapper, true);
+        strategy = new JsonSchemaStrategy();
         schema = new ResolvedSchema(new SchemaCoordinates("test", "Person"), SchemaType.JSON,
                 SCHEMA_JSON.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Defends the tolerant-reader contract at its source: the production factory-built mapper
+     * (no hand-set flags in this test) must ignore an unmapped field rather than throw.
+     */
+    @Test
+    void deserialize_extraUnknownField_toleratedByDefaultMapper() throws Exception {
+        byte[] withExtraField =
+                "{\"name\":\"Alice\",\"age\":30,\"promoCode\":\"X\"}".getBytes(StandardCharsets.UTF_8);
+
+        Object result = strategy.deserialize(withExtraField, Person.class, schema);
+
+        assertThat(result).isEqualTo(new Person("Alice", 30));
     }
 
     /** TC-serde-5: valid payload serializes to bytes and deserializes back to equal object. */
@@ -95,9 +106,8 @@ class JsonSchemaStrategyTest {
     /** TC-serde-7b: with validateOnDeserialize=false, invalid bytes do NOT throw on deserialize. */
     @Test
     void deserialize_invalidBytes_validateOnDeserializeFalse_noException() throws Exception {
-        ObjectMapper mapper = new ObjectMapper()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        JsonSchemaStrategy noValidation = new JsonSchemaStrategy(mapper, false);
+        JsonSchemaStrategy noValidation =
+                new JsonSchemaStrategy(JsonSchemaStrategy.defaultObjectMapper(), false);
 
         byte[] missingNameBytes = "{\"age\":99}".getBytes(StandardCharsets.UTF_8);
         Object result = noValidation.deserialize(missingNameBytes, Person.class, schema);
@@ -124,9 +134,8 @@ class JsonSchemaStrategyTest {
      */
     @Test
     void deserialize_notJsonBytes_validationDisabled_throwsDeserializationException() {
-        ObjectMapper mapper = new ObjectMapper()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        JsonSchemaStrategy noValidation = new JsonSchemaStrategy(mapper, false);
+        JsonSchemaStrategy noValidation =
+                new JsonSchemaStrategy(JsonSchemaStrategy.defaultObjectMapper(), false);
 
         byte[] garbage = new byte[]{0x01, 0x02, 0x03};
 
@@ -156,8 +165,7 @@ class JsonSchemaStrategyTest {
     /** PERF-001: consume path parses bytes once (readTree → validate → convertValue). */
     @Test
     void deserialize_validateEnabled_parsesOnce() throws Exception {
-        ObjectMapper mapper = spy(new ObjectMapper()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false));
+        ObjectMapper mapper = spy(JsonSchemaStrategy.defaultObjectMapper());
         JsonSchemaStrategy strat = new JsonSchemaStrategy(mapper, true);
         strat.warm(schema);
         byte[] bytes = "{\"name\":\"Alice\",\"age\":30}".getBytes(StandardCharsets.UTF_8);
@@ -172,8 +180,7 @@ class JsonSchemaStrategyTest {
     /** PERF-001: produce path serializes once (valueToTree → validate → writeValueAsBytes). */
     @Test
     void serialize_parsesOnce() throws Exception {
-        ObjectMapper mapper = spy(new ObjectMapper()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false));
+        ObjectMapper mapper = spy(JsonSchemaStrategy.defaultObjectMapper());
         JsonSchemaStrategy strat = new JsonSchemaStrategy(mapper, true);
         strat.warm(schema);
         Person p = new Person("Alice", 30);
