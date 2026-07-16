@@ -4,8 +4,8 @@
 
 **Blocked by:** 01 — Defend tolerant reader; 02 — Generator additionalProperties invariant; 03 — Apicurio register canonicalize.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] ADR-0009 has Open work pointing at Phase 1 / QUAL-003 (and related hardening) with accurate done vs remaining
-- [ ] Status note distinguishes accepted architecture from runtime production-ready claim
-- [ ] No implication that DEPRECATED or wire version/hash gates consumers at runtime
+- [x] ADR-0009 has Open work pointing at Phase 1 / QUAL-003 (and related hardening) with accurate done vs remaining
+- [x] Status note distinguishes accepted architecture from runtime production-ready claim
+- [x] No implication that DEPRECATED or wire version/hash gates consumers at runtime

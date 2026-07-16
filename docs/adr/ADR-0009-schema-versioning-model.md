@@ -1,9 +1,10 @@
 # ADR-0009: Schema versioning model — compatible evolution only
 
-**Status:** Accepted  
+**Status:** Accepted — architecture; runtime hardening tracked (see [Open work](#open-work)).  
+Not a claim that production hardening is complete.  
 **Date:** 2026-07-16  
 **Spec:** `spec/12-schema-versioning.md`  
-**Related findings:** ARCH-010 (versioning model undocumented), QUAL-003 (tolerant reader undefended), DOC-001 (ADR-0004 deleted but cited)  
+**Related findings:** ARCH-010 (versioning model undocumented), QUAL-003 (tolerant reader — Phase 1), DOC-001 (ADR-0004 deleted but cited)  
 **Depends on:** [ADR-0004](0004-local-schema-validation.md) — classpath schema resolution, no runtime registry  
 **Supersedes:** nothing
 
@@ -99,9 +100,11 @@ FORWARD gate entirely
 stay: byte-determinism is the design goal, and a version in `$id` would churn every schema on every
 bump. Generation is also where the tolerant-reader invariant is asserted (below).
 
-**Registry.** Versions stay auto-assigned; nothing in code names a version number. `canonicalize`
-should be enabled so `FIND_OR_CREATE_VERSION` matches on canonical content rather than raw bytes —
-today idempotency rests on the generator's byte-determinism, which is load-bearing but incidental.
+**Registry.** Versions stay auto-assigned; nothing in code names a version number.
+`<canonicalize>true</canonicalize>` is set on contract-module Apicurio register config so
+`FIND_OR_CREATE_VERSION` matches on canonical content rather than raw bytes. Generator
+byte-determinism remains load-bearing for the offline drift gate; canonicalize closes the
+registry-side gap.
 
 **Wire.** If a version identifier is ever added, it must be Apicurio's **`contentHash`** — the hash
 of canonical schema content. Of Apicurio's three identifiers, `globalId` (per artifact version) and
@@ -138,40 +141,23 @@ setting.
 ### The tolerant reader is a named invariant
 
 Under Tier 1, the FORWARD gate is only **half** the compatibility contract. The other half is the
-runtime's willingness to read a payload carrying fields it does not know. **Today that half holds by
-accident, is undefended by tests, and is the single point of failure of this entire model.**
+runtime's willingness to read a payload carrying fields it does not know. Both props are
+**architectural invariants**, now defended in code (Phase 1 — see [Open work](#open-work)):
 
-Two props, both accidental:
-
-1. **Schemas omit `additionalProperties`.** JSON Schema defaults it to `true`, so an old consumer
-   validating new-version bytes with an extra field passes. This is a consequence of
-   `OptionPreset.PLAIN_JSON` in
-   [`SchemaGenerator`](../../schema-gen-tools/src/main/java/com/example/schemagen/SchemaGenerator.java),
-   not a decision. A future "tighten the schemas" change adding `additionalProperties: false` would
-   silently convert every forward-compatible message into a DLQ'd `SchemaValidationException`.
-2. **Jackson does not fail on unknown properties** —
-   [`SchemaMessagingAutoConfiguration.java:56-60`](../../schema-messaging-core/src/main/java/com/example/messaging/core/config/SchemaMessagingAutoConfiguration.java#L56-L60):
-
-   ```java
-   @ConditionalOnMissingBean(ObjectMapper.class)
-   public ObjectMapper objectMapper() {
-       ObjectMapper mapper = new ObjectMapper();
-       mapper.findAndRegisterModules();
-       mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-   ```
-
-   This is a **fallback**. Any application defining its own `ObjectMapper` displaces it, and
-   Jackson's own default for `FAIL_ON_UNKNOWN_PROPERTIES` is **`true`**. That service would DLQ
-   every forward-compatible message it received. The tests cannot catch this: every test mapper sets
-   the flag **by hand**
-   ([`JsonSchemaStrategyTest.java:53`](../../schema-messaging-core/src/test/java/com/example/messaging/core/serde/JsonSchemaStrategyTest.java#L53)
-   and five further sites), so they exercise a mapper production may not have.
-
-**Both are hereby architectural invariants**, and must be defended by an end-to-end test through the
-**real auto-configured** `ObjectMapper`: an old consumer schema, a payload carrying an extra field,
-asserting successful consumption. Whether core should own the deserialization posture outright
-rather than yield it to `@ConditionalOnMissingBean` is specified in `spec/12-schema-versioning.md`.
-No code is changed by this ADR.
+1. **Generated schemas emit `"additionalProperties": true`** on every object node
+   ([`SchemaGenerator`](../../schema-gen-tools/src/main/java/com/example/schemagen/SchemaGenerator.java)),
+   with a parse-tree test that fails if any node carries `false`. Intent is visible in committed
+   JSON, not resting on JSON Schema's implicit default. A future "tighten the schemas" change
+   adding `additionalProperties: false` would silently convert every forward-compatible message
+   into a DLQ'd `SchemaValidationException` — the generator test is the tripwire.
+2. **Messaging owns a dedicated tolerant `ObjectMapper`** built inside
+   [`JsonSchemaStrategy`](../../schema-messaging-core/src/main/java/com/example/messaging/core/serde/JsonSchemaStrategy.java)
+   (`FAIL_ON_UNKNOWN_PROPERTIES=false`) — never a bean, never injected from the app context. The
+   `@ConditionalOnMissingBean(ObjectMapper.class)` fallback in
+   [`SchemaMessagingAutoConfiguration`](../../schema-messaging-core/src/main/java/com/example/messaging/core/config/SchemaMessagingAutoConfiguration.java)
+   remains for non-messaging Jackson 2 needs only. An application `@Bean ObjectMapper` with
+   `FAIL_ON_UNKNOWN_PROPERTIES=true` must not displace messaging deserialization; defended by
+   [`MessagingObjectMapperIsolationTest`](../../schema-messaging-core/src/test/java/com/example/messaging/core/config/MessagingObjectMapperIsolationTest.java).
 
 ## Rejected alternatives
 
@@ -237,8 +223,8 @@ ADR-0004 is not "we removed the registry"; it is **compile-time schema resolutio
 - **Positive:** No new mechanism. Tier 1 is what the tooling already does; this ADR mostly names and
   defends it.
 - **Positive:** The versioning reasoning is written down again, with ADR-0004 restored beneath it.
-- **Positive:** The tolerant reader is promoted from accident to invariant, with a specified test.
-  The latent `ObjectMapper` bug is documented rather than waiting to be discovered in production.
+- **Positive:** The tolerant reader is promoted from accident to invariant and Phase-1-defended
+  (dedicated messaging mapper + generator `additionalProperties` emit/assert + canonicalize).
 - **Positive:** The FORWARD choice now records its directional meaning, not just its mechanical one.
 - **Negative — the accepted cost of Tier 1:** **schemas grow monotonically.** No field is ever
   removable, because removal is breaking and breaking is unsupported. Left undisciplined, in five
@@ -247,7 +233,27 @@ ADR-0004 is not "we removed the registry"; it is **compile-time schema resolutio
   convention despite Draft-07 lacking the keyword.
 - **Negative:** A genuinely breaking change has no sanctioned path. That is deliberate — it forces
   escalation and a design conversation rather than a quiet `V2`.
-- **Neutral:** No runtime code changes. `contentHash`, the drift metric, and the tolerant-reader test
-  are specified in `spec/12-schema-versioning.md` and deferred.
-- **Neutral:** Apicurio version state remains available as a governance signal, now correctly
-  described as having no runtime effect in this architecture.
+- **Neutral:** Wire `contentHash` and runtime drift telemetry remain deferred (advisory only if
+  added — never a reject gate). See [Open work](#open-work).
+- **Neutral:** Apicurio version state remains available as a governance signal, correctly
+  described as having **no runtime effect** here — `DEPRECATED` does not gate consumers.
+
+## Open work
+
+**Accepted architecture; runtime hardening tracked.** ADR status ≠ “production hardening complete.”
+
+Phase 1 DoD (additive producer bump must not DLQ a consumer with a strict app `ObjectMapper`;
+re-register of unchanged schema creates no spurious version) is the bar for calling schema
+versioning production-ready — see `spec/schema-versioning-spec.md`.
+
+| Item | Status |
+|---|---|
+| **QUAL-003 / dedicated messaging `ObjectMapper`** — factory-internal tolerant mapper; app `@Bean ObjectMapper` cannot displace it; isolation E2E (`MessagingObjectMapperIsolationTest`) | **Done** (Phase 1a–1b) |
+| **Generator `additionalProperties: true`** — emit on every object node; parse-tree test fails on `false` | **Done** (Phase 1c) |
+| **Apicurio `<canonicalize>true`** on contract-module register config | **Done** (Phase 1d) |
+| **Wire `contentHash`** — advisory forensic header only; **never gates** consume | **Deferred** (Phase 3; not required for Phase 1 DoD) |
+| **Runtime drift telemetry** (hash-miss counter / signal) | **Deferred** — no consumer-side metric yet |
+| **`DEPRECATED` / version state at runtime** | **N/A by design** — CI/governance metadata only; runtime never fetches registry content, so deprecation warnings reach nobody. Owners signal via ticket + CODEOWNERS, not the consumer JVM. |
+
+Nothing in this ADR implies that `DEPRECATED`, a wire version, or a `contentHash` miss rejects or
+DLQs a message. Consume stays `(group, artifact)` → classpath schema + tolerant reader.
