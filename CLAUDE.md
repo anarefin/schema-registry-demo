@@ -242,7 +242,10 @@ JSON field additions only validate under FORWARD). The `compat-check` Maven prof
 the parent POM; contract modules supply per-artifact coordinates. CI workflows discover `*-contracts`
 modules dynamically. Drift is checked offline via `schema-gen-tools` + `git diff --exit-code`. This
 is a build-time/CI-only flow (`apicurio-registry-maven-plugin`) — producer/consumer never call the
-registry at runtime, so there is no runtime schema-version pinning to configure.
+registry at runtime, so there is no runtime schema-version pinning to configure. Wire `contentHash`
+(Apicurio's content-addressed schema identifier) is **deferred**: if ever added, it is
+advisory-only forensic telemetry (fleet-drift evidence ahead of a `DEPRECATED` flip), **never a
+reject gate** — runtime identity stays `(group, artifact)` only. See ADR-0009 §Open work.
 
 ### Health checks
 

@@ -155,6 +155,15 @@ Deprecation and removal need explicit ACK from every handler owner:
 3. Do **not** expect consumer JVMs to observe `DEPRECATED` — they resolve schemas from the
    contracts jar on the classpath, not from Apicurio.
 
+### Field census cadence
+
+Schemas grow monotonically under Tier 1 (see Step C), so removal candidates have to be found
+deliberately — nothing forces the question. Run a **quarterly** census: grep every `*-contracts`
+module for `@Deprecated` record components, then cross-reference each hit against the current
+`@BitsEventHandler` inventory for that event type. A field becomes a removal candidate once the
+census shows no remaining handler reads it and no producer still emits it; open the Step C removal
+PR at that point rather than letting `@Deprecated` fields sit un-actioned across multiple censuses.
+
 ---
 
 ## Anti-example — do not do this

@@ -491,6 +491,16 @@ the DLQ (management UI → purge, or manually ack the message) and re-check to s
 **What you verified:** queue-depth health surfaces poison messages piling up through the standard
 actuator surface.
 
+**Ops expectation (production):** this POC has no Prometheus/Grafana or other metrics pipeline
+(removed, see `CLAUDE.md`), so alerting on DLQ depth is whatever polls `/actuator/health` —
+typically a synthetic prober or the orchestrator's own health-check loop. Page on-call whenever
+`components.queueDepth` flips to `DOWN`; that status means at least one of this service's own DLQs
+is non-empty and messages are silently accumulating (no retry will drain a DLQ). `POST
+/api/orders/poison` (§10) is the sanctioned synthetic drill for this: it deterministically lands
+one message on `orders.created.consumer-service.dlq`, so running it against a non-prod environment
+on a schedule (not just ad hoc, as here) is how you prove the alert path actually fires end to end,
+not just that the health indicator computes the right boolean.
+
 ---
 
 ## 18. Teardown
