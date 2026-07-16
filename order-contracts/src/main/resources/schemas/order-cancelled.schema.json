@@ -1,6 +1,7 @@
 {
   "$id" : "urn:example:schema:OrderCancelled",
   "$schema" : "http://json-schema.org/draft-07/schema#",
+  "additionalProperties" : true,
   "description" : "Emitted when an order is cancelled.",
   "properties" : {
     "cancelledAt" : {

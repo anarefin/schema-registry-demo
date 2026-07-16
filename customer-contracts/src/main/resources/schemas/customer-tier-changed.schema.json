@@ -1,6 +1,7 @@
 {
   "$id" : "urn:example:schema:CustomerTierChanged",
   "$schema" : "http://json-schema.org/draft-07/schema#",
+  "additionalProperties" : true,
   "description" : "Emitted when a customer's loyalty tier changes.",
   "properties" : {
     "customerId" : {

@@ -12,6 +12,7 @@ import com.github.victools.jsonschema.generator.Option;
 import com.github.victools.jsonschema.generator.OptionPreset;
 import com.github.victools.jsonschema.generator.SchemaGeneratorConfig;
 import com.github.victools.jsonschema.generator.SchemaGeneratorConfigBuilder;
+import com.github.victools.jsonschema.generator.SchemaKeyword;
 import com.github.victools.jsonschema.generator.SchemaVersion;
 import com.github.victools.jsonschema.module.jackson.JacksonModule;
 import com.github.victools.jsonschema.module.jakarta.validation.JakartaValidationModule;
@@ -42,6 +43,9 @@ import java.util.List;
  * {@code description}; {@link JakartaValidationModule} maps {@code @NotNull} → {@code required},
  * {@code @Size} → {@code minLength}/{@code maxLength}, {@code @DecimalMin}/{@code @Min} →
  * {@code minimum}/{@code exclusiveMinimum}, and {@code @Pattern} → {@code pattern}.
+ *
+ * <p>Tolerant-reader invariant: every object node emits {@code "additionalProperties": true}
+ * explicitly (not relying on JSON Schema's implicit default). See ADR-0009.
  */
 public final class SchemaGenerator {
 
@@ -49,7 +53,7 @@ public final class SchemaGenerator {
 
     /** Generate the byte-stable schema for {@code eventType}. */
     public static String generate(Class<?> eventType) {
-        SchemaGeneratorConfig config = new SchemaGeneratorConfigBuilder(
+        SchemaGeneratorConfigBuilder configBuilder = new SchemaGeneratorConfigBuilder(
                 SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON)
                 // Record components are argument-free accessor methods — this is how their
                 // properties (and their annotations) are discovered.
@@ -58,8 +62,24 @@ public final class SchemaGenerator {
                 .with(new JacksonModule())
                 .with(new JakartaValidationModule(
                         JakartaValidationOption.NOT_NULLABLE_FIELD_IS_REQUIRED,
-                        JakartaValidationOption.INCLUDE_PATTERN_EXPRESSIONS))
-                .build();
+                        JakartaValidationOption.INCLUDE_PATTERN_EXPRESSIONS));
+        // Make tolerant-reader intent visible in committed JSON (ADR-0009 / schema-versioning 1c).
+        // victools' AttributeCollector deliberately omits additionalProperties when the resolved
+        // value is Boolean.TRUE (treats it as the JSON Schema default), so a resolver alone cannot
+        // emit the keyword — force it via type-attribute override after collection.
+        configBuilder.forTypesInGeneral()
+                .withTypeAttributeOverride((node, scope, context) -> {
+                    String typeKeyword = context.getKeyword(SchemaKeyword.TAG_TYPE);
+                    String objectType = context.getKeyword(SchemaKeyword.TAG_TYPE_OBJECT);
+                    String propertiesKeyword = context.getKeyword(SchemaKeyword.TAG_PROPERTIES);
+                    JsonNode type = node.get(typeKeyword);
+                    boolean objectSchema = node.has(propertiesKeyword)
+                            || (type != null && type.isTextual() && objectType.equals(type.textValue()));
+                    if (objectSchema) {
+                        node.put(context.getKeyword(SchemaKeyword.TAG_ADDITIONAL_PROPERTIES), true);
+                    }
+                });
+        SchemaGeneratorConfig config = configBuilder.build();
 
         com.github.victools.jsonschema.generator.SchemaGenerator generator =
                 new com.github.victools.jsonschema.generator.SchemaGenerator(config);

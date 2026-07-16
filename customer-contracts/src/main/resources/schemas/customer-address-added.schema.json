@@ -1,6 +1,7 @@
 {
   "$id" : "urn:example:schema:CustomerAddressAdded",
   "$schema" : "http://json-schema.org/draft-07/schema#",
+  "additionalProperties" : true,
   "description" : "Emitted when a customer adds a postal address.",
   "properties" : {
     "addedAt" : {
@@ -41,7 +42,8 @@
             "line1",
             "postalCode"
           ],
-          "description" : "A customer postal address."
+          "description" : "A customer postal address.",
+          "additionalProperties" : true
         },
         {
           "description" : "The address that was added."
