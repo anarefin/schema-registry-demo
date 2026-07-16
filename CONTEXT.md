@@ -71,3 +71,15 @@ account identified by `customerId`.
 The exchange/queue split maps onto **least-privilege broker roles** (publisher: `configure`+`write`
 on exchanges; consumer: own-queue rights + `read` on exchanges, no exchange `configure`). See
 ADR-0008 and `docs/TUTORIAL.md` §2 and §4.5 for the full walkthrough.
+
+## Schema evolution and versioning
+
+| Term | Meaning |
+|------|---------|
+| **Compatible evolution** | The only supported way a schema changes here ("Tier 1"). Additive changes pass the FORWARD gate and get a new auto-assigned registry version. Breaking changes are **unsupported** — an escalation, not a workflow. A breaking change cannot be "version 2" of an artifact: the compat gate rejects it, correctly. See ADR-0009. |
+| **Expand/contract** (parallel change) | The sanctioned route for an apparently-breaking change, using no new mechanism: add the new field alongside the old (additive, passes FORWARD), migrate readers, then remove the old field once provably unread. One hard break becomes three easy steps. |
+| **Tolerant reader** | The runtime's willingness to accept a payload carrying fields it does not know — the half of the compatibility contract the registry does **not** provide. Two props: generated schemas omit `additionalProperties` (JSON Schema defaults it to `true`), and Jackson runs with `FAIL_ON_UNKNOWN_PROPERTIES=false`. Both are **named invariants** (ADR-0009); the second currently rests on a `@ConditionalOnMissingBean` fallback and is undefended by tests. |
+| **FORWARD** | The compatibility rule on all seven artifacts. Mechanically: Apicurio classifies adding a property as `OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED`, which BACKWARD rejects and FORWARD accepts. Directionally — and this is the real meaning — **the producer upgrades first and consumers lag safely**. That is a deployment-order commitment, not a lint setting. |
+| **`contentHash`** | Apicurio's content-addressed schema identifier. The only one of `globalId` / `contentId` / `contentHash` computable at **build time** — the other two are assigned by the registry and unknowable without calling it. If a version identifier ever reaches the wire it must be this one, and it is **advisory**: a classpath-resolved consumer can never gate on a version, because it cannot fetch a schema it does not ship (ADR-0009). |
+| **Version state** | Apicurio's per-version lifecycle: `ENABLED` / `DISABLED` / `DEPRECATED`, set via `PUT /groups/{g}/artifacts/{a}/versions/{v}/state`. `DEPRECATED` signals through a warning header on the REST response **when content is fetched** — and this runtime never fetches content, so it is a **CI/governance signal only**, with no runtime effect here. |
+| **Schema drift** | Two distinct meanings. *Build-time:* committed schemas differ from regenerated ones — caught by the **drift gate**. *Runtime (hypothetical, not implemented):* a consumer receives a message stamped with a `contentHash` it does not have — a **signal, not a failure**, and the evidence needed before flipping a version to `DEPRECATED`. |
