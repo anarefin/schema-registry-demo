@@ -8,8 +8,9 @@ name: Schema Governance Bootstrap
 # optional property is classified as a "narrowing" and is only FORWARD-compatible, never BACKWARD
 # (see README §2 / the parent POM note).
 #
-# Data-driven: the artifact set lives in the ARTIFACTS list below (one `group/artifact` per line).
-# Adding a seventh event is a one-line change here — no new hardcoded step. It is safe to re-run:
+# Data-driven: artifact coordinates are DISCOVERED from each *-contracts POM's
+# apicurio-registry-maven-plugin <artifacts> list (see .github/scripts/discover-contract-artifacts.sh).
+# Adding a new event only requires updating that POM — bootstrap cannot drift. It is safe to re-run:
 # `register` is idempotent (FIND_OR_CREATE_VERSION) and Apicurio returns 409 if a rule already
 # exists, which this workflow treats as success.
 #
@@ -33,16 +34,6 @@ env:
   # sets a variable rather than being evaluated by the shell — this prevents command injection via
   # the registry_url input.
   REGISTRY_URL: ${{ github.event.inputs.registry_url || 'http://localhost:8080' }}
-  # The full artifact set, one `group/artifact` per line. This is the single source of truth the
-  # rule-attach and verify steps both loop over. Keep it in sync with GeneratedSchemas.ALL.
-  ARTIFACTS: |
-    events.orders/OrderCreated
-    events.orders/OrderShipped
-    events.orders/OrderCancelled
-    events.orders/OrderFulfilled
-    events.customers/CustomerRegistered
-    events.customers/CustomerAddressAdded
-    events.customers/CustomerTierChanged
 
 jobs:
   bootstrap:
@@ -66,8 +57,26 @@ jobs:
           echo "pl=$PL" >> "$GITHUB_OUTPUT"
           echo "Discovered contract modules: $PL"
 
+      - name: Discover contract artifacts
+        id: artifacts
+        # Single source of truth: same POM <artifacts> lists that apicurio-registry:register uses.
+        run: |
+          ARTIFACTS=$(.github/scripts/discover-contract-artifacts.sh)
+          COUNT=$(printf '%s\n' "${ARTIFACTS}" | grep -c . || true)
+          if [ "${COUNT}" -eq 0 ]; then
+            echo "ERROR: no artifacts discovered from *-contracts POMs" >&2
+            exit 1
+          fi
+          {
+            echo "list<<EOF"
+            printf '%s\n' "${ARTIFACTS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Discovered ${COUNT} artifacts:"
+          printf '%s\n' "${ARTIFACTS}"
+
       - name: Re-seed v1 — register every contract schema
-        # Idempotent (FIND_OR_CREATE_VERSION). Seeds all six artifacts from their committed
+        # Idempotent (FIND_OR_CREATE_VERSION). Seeds all contract artifacts from their committed
         # generated schemas before the rules are attached.
         run: |
           ./mvnw -pl ${{ steps.modules.outputs.pl }} apicurio-registry:register \
@@ -75,10 +84,12 @@ jobs:
             --no-transfer-progress
 
       - name: Attach FORWARD compatibility rules
-        # Loop the data-driven ARTIFACTS list. JSON Schema: adding an optional property is
+        # Loop discovered artifacts. JSON Schema: adding an optional property is
         # FORWARD-compatible in Apicurio (BACKWARD rejects it as OBJECT_TYPE_PROPERTY_SCHEMAS_NARROWED).
         # Here-string (<<<) keeps the loop in the current shell so a failing `exit 1` fails the step
         # (a piped `while` would run in a subshell and swallow the exit).
+        env:
+          ARTIFACTS: ${{ steps.artifacts.outputs.list }}
         run: |
           while IFS='/' read -r GROUP ARTIFACT; do
             [ -z "${GROUP}" ] && continue
@@ -95,6 +106,8 @@ jobs:
           done <<< "${ARTIFACTS}"
 
       - name: Verify rules are active
+        env:
+          ARTIFACTS: ${{ steps.artifacts.outputs.list }}
         run: |
           while IFS='/' read -r GROUP ARTIFACT; do
             [ -z "${GROUP}" ] && continue

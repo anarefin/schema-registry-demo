@@ -4,8 +4,8 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Bootstrap workflow no longer references deleted `GeneratedSchemas.ALL`
-- [ ] `ARTIFACTS` (or equivalent) is derived from contracts schemas and/or POM artifact coordinates
-- [ ] Rule-attach / verify loops still cover all seven order + customer artifacts under FORWARD
+- [x] Bootstrap workflow no longer references deleted `GeneratedSchemas.ALL`
+- [x] `ARTIFACTS` (or equivalent) is derived from contracts schemas and/or POM artifact coordinates
+- [x] Rule-attach / verify loops still cover all seven order + customer artifacts under FORWARD
