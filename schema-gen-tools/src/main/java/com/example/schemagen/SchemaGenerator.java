@@ -12,7 +12,6 @@ import com.github.victools.jsonschema.generator.Option;
 import com.github.victools.jsonschema.generator.OptionPreset;
 import com.github.victools.jsonschema.generator.SchemaGeneratorConfig;
 import com.github.victools.jsonschema.generator.SchemaGeneratorConfigBuilder;
-import com.github.victools.jsonschema.generator.SchemaKeyword;
 import com.github.victools.jsonschema.generator.SchemaVersion;
 import com.github.victools.jsonschema.module.jackson.JacksonModule;
 import com.github.victools.jsonschema.module.jakarta.validation.JakartaValidationModule;
@@ -63,28 +62,15 @@ public final class SchemaGenerator {
                 .with(new JakartaValidationModule(
                         JakartaValidationOption.NOT_NULLABLE_FIELD_IS_REQUIRED,
                         JakartaValidationOption.INCLUDE_PATTERN_EXPRESSIONS));
-        // Make tolerant-reader intent visible in committed JSON (ADR-0009 / schema-versioning 1c).
-        // victools' AttributeCollector deliberately omits additionalProperties when the resolved
-        // value is Boolean.TRUE (treats it as the JSON Schema default), so a resolver alone cannot
-        // emit the keyword — force it via type-attribute override after collection.
-        configBuilder.forTypesInGeneral()
-                .withTypeAttributeOverride((node, scope, context) -> {
-                    String typeKeyword = context.getKeyword(SchemaKeyword.TAG_TYPE);
-                    String objectType = context.getKeyword(SchemaKeyword.TAG_TYPE_OBJECT);
-                    String propertiesKeyword = context.getKeyword(SchemaKeyword.TAG_PROPERTIES);
-                    JsonNode type = node.get(typeKeyword);
-                    boolean objectSchema = node.has(propertiesKeyword)
-                            || (type != null && type.isTextual() && objectType.equals(type.textValue()));
-                    if (objectSchema) {
-                        node.put(context.getKeyword(SchemaKeyword.TAG_ADDITIONAL_PROPERTIES), true);
-                    }
-                });
         SchemaGeneratorConfig config = configBuilder.build();
 
         com.github.victools.jsonschema.generator.SchemaGenerator generator =
                 new com.github.victools.jsonschema.generator.SchemaGenerator(config);
 
         ObjectNode schema = (ObjectNode) generator.generateSchema(eventType);
+        // Post-process: victools omits additionalProperties when true (JSON Schema default), and
+        // type-attribute overrides miss some inlined/allOf shapes — walk the tree explicitly.
+        TolerantReaderSchemaInvariants.enforceAdditionalPropertiesTrue(schema);
 
         // Stable identity derived from the class name only (no timestamps/env values).
         // $id must be a valid absolute URI (a bare class name is rejected by strict validators

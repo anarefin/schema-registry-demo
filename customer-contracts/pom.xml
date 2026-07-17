@@ -118,10 +118,27 @@
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
         <dependencies>
+          <!-- Generator runtime libs only — NOT schema-gen-tools itself (stale ~/.m2 copy would
+               shadow ${maven.multiModuleProjectDirectory}/schema-gen-tools/target/classes). -->
           <dependency>
-            <groupId>com.example</groupId>
-            <artifactId>schema-gen-tools</artifactId>
-            <version>${project.version}</version>
+            <groupId>com.github.victools</groupId>
+            <artifactId>jsonschema-generator</artifactId>
+            <version>${victools.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>com.github.victools</groupId>
+            <artifactId>jsonschema-module-jackson</artifactId>
+            <version>${victools.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>com.github.victools</groupId>
+            <artifactId>jsonschema-module-jakarta-validation</artifactId>
+            <version>${victools.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+            <version>${jakarta.validation-api.version}</version>
           </dependency>
         </dependencies>
         <executions>
@@ -134,6 +151,9 @@
             <configuration>
               <mainClass>com.example.schemagen.SchemaGeneratorCli</mainClass>
               <includePluginDependencies>true</includePluginDependencies>
+              <additionalClasspathElements>
+                <additionalClasspathElement>${maven.multiModuleProjectDirectory}/schema-gen-tools/target/classes</additionalClasspathElement>
+              </additionalClasspathElements>
               <arguments>
                 <argument>${project.basedir}/src/main/resources/schemas</argument>
                 <argument>${project.build.outputDirectory}</argument>
