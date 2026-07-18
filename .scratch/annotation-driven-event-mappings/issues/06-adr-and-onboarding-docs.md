@@ -9,10 +9,10 @@ vs `TypeMappingSelection`, exact-package invariant, and build/startup failure mo
 
 **Blocked by:** 05 — Migrate customer-contracts (second domain E2E)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] ADR exists and correctly scopes what supersedes vs what stays from ADR-0007 / ADR-0008.
-- [ ] `CONTEXT.md`, `README.md`, and `docs/TUTORIAL.md` describe annotation-driven mappings and
+- [x] ADR exists and correctly scopes what supersedes vs what stays from ADR-0007 / ADR-0008.
+- [x] `CONTEXT.md`, `README.md`, and `docs/TUTORIAL.md` describe annotation-driven mappings and
       new-event onboarding without mapping `@Bean` methods.
-- [ ] Index called out as build-output only (not committed); override and selection knobs distinguished.
-- [ ] Docs match shipped behavior (no runtime scan; publisher topology still opt-in).
+- [x] Index called out as build-output only (not committed); override and selection knobs distinguished.
+- [x] Docs match shipped behavior (no runtime scan; publisher topology still opt-in).

@@ -110,18 +110,20 @@ the `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types, which is why
 
 `schema-gen-tools` is a Maven-plugin-invoked generator (victools) that each `*-contracts`
 module calls at `process-classes` via `exec-maven-plugin` — it has no Maven dependency on
-any contracts module. It reads compiled `@GenerateSchema`-annotated records and
-writes their `*.schema.json` files. It is never a runtime dependency of any service — the Java
-record, not the schema, is authored by hand.
+any contracts module. It reads compiled `@GenerateSchema`-annotated records (each must also
+carry `@EventMapping`), writes their `*.schema.json` files, and atomically replaces
+`target/classes/META-INF/event-mappings.idx` (FQCN list — build output only, not committed).
+It is never a runtime dependency of any service — the Java record, not the schema, is authored
+by hand.
 
 ### Contracts
 
 `order-contracts` and `customer-contracts` each own four things for their domain: the
-event records, the generated JSON Schemas, an **opt-in** `@Configuration` class
-(`OrderPublisherTopology` / `CustomerPublisherTopology`) that declares that
+event records (`@GenerateSchema` + `@EventMapping`), the generated JSON Schemas, an **opt-in**
+`@Configuration` class (`OrderPublisherTopology` / `CustomerPublisherTopology`) that declares that
 domain's three **exchanges** (main / DLX / retry), and an auto-loaded `@AutoConfiguration` class
 (`OrderTypeMappingAutoConfiguration` / `CustomerTypeMappingAutoConfiguration`) that registers
-that domain's `TypeMapping` beans.
+that domain's `TypeMapping` beans from the build-time event index (no runtime package scan).
 
 Exchange ownership follows domain cardinality: only the **single service that publishes** a domain
 declares its exchanges, by `@Import`-ing that domain's `*PublisherTopology`. These classes are
@@ -206,7 +208,9 @@ naming, so you don't have to keep looking them up mid-trace.
 | `PermanentFailure` | `schema-messaging-core` | Marker interface implemented by every permanent exception; `classify()` checks `instanceof` this, not a hand-maintained set. |
 | `EventTopologyFactory` / `TopologyNaming` | `event-contract-kit` | Builds the per-service queue/DLQ/retry-tier `Declarable`s for one routing key + service name (fan-out binding on the plain key + a private `routingKey.serviceName` binding), and supplies the naming convention. |
 | `OrderPublisherTopology` | `order-contracts` | **Opt-in** (`@Import`-ed by the publisher, not auto-loaded). Declares the `events.orders.*` **exchanges** only (main / DLX / retry). The queues are declared per-service by `ServiceQueueTopologyAutoConfiguration`. |
-| `OrderTypeMappingAutoConfiguration` | `order-contracts` | Registers this domain's `TypeMapping` beans — one per order event. |
+| `OrderTypeMappingAutoConfiguration` | `order-contracts` | `@RegisterEventMappings("com.example.contracts.orders")` — registers this domain's indexed `TypeMapping` beans (exact package). |
+| `@EventMapping` / `EventMappingRegistrar` | `event-contract-kit` | Annotation on each event record; registrar reads `META-INF/event-mappings.idx`, builds mappings via `Mappings`, skips names already defined (app override wins). |
+| `event-mappings.idx` | build output (contracts jar) | Deterministic FQCN index under `META-INF/` — not committed under `src/`. |
 
 ## 4. Deep Dive: `OrderCreated` End-to-End
 
@@ -265,21 +269,35 @@ both taken from the `TypeMapping`.
 
 ### 4.3 Where the `TypeMapping` bean comes from
 
-`order-contracts/src/main/java/com/example/contracts/orders/topology/OrderTypeMappingAutoConfiguration.java:31-36`:
+The event record itself carries the mapping metadata
+(`order-contracts/.../OrderCreated.java`):
 
 ```java
-@Bean("orderCreatedMapping")
-@ConditionalOnMissingBean(name = "orderCreatedMapping")
-public TypeMapping orderCreatedMapping() {
-    return new TypeMapping(OrderCreated.class, coords("OrderCreated"),
-            SchemaType.JSON, OrderEventRouting.CREATED_ROUTING_KEY, OrderEventRouting.EXCHANGE);
-}
+@GenerateSchema
+@EventMapping(
+        groupId = "events.orders",
+        exchange = OrderEventRouting.EXCHANGE,
+        routingKey = OrderEventRouting.CREATED_ROUTING_KEY)
+public record OrderCreated(...) {}
 ```
 
-One `@Bean` method per event, all in one self-activating `@AutoConfiguration` class shipped in
-the `order-contracts` jar — not hand-registered per service. The `coords()` helper
-builds a 2-arg `SchemaCoordinates(groupId, artifactId)` — no version pinning at runtime
-(local classpath validation only).
+At `process-classes`, `schema-gen-tools` writes `OrderCreated`'s FQCN into
+`META-INF/event-mappings.idx` (build output only). At startup,
+`OrderTypeMappingAutoConfiguration` is a thin auto-config:
+
+```java
+@AutoConfiguration
+@RegisterEventMappings("com.example.contracts.orders")
+public class OrderTypeMappingAutoConfiguration {}
+```
+
+`EventMappingRegistrar` loads the index (no classpath package scan), filters to the exact
+package, builds each `TypeMapping` via `Mappings.forDomain(...).json(...)`, and registers
+bean name `orderCreatedMapping` (`Introspector.decapitalize(simpleName) + "Mapping"`). If the
+app already defined that bean name, the registrar **skips** it — same override semantics as the
+old `@ConditionalOnMissingBean`. `events.mappings.include` / `exclude` are a different knob:
+they filter by type identity for registry/catalog selection, not by Spring bean name. Mapping
+registration never declares exchanges; publisher topology stays opt-in (ADR-0008 / ADR-0010).
 
 ### 4.4 Convert: produce path
 
@@ -602,18 +620,22 @@ see `order-contracts/.../OrderFulfilled.java`.
 `OrderPublisherTopology` (section 4.5) for the customer domain — it declares the
 customer exchanges (and is `@Import`-ed by the publisher); the queues are provisioned per-service by
 `ServiceQueueTopologyAutoConfiguration` just as for orders. If you understand section 4, you
-understand all seven events — the only new code you'd write for an eighth event is a new record
-(plus nested types if needed), a routing-key constant, one `TypeMapping` bean, and one
-`@BitsEventHandler` method. There is **no** topology list to touch: the new event's per-service
+understand all seven events — the only new code for an eighth event is a new record in the domain
+event package (plus nested types if needed) with `@GenerateSchema` + `@EventMapping` (reuse
+`*EventRouting` constants), a routing-key constant if needed, and one `@BitsEventHandler` method.
+**No** mapping `@Bean`. Build, commit the generated schema, **do not** commit
+`event-mappings.idx`. There is **no** topology list to touch: the new event's per-service
 queue/DLQ/retry-ladder is provisioned automatically the moment a handler for it exists (and only if
 the exchange group is new do you add three exchange beans to the domain's
-`*PublisherTopology`).
+`*PublisherTopology`). See README § "Adding a new event" and ADR-0010.
 
 ## 6. Where to Go Next
 
 | Next step | Doc |
 |---|---|
 | Actually run the system | [`README.md`](../README.md) |
+| Add an eighth event (annotate → build → commit schema) | [`README.md`](../README.md) § "Adding a new event" |
 | Exercise every scenario manually (happy path, validation failure, DLQ, retry, pinning, evolution) | [`docs/TESTING-GUIDE.md`](TESTING-GUIDE.md) |
 | Look up a domain term or topology ownership split | [`CONTEXT.md`](../CONTEXT.md) |
+| Annotation-driven mappings / index lifecycle | [`docs/adr/ADR-0010-annotation-driven-event-mappings.md`](adr/ADR-0010-annotation-driven-event-mappings.md) |
 | Deep dive on exchanges vs per-service queues | This file, §2 and §4.5 |

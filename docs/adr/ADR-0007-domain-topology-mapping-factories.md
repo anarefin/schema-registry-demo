@@ -1,6 +1,7 @@
 # ADR-0007: Domain topology and mapping factories in `event-contract-kit`
 
-**Status:** Accepted (superseded in part by [ADR-0008](ADR-0008-publisher-owned-messaging-topology.md))  
+**Status:** Accepted (superseded in part by [ADR-0008](ADR-0008-publisher-owned-messaging-topology.md)
+and [ADR-0010](ADR-0010-annotation-driven-event-mappings.md))  
 **Date:** 2026-07-14  
 **Spec:** `spec/10-domain-topology-mapping-factories.md`  
 **Related findings:** ARCH-006 (extract now), QUAL-002 (wait for third domain — rejected)
@@ -10,6 +11,13 @@
 > the `*TopologyAutoConfiguration` classes described below (auto-declared for every dependent) were
 > replaced by opt-in `*PublisherTopology` configs declared only by the domain's single publisher.
 > Read the "Each `*TopologyAutoConfiguration`…" passages below as historical.
+
+> **Note (ADR-0010):** `Mappings` remains the single `TypeMapping` construction path, and named
+> override semantics are unchanged. What ADR-0010 replaces is the *hand-written per-event
+> `@Bean` methods* in each `*TypeMappingAutoConfiguration` — those are now registered from a
+> build-time `META-INF/event-mappings.idx` driven by `@EventMapping` on each event record.
+> Read the "Each `*TypeMappingAutoConfiguration` holds one `Mappings.forDomain(...)` and returns
+> `M.json(...)` from its existing `@Bean` methods" passages below as historical.
 
 ## Context
 
