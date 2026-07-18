@@ -49,7 +49,9 @@ public final class GenerateSchemaScanner {
                     .forEach(classFile -> {
                         String fqcn = toFqcn(classesDir, classFile);
                         try {
-                            Class<?> type = Class.forName(fqcn);
+                            // initialize=false: discovery must not run static initializers.
+                            Class<?> type = Class.forName(
+                                    fqcn, false, GenerateSchemaScanner.class.getClassLoader());
                             if (hasGenerateSchema(type)) {
                                 found.add(type);
                             }

@@ -30,10 +30,19 @@ public final class SchemaGeneratorCli {
         String basePackage = args[2];
 
         List<Class<?>> eventTypes = GenerateSchemaScanner.findAnnotatedTypes(classesDir, basePackage);
+        // Fail the build before writing anything if any event record breaks the paired-annotation
+        // contract (shape, blank attribute, or duplicate coordinates/bean name).
+        List<EventMappingMetadata> mappings = EventMappingValidator.validate(eventTypes);
+
         for (Class<?> eventType : eventTypes) {
             Path outputPath = outputDir.resolve(SchemaFileNaming.toFileName(eventType.getSimpleName()));
             write(eventType, outputPath);
         }
+
+        // Index lives only under build output — never committed under src/main/resources.
+        Path indexPath = EventMappingIndexWriter.write(classesDir, mappings);
+        System.out.println("Event mapping index written: " + indexPath.toAbsolutePath().normalize()
+                + " (" + mappings.size() + " mappings)");
     }
 
     private static void write(Class<?> eventType, Path outputPath) throws IOException {
