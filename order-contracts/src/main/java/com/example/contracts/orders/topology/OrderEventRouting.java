@@ -5,13 +5,13 @@ import com.example.amqp.topology.TopologyNaming;
 /**
  * AMQP routing constants for the four order events (spec §9/§10.4, code-first D3).
  *
- * <p>Plain {@code String} constants only — no Spring dependency — so the poison demo and
- * {@code OrderTypeMappingAutoConfiguration} can reference them as compile-time constants. Queue
- * names are no longer declared here — listeners resolve them internally via
- * {@code @BitsEventHandler} from the routing key below (spec
- * {@code simplified-publish-and-listen.md} D4). The domain exchanges are declared by the opt-in
- * {@code OrderPublisherTopology} (this module) via {@code amqp-topology-kit}; these constants
- * follow the same naming convention and are the single source of truth for the names.
+ * <p>Plain {@code String} constants only — no Spring dependency — so the poison demo and each
+ * order event's {@code @EventMapping} can reference them as compile-time constants. Queue names
+ * are no longer declared here — listeners resolve them internally via {@code @BitsEventHandler}
+ * from the routing key below (spec {@code simplified-publish-and-listen.md} D4). The domain
+ * exchanges are declared by the opt-in {@code OrderPublisherTopology} (this module) via
+ * {@code event-contract-kit}; these constants follow the same naming convention and are the
+ * single source of truth for the names.
  *
  * <p>{@link #DLX} and {@link #RETRY_EXCHANGE} are derived from {@link #EXCHANGE} via
  * {@link TopologyNaming}, the same helper {@code DlxMessageRecoverer} uses at runtime to compute

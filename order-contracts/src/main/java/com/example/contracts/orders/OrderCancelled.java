@@ -1,6 +1,8 @@
 package com.example.contracts.orders;
 
+import com.example.amqp.topology.mapping.EventMapping;
 import com.example.amqp.topology.mapping.GenerateSchema;
+import com.example.contracts.orders.topology.OrderEventRouting;
 import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.constraints.DecimalMin;
@@ -15,6 +17,10 @@ import java.util.UUID;
  * contract, and {@code order-cancelled.schema.json} is generated from it (never hand-edited).
  */
 @GenerateSchema
+@EventMapping(
+        groupId = "events.orders",
+        exchange = OrderEventRouting.EXCHANGE,
+        routingKey = OrderEventRouting.CANCELLED_ROUTING_KEY)
 @JsonClassDescription("Emitted when an order is cancelled.")
 public record OrderCancelled(
 

@@ -1,6 +1,8 @@
 package com.example.contracts.orders;
 
+import com.example.amqp.topology.mapping.EventMapping;
 import com.example.amqp.topology.mapping.GenerateSchema;
+import com.example.contracts.orders.topology.OrderEventRouting;
 import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.Valid;
@@ -16,6 +18,10 @@ import java.util.UUID;
  * inlined into the generated schema.
  */
 @GenerateSchema
+@EventMapping(
+        groupId = "events.orders",
+        exchange = OrderEventRouting.EXCHANGE,
+        routingKey = OrderEventRouting.FULFILLED_ROUTING_KEY)
 @JsonClassDescription("Emitted when an order is fulfilled and ready for delivery.")
 public record OrderFulfilled(
 

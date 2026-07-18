@@ -10,11 +10,11 @@ declares no exchanges.
 
 **Blocked by:** 02 — Build-time index + paired-annotation validation; 03 — Index reader + mapping registrar
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Four order records annotated; no manual per-event `TypeMapping` bean methods remain.
-- [ ] Auto-config imports the indexed registrar scoped to the exact orders event package.
-- [ ] Packaged `order-contracts` jar contains `META-INF/event-mappings.idx` with the four FQCNs.
-- [ ] Expected coordinates, schema types, routing keys, exchanges, and bean names match prior behavior.
-- [ ] App bean override and `TypeMappingSelection` still work; publisher topology stays opt-in.
-- [ ] Schema regeneration creates no unexpected schema diff; focused order-contracts (+ deps) tests pass.
+- [x] Four order records annotated; no manual per-event `TypeMapping` bean methods remain.
+- [x] Auto-config imports the indexed registrar scoped to the exact orders event package.
+- [x] Packaged `order-contracts` jar contains `META-INF/event-mappings.idx` with the four FQCNs.
+- [x] Expected coordinates, schema types, routing keys, exchanges, and bean names match prior behavior.
+- [x] App bean override and `TypeMappingSelection` still work; publisher topology stays opt-in.
+- [x] Schema regeneration creates no unexpected schema diff; focused order-contracts (+ deps) tests pass.
