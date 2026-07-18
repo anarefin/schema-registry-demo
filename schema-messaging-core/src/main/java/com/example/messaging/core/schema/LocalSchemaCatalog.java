@@ -17,8 +17,9 @@ import java.util.Map;
  *
  * <p>Schemas are generated at build time by {@code schema-gen-tools} and committed into each
  * {@code *-contracts} module's {@code src/main/resources/schemas/} directory, which lands on the
- * classpath of any service depending on that module. There is exactly one schema per event type
- * per build — no versions to select between, no network fetch, nothing to go stale.
+ * classpath of any service depending on that module. Only mappings present in the
+ * {@link TypeMappingRegistry} are warmed — on consumers that is typically the
+ * {@code @BitsEventHandler}-scoped subset (see {@code TypeMappingSelection}).
  *
  * <p>Fails fast: a missing classpath resource throws {@link SchemaNotFoundException} synchronously
  * out of the constructor, aborting Spring context refresh rather than surfacing on the first

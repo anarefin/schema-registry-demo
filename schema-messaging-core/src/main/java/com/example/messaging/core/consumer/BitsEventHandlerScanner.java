@@ -35,15 +35,33 @@ public final class BitsEventHandlerScanner {
                         AnnotatedElementUtils.hasAnnotation(method, BitsEventHandler.class));
     }
 
-    public static TypeMapping mappingFor(TypeMappingRegistry typeMappingRegistry, Method method) {
+    public static Class<?> eventType(Method method) {
         if (method.getParameterCount() != 1) {
             throw new IllegalStateException(
                     "@BitsEventHandler method " + method + " must have exactly one parameter (the event type)");
         }
-        Class<?> eventType = method.getParameterTypes()[0];
+        return method.getParameterTypes()[0];
+    }
+
+    public static TypeMapping mappingFor(TypeMappingRegistry typeMappingRegistry, Method method) {
+        Class<?> eventType = eventType(method);
         return typeMappingRegistry.findByJavaType(eventType)
                 .orElseThrow(() -> new IllegalStateException(
                         "No TypeMapping for " + eventType.getName()));
+    }
+
+    /**
+     * Event parameter types of every {@link BitsEventHandler} method — no {@link TypeMappingRegistry}
+     * required. Used to scope the registry/catalog before those beans exist.
+     */
+    public static Set<Class<?>> discoverHandledJavaTypes(ApplicationContext applicationContext) {
+        Set<Class<?>> types = new LinkedHashSet<>();
+        for (HandlerBinding binding : discoverHandlerBindings(applicationContext)) {
+            for (Method method : binding.methods()) {
+                types.add(eventType(method));
+            }
+        }
+        return types;
     }
 
     /**

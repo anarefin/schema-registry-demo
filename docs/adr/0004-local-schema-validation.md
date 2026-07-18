@@ -9,8 +9,8 @@
 > a docs sweep. Nothing in that commit message indicates the decision log was meant to be
 > discarded. Six live javadoc/test citations point at this file's path, which is why it is restored
 > **here**, at its original filename, rather than renamed to the newer `ADR-000N-` convention: the
-> citations resolve with no source edit. ADR-0003, ADR-0005 and ADR-0006 are still deleted and
-> still cited (2 citations each); they are recoverable the same way.
+> citations resolve with no source edit. ADR-0003, ADR-0005 and ADR-0006 are restored as
+> [tombstones](README.md) under their original paths (0005 notes the decision was reversed).
 >
 > **Number-reuse hazard.** The ADRs currently in this directory — `ADR-0007-domain-topology-mapping-factories`
 > and `ADR-0008-publisher-owned-messaging-topology` — **reuse the numbers** of two different deleted

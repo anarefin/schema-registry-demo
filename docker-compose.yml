@@ -114,7 +114,7 @@ services:
   # register both contracts and attach their compatibility rules from the host —
   #   ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
   #          -Dapicurio.registry.url=http://localhost:8080
-  # then POST the COMPATIBILITY rules — FORWARD for all six artifacts
+  # then POST the COMPATIBILITY rules — FORWARD for all seven artifacts
   # (JSON property additions only validate under FORWARD; see README §2) — or run the
   # "Schema Governance Bootstrap" GitHub workflow. The contracts modules already carry the
   # apicurio-registry-maven-plugin, so no separate Maven container is needed.

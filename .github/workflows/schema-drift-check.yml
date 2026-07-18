@@ -6,9 +6,9 @@ name: Schema Drift Check
 #
 # Catches: record/annotation changes that weren't followed by a schema regeneration + commit.
 #
-# Data-driven only insofar as the diff globs every `*-contracts` schemas dir; the modules whose
-# process-classes phase gets run must be listed explicitly below (each owns its own exec-maven-plugin
-# execution — adding a new contracts module means adding it to the -pl list here too).
+# Data-driven: contract modules are DISCOVERED from every top-level `*-contracts` directory that
+# carries a pom.xml (same pattern as schema-compat-check / schema-register), so adding a new
+# domain needs no workflow edit. The schema diff glob already covers every `*-contracts` schemas dir.
 
 on:
   pull_request:
@@ -17,6 +17,7 @@ on:
       - 'schema-gen-tools/**'
       - '.github/scripts/**'
       - '.github/workflows/schema-governance-bootstrap.yml'
+      - '.github/workflows/schema-drift-check.yml'
 
 jobs:
   drift-check:
@@ -34,15 +35,42 @@ jobs:
           java-version: '25'
           cache: maven
 
+      - name: Write toolchains.xml (Temurin)
+        run: |
+          mkdir -p "$HOME/.m2"
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<toolchains>' \
+            '  <toolchain>' \
+            '    <type>jdk</type>' \
+            '    <provides>' \
+            '      <version>25</version>' \
+            '    </provides>' \
+            '    <configuration>' \
+            "      <jdkHome>${JAVA_HOME}</jdkHome>" \
+            '    </configuration>' \
+            '  </toolchain>' \
+            '</toolchains>' \
+            > "$HOME/.m2/toolchains.xml"
+
       - name: Verify bootstrap artifact discovery
         # Same POM <artifacts> list the governance bootstrap workflow consumes — fails if
         # discovery drifts from the known seven order + customer coordinates.
         run: .github/scripts/discover-contract-artifacts_test.sh
 
+      - name: Discover contract modules
+        id: modules
+        run: |
+          PL=$(for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done | sort | paste -sd, -)
+          echo "pl=$PL" >> "$GITHUB_OUTPUT"
+          echo "Discovered contract modules: $PL"
+
       - name: Regenerate all schemas
         # Each contracts module's own process-classes phase invokes schema-gen-tools against its
         # own records (ADR-0003); -am also builds schema-gen-tools itself first.
-        run: ./mvnw -pl order-contracts,customer-contracts -am process-classes --no-transfer-progress
+        env:
+          CONTRACT_MODULES: ${{ steps.modules.outputs.pl }}
+        run: ./mvnw -pl "$CONTRACT_MODULES" -am process-classes --no-transfer-progress
 
       - name: Fail if any schema differs from its committed artifact
         run: git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'

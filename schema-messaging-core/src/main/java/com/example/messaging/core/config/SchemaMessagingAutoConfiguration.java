@@ -1,9 +1,12 @@
 package com.example.messaging.core.config;
 
+import com.example.messaging.core.consumer.BitsEventHandlerScanner;
 import com.example.messaging.core.consumer.EventConsumerSupport;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
+import com.example.messaging.core.mapping.TypeMappingSelection;
+import com.example.messaging.core.mapping.TypeMappingSelectionProperties;
 import com.example.messaging.core.publisher.EventPublisher;
 import com.example.messaging.core.schema.LocalSchemaCatalog;
 import com.example.messaging.core.serde.JsonSchemaStrategy;
@@ -13,21 +16,35 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Spring Boot auto-configuration for schema-messaging-core (T-1.13).
  * Wires all core beans; services can override any bean with their own {@code @Bean}.
+ *
+ * <p>{@link TypeMappingRegistry} / {@link LocalSchemaCatalog} are scoped: when
+ * {@code @BitsEventHandler} methods exist, only handled event types are registered and warmed
+ * (see {@link TypeMappingSelection}). Optional {@code events.mappings.include}/{@code exclude}
+ * override or trim further.
  */
 @AutoConfiguration
+@EnableConfigurationProperties(TypeMappingSelectionProperties.class)
 public class SchemaMessagingAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public TypeMappingRegistry typeMappingRegistry(List<TypeMapping> mappings) {
-        return new TypeMappingRegistry(mappings);
+    public TypeMappingRegistry typeMappingRegistry(
+            List<TypeMapping> mappings,
+            ApplicationContext applicationContext,
+            TypeMappingSelectionProperties selectionProperties) {
+        Set<Class<?>> handledTypes = BitsEventHandlerScanner.discoverHandledJavaTypes(applicationContext);
+        List<TypeMapping> selected = TypeMappingSelection.select(mappings, handledTypes, selectionProperties);
+        return new TypeMappingRegistry(selected);
     }
 
     @Bean

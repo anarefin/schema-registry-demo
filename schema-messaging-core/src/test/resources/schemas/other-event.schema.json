@@ -1,0 +1,10 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:example:schema:OtherEvent",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string" }
+  },
+  "required": ["id"]
+}

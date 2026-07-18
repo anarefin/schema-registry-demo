@@ -27,11 +27,28 @@ DLX/DLQ/retry failure topology.
 
 | Tool | Version |
 |---|---|
-| JDK | 25 (entry in `~/.m2/toolchains.xml`, vendor `oracle`, `id` `25-oracle`) |
+| JDK | 25 (entry in `~/.m2/toolchains.xml` — see snippet below) |
 | Docker + Docker Compose | Compose v2 (`docker compose`) |
 | Maven | Provided via `./mvnw` (Maven Wrapper — **always use `./mvnw` not `mvn`**) |
 
 No system Maven installation needed. The wrapper downloads Maven 3.9.11 automatically.
+
+`maven-toolchains-plugin` requires a JDK-25 entry in `~/.m2/toolchains.xml`. Either vendor works;
+CI uses Temurin. Example Temurin entry (adjust `jdkHome` to your install):
+
+```xml
+<toolchain>
+  <type>jdk</type>
+  <provides>
+    <version>25</version>
+  </provides>
+  <configuration>
+    <jdkHome>/path/to/jdk-25</jdkHome>
+  </configuration>
+</toolchain>
+```
+
+Parent POM matches on `<version>25</version>` only. Oracle-style (`vendor` / `id`) entries also work if present.
 
 ---
 
@@ -43,8 +60,8 @@ No system Maven installation needed. The wrapper downloads Maven 3.9.11 automati
 ./mvnw clean install -DskipTests
 ```
 
-Compiles all seven modules, generates JSON Schemas from the code-first records via
-`schema-gen-tools`, and installs JARs into the local Maven repository. Skip tests for speed;
+Compiles all seven child modules (plus parent), generates JSON Schemas from the code-first records
+via `schema-gen-tools`, and installs JARs into the local Maven repository. Skip tests for speed;
 run them later with `./mvnw verify`.
 
 ### 2. Start infrastructure and services
@@ -291,6 +308,25 @@ sequenceDiagram
     P-->>C: 400 Bad Request (no message emitted)
     Note over P: RabbitMQ never sees the message
 ```
+
+---
+
+## Using `schema-messaging-core` as a library
+
+Adopters building their own services (not just this POC's producer/consumer) should:
+
+1. **Depend only on the `*-contracts` modules you publish or consume.** Each contracts jar
+   auto-registers its domain's `TypeMapping` beans; unused domains stay off the classpath.
+2. **Consumers:** declare `@BitsEventHandler` methods for the events you handle.
+   `ServiceQueueTopologyAutoConfiguration` declares only those queues, and
+   `TypeMappingRegistry` / `LocalSchemaCatalog` warm **only those handled types** (intersection
+   with classpath mappings). Optional filters: `events.mappings.include` /
+   `events.mappings.exclude` (simple name, FQCN, or `groupId:artifactId`).
+3. **Publishers:** no handlers → all classpath mappings stay registered (whole domain). Opt into
+   exchanges with `@Import(OrderPublisherTopology.class)` (etc.) — **one publisher per domain**.
+   Fat-jar producers that publish a subset can set `events.mappings.include=...`.
+
+See [docs/TUTORIAL.md](docs/TUTORIAL.md) for the end-to-end walkthrough.
 
 ---
 

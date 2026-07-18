@@ -149,9 +149,16 @@ startup. `consumer-service` imports no topology in production code — its queue
 `schema-messaging-core`'s `ServiceQueueTopologyAutoConfiguration`, which reads the handled set from
 `HandledEventTypesCache` and provisions one dedicated queue/DLQ/retry-ladder per handled event,
 named `{routingKey}.{serviceName}.queue` (`serviceName` = `spring.application.name`), each bound to
-the publisher-owned exchanges. A consumer that boots before the producer self-heals: its
+the publisher-owned exchanges. The same handled set also scopes `TypeMappingRegistry` /
+`LocalSchemaCatalog`: only schemas for handled event types are warmed, even if a full domain
+contracts jar is on the classpath. A consumer that boots before the producer self-heals: its
 `RabbitAdmin` is set to `ignoreDeclarationExceptions(true)`, so bindings to a not-yet-declared
 exchange are retried on the next broker reconnect rather than failing context refresh.
+
+**Library adopters:** depend only on the contracts modules you need; `@Import` publisher topology
+only on the single publisher of each domain; use `events.mappings.include`/`exclude` when a
+producer ships a fat contracts jar but publishes a subset. See README § "Using schema-messaging-core
+as a library".
 
 Consumer-side auto-config is split by role: `SchemaMessagingConsumerAutoConfiguration` always
 registers `RabbitAdmin` (applies queue/binding declarations from
@@ -183,9 +190,9 @@ naming, so you don't have to keep looking them up mid-trace.
 | Class | Module | Role |
 |---|---|---|
 | `TypeMapping` / `SchemaCoordinates` / `SchemaType` | `event-contract-kit` | `TypeMapping` maps a Java type ↔ `SchemaCoordinates` ↔ `SchemaType` ↔ AMQP routing key ↔ exchange. One `TypeMapping` bean per event. `SchemaCoordinates` is group/artifact; `SchemaType` is the wire format. |
-| `TypeMappingRegistry` / `ResolvedSchema` | `schema-messaging-core` | `TypeMappingRegistry` indexes every `TypeMapping` bean for O(1) lookup; `ResolvedSchema` is the classpath-loaded schema bytes + type. |
+| `TypeMappingRegistry` / `ResolvedSchema` | `schema-messaging-core` | `TypeMappingRegistry` indexes selected `TypeMapping` beans for O(1) lookup; `ResolvedSchema` is the classpath-loaded schema bytes + type. On consumers with `@BitsEventHandler`s, selection is the handled-type intersection (optional `events.mappings.include`/`exclude`). |
 | `SchemaAwareMessageConverter` | `schema-messaging-core` | The one Spring AMQP `MessageConverter` that does `toMessage`/`fromMessage` for every event — the single validation authority. |
-| `LocalSchemaCatalog` | `schema-messaging-core` | Eagerly loads every mapping's JSON Schema from the classpath at startup; fails fast if missing. |
+| `LocalSchemaCatalog` | `schema-messaging-core` | Eagerly loads each **registered** mapping's JSON Schema from the classpath at startup; fails fast if missing. Scoped with the registry — not every bean from every contracts jar. |
 | `JsonSchemaStrategy` | `schema-messaging-core` | The `SerializationStrategy` implementation: validates (networknt, Draft-07) then (de)serializes with Jackson. Parses each payload once — produce: `valueToTree` → validate → `writeValueAsBytes`; consume: `readTree` → validate → `convertValue`. |
 | `EventPublisher` | `schema-messaging-core` | Producer-side wrapper: `TypeMapping` lookup → `messageConverter.toMessage()` → `rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), ...)`. Caller supplies only the event. |
 | `BitsEventHandler` | `schema-messaging-core` | Marker on listener methods — no queue name or container factory. Queue resolved from the parameter type's `TypeMapping` at startup. |
