@@ -2,8 +2,7 @@ package com.example.contracts.customers.topology;
 
 import com.example.amqp.topology.mapping.TypeMapping;
 import org.junit.jupiter.api.Test;
-
-import java.util.List;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -11,14 +10,12 @@ class CustomerTypeMappingArtifactIdTest {
 
     @Test
     void artifactIdEqualsJavaTypeSimpleNameForEveryMapping() {
-        CustomerTypeMappingAutoConfiguration config = new CustomerTypeMappingAutoConfiguration();
-        List<TypeMapping> mappings = List.of(
-                config.customerRegisteredMapping(),
-                config.customerAddressAddedMapping(),
-                config.customerTierChangedMapping());
-
-        assertThat(mappings).allSatisfy(mapping ->
-                assertThat(mapping.coordinates().artifactId())
-                        .isEqualTo(mapping.javaType().getSimpleName()));
+        new ApplicationContextRunner()
+                .withUserConfiguration(CustomerTypeMappingAutoConfiguration.class)
+                .run(context -> assertThat(context.getBeansOfType(TypeMapping.class).values())
+                        .hasSize(3)
+                        .allSatisfy(mapping ->
+                                assertThat(mapping.coordinates().artifactId())
+                                        .isEqualTo(mapping.javaType().getSimpleName())));
     }
 }

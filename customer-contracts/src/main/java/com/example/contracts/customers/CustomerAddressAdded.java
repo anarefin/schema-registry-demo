@@ -1,6 +1,8 @@
 package com.example.contracts.customers;
 
+import com.example.amqp.topology.mapping.EventMapping;
 import com.example.amqp.topology.mapping.GenerateSchema;
+import com.example.contracts.customers.topology.CustomerEventRouting;
 import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.Valid;
@@ -15,6 +17,10 @@ import java.util.UUID;
  * nested {@link Address} value object, inlined into the generated schema.
  */
 @GenerateSchema
+@EventMapping(
+        groupId = "events.customers",
+        exchange = CustomerEventRouting.EXCHANGE,
+        routingKey = CustomerEventRouting.ADDRESS_ADDED_ROUTING_KEY)
 @JsonClassDescription("Emitted when a customer adds a postal address.")
 public record CustomerAddressAdded(
 

@@ -1,6 +1,8 @@
 package com.example.contracts.customers;
 
+import com.example.amqp.topology.mapping.EventMapping;
 import com.example.amqp.topology.mapping.GenerateSchema;
+import com.example.contracts.customers.topology.CustomerEventRouting;
 import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.constraints.Email;
@@ -16,6 +18,10 @@ import java.util.UUID;
  * contract, and {@code customer-registered.schema.json} is generated from it (never hand-edited).
  */
 @GenerateSchema
+@EventMapping(
+        groupId = "events.customers",
+        exchange = CustomerEventRouting.EXCHANGE,
+        routingKey = CustomerEventRouting.REGISTERED_ROUTING_KEY)
 @JsonClassDescription("Emitted when a new customer registers.")
 public record CustomerRegistered(
 

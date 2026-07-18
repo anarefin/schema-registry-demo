@@ -1,6 +1,8 @@
 package com.example.contracts.customers;
 
+import com.example.amqp.topology.mapping.EventMapping;
 import com.example.amqp.topology.mapping.GenerateSchema;
+import com.example.contracts.customers.topology.CustomerEventRouting;
 import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.constraints.NotNull;
@@ -14,6 +16,10 @@ import java.util.UUID;
  * {@link CustomerTier} enum, rendered as a JSON Schema {@code enum}.
  */
 @GenerateSchema
+@EventMapping(
+        groupId = "events.customers",
+        exchange = CustomerEventRouting.EXCHANGE,
+        routingKey = CustomerEventRouting.TIER_CHANGED_ROUTING_KEY)
 @JsonClassDescription("Emitted when a customer's loyalty tier changes.")
 public record CustomerTierChanged(
 
