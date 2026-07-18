@@ -1,16 +1,17 @@
 package com.example.messaging.core.publisher;
 
 import com.example.amqp.topology.mapping.TypeMapping;
+import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.MessageConverter;
 
 /**
- * Wraps {@link RabbitTemplate} + {@link MessageConverter} for schema-governed publishing (T-1.10).
+ * Wraps {@link RabbitTemplate} + {@link SchemaAwareMessageConverter} for schema-governed
+ * publishing (T-1.10).
  *
  * <p>The converter handles validation → serialization → header population.
  * Exchange and routing key are both read from the event's registered {@link TypeMapping} —
@@ -21,12 +22,12 @@ public class EventPublisher {
     private static final Logger log = LoggerFactory.getLogger(EventPublisher.class);
 
     private final RabbitTemplate rabbitTemplate;
-    private final MessageConverter messageConverter;
+    private final SchemaAwareMessageConverter messageConverter;
     private final TypeMappingRegistry typeMappingRegistry;
 
     public EventPublisher(
             RabbitTemplate rabbitTemplate,
-            MessageConverter messageConverter,
+            SchemaAwareMessageConverter messageConverter,
             TypeMappingRegistry typeMappingRegistry) {
         this.rabbitTemplate = rabbitTemplate;
         this.messageConverter = messageConverter;

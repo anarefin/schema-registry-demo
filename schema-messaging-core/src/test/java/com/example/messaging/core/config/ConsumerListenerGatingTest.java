@@ -18,6 +18,7 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -63,6 +64,7 @@ class ConsumerListenerGatingTest {
                     assertThat(context).doesNotHaveBean(DlxRoutingAdvice.class);
 
                     assertThat(context).hasSingleBean(RabbitAdmin.class);
+                    assertThat(ignoreDeclarationExceptions(context.getBean(RabbitAdmin.class))).isFalse();
                     assertThat(context).hasSingleBean(HandledEventTypesCache.class);
                 });
     }
@@ -79,8 +81,14 @@ class ConsumerListenerGatingTest {
                     assertThat(context).hasSingleBean(DlxRoutingAdvice.class);
 
                     assertThat(context).hasSingleBean(RabbitAdmin.class);
+                    assertThat(ignoreDeclarationExceptions(context.getBean(RabbitAdmin.class))).isTrue();
                     assertThat(context).hasSingleBean(HandledEventTypesCache.class);
                 });
+    }
+
+    private static boolean ignoreDeclarationExceptions(RabbitAdmin admin) {
+        return Boolean.TRUE.equals(
+                ReflectionTestUtils.getField(admin, "ignoreDeclarationExceptions"));
     }
 
     record TestEvent(String id) {}

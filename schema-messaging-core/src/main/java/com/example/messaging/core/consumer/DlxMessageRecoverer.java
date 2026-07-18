@@ -73,19 +73,24 @@ public class DlxMessageRecoverer implements MessageRecoverer {
         String dlxExchange = TopologyNaming.dlxExchangeName(receivedExchange);
         String retryExchange = TopologyNaming.retryExchangeName(receivedExchange);
 
-        if (decision == RoutingDecision.DLQ_DIRECT || retryCount >= retryDelaysMs.length) {
+        // Invalid/forged X-Retry-Count (< 0) and exhausted ladder both go DLQ — never index the
+        // tier array with a bad count (would invent unbound routing keys / AIOOBE after send).
+        if (decision == RoutingDecision.DLQ_DIRECT
+                || retryCount < 0
+                || retryCount >= retryDelaysMs.length) {
             consumerSupport.populateFailureHeaders(message, ex, RoutingDecision.DLQ_DIRECT);
             String dlqRoutingKey = TopologyNaming.serviceDlqRoutingKey(originalRoutingKey, serviceName);
             rabbitTemplate.send(dlxExchange, dlqRoutingKey, message);
             log.error("→ DLQ exchange={} routingKey={} retries={} cause={}",
                     dlxExchange, dlqRoutingKey, retryCount, ex.getMessage());
         } else {
+            long ttlMs = retryDelaysMs[retryCount];
             props.setHeader(SchemaMessageHeaders.RETRY_COUNT, retryCount + 1);
             String retryRoutingKey = TopologyNaming.serviceRetryRoutingKey(
                     originalRoutingKey, serviceName, retryCount);
             rabbitTemplate.send(retryExchange, retryRoutingKey, message);
             log.warn("→ retry exchange={} routingKey={} retryCount={} ttlMs={}",
-                    retryExchange, retryRoutingKey, retryCount + 1, retryDelaysMs[retryCount]);
+                    retryExchange, retryRoutingKey, retryCount + 1, ttlMs);
         }
     }
 }

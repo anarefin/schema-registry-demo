@@ -18,8 +18,8 @@ management:
         include: health,info
   endpoint:
     health:
-      show-details: always
-      show-components: always
+      show-details: never
+      show-components: never
 
 ---
 # T-6.4: Structured JSON logging for prod profile (Spring Boot 4.0 native)

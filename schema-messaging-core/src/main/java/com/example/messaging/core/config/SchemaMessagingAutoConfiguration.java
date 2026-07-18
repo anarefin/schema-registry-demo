@@ -13,7 +13,6 @@ import com.example.messaging.core.serde.JsonSchemaStrategy;
 import com.example.messaging.core.serde.SerializationStrategy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -82,7 +81,7 @@ public class SchemaMessagingAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(MessageConverter.class)
+    @ConditionalOnMissingBean(SchemaAwareMessageConverter.class)
     public SchemaAwareMessageConverter schemaAwareMessageConverter(
             TypeMappingRegistry typeMappingRegistry,
             LocalSchemaCatalog localSchemaCatalog,
@@ -94,7 +93,7 @@ public class SchemaMessagingAutoConfiguration {
     @ConditionalOnMissingBean
     public EventPublisher eventPublisher(
             RabbitTemplate rabbitTemplate,
-            MessageConverter messageConverter,
+            SchemaAwareMessageConverter messageConverter,
             TypeMappingRegistry typeMappingRegistry) {
         return new EventPublisher(rabbitTemplate, messageConverter, typeMappingRegistry);
     }

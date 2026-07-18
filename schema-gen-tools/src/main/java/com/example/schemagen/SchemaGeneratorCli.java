@@ -35,8 +35,7 @@ public final class SchemaGeneratorCli {
         List<EventMappingMetadata> mappings = EventMappingValidator.validate(eventTypes);
 
         for (Class<?> eventType : eventTypes) {
-            Path outputPath = outputDir.resolve(SchemaFileNaming.toFileName(eventType.getSimpleName()));
-            write(eventType, outputPath);
+            writeEventSchema(eventType, outputDir, classesDir);
         }
 
         // Index lives only under build output — never committed under src/main/resources.
@@ -45,10 +44,25 @@ public final class SchemaGeneratorCli {
                 + " (" + mappings.size() + " mappings)");
     }
 
-    private static void write(Class<?> eventType, Path outputPath) throws IOException {
+    /**
+     * Writes the generated schema to the committed resources dir <em>and</em> to
+     * {@code classesDir/schemas/} so the same {@code process-classes} run refreshes the
+     * runtime classpath (Maven already copied {@code src/.../schemas} before this phase).
+     */
+    static void writeEventSchema(Class<?> eventType, Path committedSchemasDir, Path classesDir)
+            throws IOException {
+        String fileName = SchemaFileNaming.toFileName(eventType.getSimpleName());
         String schema = SchemaGenerator.generate(eventType);
+        write(schema, committedSchemasDir.resolve(fileName));
+        write(schema, classesDir.resolve("schemas").resolve(fileName));
+        System.out.println("Schema written: " + eventType.getSimpleName()
+                + " -> " + committedSchemasDir.resolve(fileName).toAbsolutePath().normalize()
+                + " (+ classpath " + classesDir.resolve("schemas").resolve(fileName).toAbsolutePath().normalize()
+                + ")");
+    }
+
+    private static void write(String schema, Path outputPath) throws IOException {
         Files.createDirectories(outputPath.getParent());
         Files.writeString(outputPath, schema, StandardCharsets.UTF_8);
-        System.out.println("Schema written: " + eventType.getSimpleName() + " -> " + outputPath.toAbsolutePath().normalize());
     }
 }

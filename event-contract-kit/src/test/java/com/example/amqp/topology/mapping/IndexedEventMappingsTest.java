@@ -14,6 +14,7 @@ class IndexedEventMappingsTest {
 
     private static final String ALPHA_CREATED = "com.example.contractkit.indexfixtures.alpha.AlphaCreated";
     private static final String BETA_SHIPPED = "com.example.contractkit.indexfixtures.alpha.BetaShipped";
+    private static final String AVRO_ONLY = "com.example.contractkit.indexfixtures.alpha.AvroOnlyEvent";
     private static final String SUB_EVENT = "com.example.contractkit.indexfixtures.alpha.sub.SubEvent";
     private static final String GAMMA_REGISTERED = "com.example.contractkit.indexfixtures.beta.GammaRegistered";
     private static final String CLASH_ONE = "com.example.contractkit.indexfixtures.clash.ClashOne";
@@ -111,6 +112,18 @@ class IndexedEventMappingsTest {
             assertThatThrownBy(() -> IndexedEventMappings.load(cl))
                     .isInstanceOf(EventMappingRegistrationException.class)
                     .hasMessageContaining("Duplicate schema coordinates");
+        }
+    }
+
+    @Test
+    void failsOnUnsupportedSchemaType(@TempDir Path jar) throws Exception {
+        IndexClassLoaders.writeIndex(jar, AVRO_ONLY);
+
+        try (URLClassLoader cl = IndexClassLoaders.over(jar)) {
+            assertThatThrownBy(() -> IndexedEventMappings.load(cl))
+                    .isInstanceOf(EventMappingRegistrationException.class)
+                    .hasMessageContaining("Unsupported @EventMapping.schemaType=AVRO")
+                    .hasMessageContaining("only SchemaType.JSON");
         }
     }
 

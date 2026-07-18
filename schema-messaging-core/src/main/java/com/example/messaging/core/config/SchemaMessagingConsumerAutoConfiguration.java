@@ -1,12 +1,14 @@
 package com.example.messaging.core.config;
 
 import com.example.messaging.core.consumer.BitsEventHandlerRegistrar;
+import com.example.messaging.core.consumer.BitsEventHandlerScanner;
 import com.example.messaging.core.consumer.DlxMessageRecoverer;
 import com.example.messaging.core.consumer.DlxRoutingAdvice;
 import com.example.messaging.core.consumer.EventConsumerSupport;
 import com.example.messaging.core.consumer.HandledEventTypesCache;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.mapping.TypeMappingRegistry;
+import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -49,18 +51,22 @@ import org.springframework.context.annotation.Configuration;
  * <p>Retry tier TTLs are bound once by {@link RetryTierPropertiesAutoConfiguration}, not
  * re-declared here — see {@link RetryTierProperties}.
  */
-@AutoConfiguration(after = {SchemaMessagingAutoConfiguration.class, RetryTierPropertiesAutoConfiguration.class})
+@AutoConfiguration(
+        after = {SchemaMessagingAutoConfiguration.class, RetryTierPropertiesAutoConfiguration.class},
+        // String form — core depends on spring-boot-autoconfigure only, not spring-boot-amqp.
+        beforeName = "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration")
 public class SchemaMessagingConsumerAutoConfiguration {
 
     @Bean
-    @ConditionalOnMissingBean
-    public RabbitAdmin rabbitAdmin(ConnectionFactory connectionFactory) {
+    @ConditionalOnMissingBean(AmqpAdmin.class)
+    public RabbitAdmin rabbitAdmin(ConnectionFactory connectionFactory, ApplicationContext applicationContext) {
         RabbitAdmin rabbitAdmin = new RabbitAdmin(connectionFactory);
-        // A consumer that boots before its publisher has declared the domain exchanges would
-        // otherwise fail context refresh when its queue bindings reference a not-yet-existent
-        // exchange. Ignoring declaration exceptions lets Spring AMQP self-heal the topology on
-        // the next broker reconnect instead — see publisher-owned-topology spec, ticket 01.
-        rabbitAdmin.setIgnoreDeclarationExceptions(true);
+        // Consumers that boot before the publisher need ignore=true so bindings to not-yet-declared
+        // exchanges self-heal on reconnect. Producers must fail fast on exchange declare failures —
+        // only enable ignore when this app has @BitsEventHandler methods.
+        if (!BitsEventHandlerScanner.discoverHandledJavaTypes(applicationContext).isEmpty()) {
+            rabbitAdmin.setIgnoreDeclarationExceptions(true);
+        }
         return rabbitAdmin;
     }
 

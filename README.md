@@ -192,6 +192,7 @@ curl -s -X POST http://localhost:8081/api/customers \
 
 ```bash
 # Publishes garbage JSON bytes with valid X-Schema-* headers
+# (requires events.demo.poison-endpoint=true — set in local application.yml; off under prod)
 curl -s -X POST http://localhost:8081/api/orders/poison
 ```
 

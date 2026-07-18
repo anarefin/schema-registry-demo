@@ -136,4 +136,61 @@ class DlxMessageRecovererTest {
                 eq("customers.registered.consumer-service"),
                 eq(message));
     }
+
+    @Test
+    void recover_transientExhaustedRetries_sendsToDlq() {
+        when(consumerSupport.classify(any())).thenReturn(RoutingDecision.RETRY);
+
+        MessageProperties props = new MessageProperties();
+        props.setReceivedExchange("events.orders.exchange");
+        props.setReceivedRoutingKey("orders.created");
+        props.setHeader(SchemaMessageHeaders.RETRY_COUNT, 3);
+
+        Message message = new Message(new byte[0], props);
+        DlxMessageRecoverer recoverer = new DlxMessageRecoverer(
+                consumerSupport, rabbitTemplate, new long[]{5_000, 30_000, 300_000}, SERVICE_NAME);
+
+        recoverer.recover(message, new RuntimeException("downstream"));
+
+        verify(consumerSupport).populateFailureHeaders(eq(message), any(), eq(RoutingDecision.DLQ_DIRECT));
+        verify(rabbitTemplate).send(eq("events.orders.dlx"), eq("orders.created.consumer-service"), eq(message));
+    }
+
+    @Test
+    void recover_negativeRetryCount_sendsToDlq() {
+        when(consumerSupport.classify(any())).thenReturn(RoutingDecision.RETRY);
+
+        MessageProperties props = new MessageProperties();
+        props.setReceivedExchange("events.orders.exchange");
+        props.setReceivedRoutingKey("orders.created");
+        props.setHeader(SchemaMessageHeaders.RETRY_COUNT, -1);
+
+        Message message = new Message(new byte[0], props);
+        DlxMessageRecoverer recoverer = new DlxMessageRecoverer(
+                consumerSupport, rabbitTemplate, new long[]{5_000, 30_000, 300_000}, SERVICE_NAME);
+
+        recoverer.recover(message, new RuntimeException("downstream"));
+
+        verify(consumerSupport).populateFailureHeaders(eq(message), any(), eq(RoutingDecision.DLQ_DIRECT));
+        verify(rabbitTemplate).send(eq("events.orders.dlx"), eq("orders.created.consumer-service"), eq(message));
+    }
+
+    @Test
+    void recover_nonNumericRetryCount_sendsToDlq() {
+        when(consumerSupport.classify(any())).thenReturn(RoutingDecision.RETRY);
+
+        MessageProperties props = new MessageProperties();
+        props.setReceivedExchange("events.orders.exchange");
+        props.setReceivedRoutingKey("orders.created");
+        props.setHeader(SchemaMessageHeaders.RETRY_COUNT, "abc");
+
+        Message message = new Message(new byte[0], props);
+        DlxMessageRecoverer recoverer = new DlxMessageRecoverer(
+                consumerSupport, rabbitTemplate, new long[]{5_000, 30_000, 300_000}, SERVICE_NAME);
+
+        recoverer.recover(message, new RuntimeException("downstream"));
+
+        verify(consumerSupport).populateFailureHeaders(eq(message), any(), eq(RoutingDecision.DLQ_DIRECT));
+        verify(rabbitTemplate).send(eq("events.orders.dlx"), eq("orders.created.consumer-service"), eq(message));
+    }
 }

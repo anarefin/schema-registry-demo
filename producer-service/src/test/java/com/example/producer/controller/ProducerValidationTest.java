@@ -3,7 +3,6 @@ package com.example.producer.controller;
 import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.publisher.EventPublisher;
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -22,11 +21,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ProducerValidationTest {
 
     private final EventPublisher eventPublisher = mock(EventPublisher.class);
-    private final RabbitTemplate rabbitTemplate = mock(RabbitTemplate.class);
 
     @Test
     void tc59_orderValidationFailureReturns400() throws Exception {
-        OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
+        OrderController controller = new OrderController(eventPublisher);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -66,7 +64,7 @@ class ProducerValidationTest {
 
     @Test
     void fulfillOmittingBuyer_returns400() throws Exception {
-        OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
+        OrderController controller = new OrderController(eventPublisher);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -88,7 +86,7 @@ class ProducerValidationTest {
 
     @Test
     void fulfillOmittingShipping_returns400() throws Exception {
-        OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
+        OrderController controller = new OrderController(eventPublisher);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -110,7 +108,7 @@ class ProducerValidationTest {
 
     @Test
     void fulfillOmittingPayment_returns400() throws Exception {
-        OrderController controller = new OrderController(eventPublisher, rabbitTemplate);
+        OrderController controller = new OrderController(eventPublisher);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

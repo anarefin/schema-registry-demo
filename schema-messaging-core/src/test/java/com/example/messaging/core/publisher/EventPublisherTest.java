@@ -10,8 +10,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.MessageConverter;
 
 import java.util.List;
 
@@ -27,7 +27,7 @@ class EventPublisherTest {
     record Order(String id) {}
 
     @Mock private RabbitTemplate rabbitTemplate;
-    @Mock private MessageConverter messageConverter;
+    @Mock private SchemaAwareMessageConverter messageConverter;
 
     @Test
     void publish_sendsToMappingExchangeAndRoutingKey() {

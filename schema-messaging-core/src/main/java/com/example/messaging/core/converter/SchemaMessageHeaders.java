@@ -77,11 +77,26 @@ public final class SchemaMessageHeaders {
         return headerString(props, TYPE);
     }
 
+    /**
+     * Parsed {@code X-Retry-Count}. {@code null} header → {@code 0}. Negative or non-numeric
+     * values → {@code -1} (invalid; callers must treat as DLQ-direct, never as a retry tier index).
+     */
     public static int getRetryCount(MessageProperties props) {
         Object v = props.getHeader(RETRY_COUNT);
-        if (v == null) return 0;
-        if (v instanceof Number n) return n.intValue();
-        try { return Integer.parseInt(v.toString()); } catch (NumberFormatException e) { return 0; }
+        if (v == null) {
+            return 0;
+        }
+        int n;
+        if (v instanceof Number number) {
+            n = number.intValue();
+        } else {
+            try {
+                n = Integer.parseInt(v.toString());
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+        }
+        return n < 0 ? -1 : n;
     }
 
     private static String headerString(MessageProperties props, String key) {

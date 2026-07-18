@@ -40,6 +40,10 @@ public @interface EventMapping {
     /** Apicurio artifact id. Empty means {@code javaType.getSimpleName()}. */
     String artifactId() default "";
 
-    /** Wire format / schema technology. Defaults to {@link SchemaType#JSON}. */
+    /**
+     * Wire format / schema technology. Defaults to {@link SchemaType#JSON}.
+     * Only {@link SchemaType#JSON} is supported by the runtime registrar today; any other value
+     * fails fast at index load.
+     */
     SchemaType schemaType() default SchemaType.JSON;
 }

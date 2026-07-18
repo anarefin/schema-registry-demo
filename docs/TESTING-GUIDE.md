@@ -216,9 +216,10 @@ curl -s localhost:8081/actuator/health | jq
 curl -s localhost:8082/actuator/health | jq
 ```
 
-With `show-details: always` and `show-components: always`, the consumer shows a
-`components.queueDepth` entry (from `QueueDepthHealthIndicator`) with `status: UP` (no DLQ has
-messages yet). There is no runtime registry health component — Apicurio is CI-only.
+With default `show-details: never` / `show-components: never`, `/actuator/health` returns the
+aggregate status only (no component map). `QueueDepthHealthIndicator` is still registered; flip
+`show-details`/`show-components` locally if you need to inspect `components.queueDepth`. There is
+no runtime registry health component — Apicurio is CI-only.
 
 **What you verified:** both services start cleanly against RabbitMQ (and a live registry is only
 needed later for governance curls), and queue-depth health is wired before you send any traffic.
@@ -313,12 +314,14 @@ is a hard stop — no partial/invalid message is ever published.
 ## 10. Poison message → DLQ (permanent failure, no retry)
 
 ```bash
+# Requires events.demo.poison-endpoint=true (set in local producer application.yml)
 curl -si -X POST http://localhost:8081/api/orders/poison
 ```
 
-`OrderController` bypasses `EventPublisher` entirely here: it sends raw bytes `"{NOT_VALID_JSON"`
-directly via `RabbitTemplate`, with **valid** `X-Schema-GroupId`/`ArtifactId`/`Type` headers on
-routing key `orders.created`. Expect `202 Accepted`.
+`PoisonOrderController` (gated by that property) bypasses `EventPublisher` entirely: it sends raw
+bytes `"{NOT_VALID_JSON"` directly via `RabbitTemplate`, with **valid**
+`X-Schema-GroupId`/`ArtifactId`/`Type` headers on routing key `orders.created`. Expect
+`202 Accepted`.
 
 The consumer fails to parse the JSON before it can even validate → `DeserializationException`,
 which implements the `PermanentFailure` marker interface → routed straight to

@@ -255,10 +255,11 @@ OpenTelemetry/Jaeger — was removed from the POC.)
 
 ### DLQ demo
 
-`POST /api/orders/poison` on the producer service publishes garbage JSON bytes directly via
-`RabbitTemplate` (bypasses the converter), triggering a `SchemaValidationException` on the
-consumer (unparseable JSON fails validation before deserialization) and landing the message
-on the DLQ with all `X-Failure-*` headers populated.
+`POST /api/orders/poison` on the producer service (gated by `events.demo.poison-endpoint=true`,
+on in local yml / off under `prod`) publishes garbage JSON bytes directly via `RabbitTemplate`
+(bypasses the converter), triggering a `SchemaValidationException` on the consumer (unparseable
+JSON fails validation before deserialization) and landing the message on the DLQ with all
+`X-Failure-*` headers populated.
 
 ## Skill routing
 

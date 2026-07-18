@@ -103,6 +103,12 @@ public final class IndexedEventMappings {
     }
 
     private static TypeMapping toMapping(Class<?> type, EventMapping annotation) {
+        if (annotation.schemaType() != SchemaType.JSON) {
+            throw new EventMappingRegistrationException(
+                    "Unsupported @EventMapping.schemaType=" + annotation.schemaType()
+                            + " on " + type.getName()
+                            + "; only SchemaType.JSON is supported at runtime");
+        }
         String artifactId = annotation.artifactId().isEmpty()
                 ? type.getSimpleName()
                 : annotation.artifactId();

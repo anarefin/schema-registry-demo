@@ -54,6 +54,8 @@ class LocalSchemaCatalogStartupIT {
                         .sources(BrokenMappingConfig.class)
                         .run(
                                 "--spring.main.banner-mode=off",
+                                // Handler-scoped selection would otherwise drop this probe; force include.
+                                "--events.mappings.include=MissingSchemaProbe",
                                 "--spring.rabbitmq.host=" + rabbitMQ.getHost(),
                                 "--spring.rabbitmq.port=" + rabbitMQ.getAmqpPort(),
                                 "--spring.rabbitmq.username=" + rabbitMQ.getAdminUsername(),

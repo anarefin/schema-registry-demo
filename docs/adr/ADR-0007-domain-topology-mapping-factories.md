@@ -27,8 +27,10 @@ modulo domain names — ~65 lines of copy-paste that can drift on onboarding a t
 
 Nothing downstream binds to individual bean *names*:
 
-- `ServiceQueueTopologyAutoConfiguration` injects `List<TopicExchange>` and indexes by
-  `exchange.getName()`.
+- `ServiceQueueTopologyAutoConfiguration` (post-ADR-0008) does **not** inject
+  `List<TopicExchange>`; per handled mapping it builds `DomainTopology.of(mapping.exchange())`
+  locally and declares only queues + bindings. (Earlier drafts of this ADR claimed exchange-list
+  injection — that is historical.)
 - `TypeMappingRegistry` takes `List<TypeMapping>`.
 
 Both contracts modules already depend on `event-contract-kit`, which is spring-amqp-aware. The
@@ -85,9 +87,11 @@ further with no benefit.
 ## Consequences
 
 - **Positive:** One derivation site for exchange triplets and `TypeMapping` construction;
-  third-domain onboarding is a handful of one-line `@Bean` methods instead of ~65 copied lines.
+  third-domain onboarding for *exchanges* remains a thin `*PublisherTopology` delegating to
+  `DomainTopology`. Per-event mapping `@Bean` methods were later replaced by ADR-0010
+  (`@EventMapping` + build-time index + `@RegisterEventMappings`).
 - **Positive:** `artifactId` defaulting to `javaType.getSimpleName()` is centralized, closing
   the string↔class drift vector.
-- **Neutral:** `schema-messaging-core` unchanged.
-- **Neutral:** RabbitAdmin auto-declaration, `List` collection injection, and per-event override
-  semantics preserved.
+- **Neutral:** `schema-messaging-core` unchanged by this ADR (queue ownership later moved in ADR-0008).
+- **Neutral:** RabbitAdmin auto-declaration and per-event override semantics preserved
+  (override via same deterministic bean name; see ADR-0010).

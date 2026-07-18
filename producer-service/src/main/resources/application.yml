@@ -10,6 +10,11 @@ spring:
 server:
   port: 8081
 
+# Local demo: poison DLQ drill (off by default; forced off under prod profile below).
+events:
+  demo:
+    poison-endpoint: true
+
 # T-6.5: Actuator — expose health endpoints
 management:
   endpoints:
@@ -18,8 +23,8 @@ management:
         include: health,info
   endpoint:
     health:
-      show-details: always
-      show-components: always
+      show-details: never
+      show-components: never
 
 ---
 # T-6.4: Structured JSON logging for prod profile (Spring Boot 4.0 native)
@@ -29,6 +34,9 @@ spring:
       on-profile: prod
   application:
     name: producer-service
+events:
+  demo:
+    poison-endpoint: false
 logging:
   structured:
     format:
