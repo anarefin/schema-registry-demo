@@ -45,4 +45,20 @@
     </dependency>
   </dependencies>
 
+  <build>
+    <plugins>
+      <!-- This module ships EventMappingProcessor via META-INF/services, so the processor is on
+           its own test-compile classpath. Disable implicit annotation processing here so it never
+           self-activates on the @EventMapping test fixtures (several are deliberately invalid); the
+           processor is exercised explicitly by EventMappingProcessorTest's in-JVM compiler. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <proc>none</proc>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
 </project>
