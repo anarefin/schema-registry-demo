@@ -1,9 +1,11 @@
 package com.example.amqp.topology.mapping;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * The validated, merged runtime view of the build-time event index. Loads every FQCN reported by
@@ -31,10 +33,29 @@ public final class IndexedEventMappings {
     /** One indexed event: its loaded Java type and the {@link TypeMapping} built from its annotation. */
     public record Entry(Class<?> javaType, TypeMapping mapping) {}
 
+    /**
+     * Memoized merged index, one per class loader. Weak keys so a closed/GC-eligible
+     * {@code URLClassLoader} (per-test or hot-reload) is never pinned by the cache; in that
+     * scenario the loaded {@link Entry} types are defined by a parent loader, so the value does not
+     * strong-reference the key. {@code computeIfAbsent} runs under the synchronized wrapper's lock,
+     * and a throwing {@link #load(ClassLoader)} stores nothing — failures are not cached.
+     */
+    private static final Map<ClassLoader, IndexedEventMappings> CACHE =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
     private final List<Entry> entries;
 
     private IndexedEventMappings(List<Entry> entries) {
         this.entries = entries;
+    }
+
+    /**
+     * The merged, validated index for {@code classLoader}, built once and reused across every
+     * {@link RegisterEventMappings} import on that loader. Delegates to the uncached
+     * {@link #load(ClassLoader)} on first request; failures propagate and are not cached.
+     */
+    public static IndexedEventMappings forClassLoader(ClassLoader classLoader) {
+        return CACHE.computeIfAbsent(classLoader, IndexedEventMappings::load);
     }
 
     /** Loads, validates, and merges all indexed events visible to the class loader. */

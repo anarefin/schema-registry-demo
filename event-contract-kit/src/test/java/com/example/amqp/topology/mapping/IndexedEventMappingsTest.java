@@ -3,6 +3,7 @@ package com.example.amqp.topology.mapping;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.ref.WeakReference;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.util.List;
@@ -125,6 +126,74 @@ class IndexedEventMappingsTest {
                     .hasMessageContaining("Unsupported @EventMapping.schemaType=AVRO")
                     .hasMessageContaining("only SchemaType.JSON");
         }
+    }
+
+    @Test
+    void forClassLoaderReturnsSameInstanceOnRepeatedSameLoaderCalls(@TempDir Path jar) throws Exception {
+        IndexClassLoaders.writeIndex(jar, ALPHA_CREATED, BETA_SHIPPED);
+
+        try (URLClassLoader cl = IndexClassLoaders.over(jar)) {
+            IndexedEventMappings first = IndexedEventMappings.forClassLoader(cl);
+            IndexedEventMappings second = IndexedEventMappings.forClassLoader(cl);
+            // Memoized: the merged, validated index is built once per loader.
+            assertThat(second).isSameAs(first);
+        }
+    }
+
+    @Test
+    void forClassLoaderGivesDistinctLoadersDistinctInstances(@TempDir Path jarA, @TempDir Path jarB) throws Exception {
+        IndexClassLoaders.writeIndex(jarA, ALPHA_CREATED);
+        IndexClassLoaders.writeIndex(jarB, ALPHA_CREATED);
+
+        try (URLClassLoader clA = IndexClassLoaders.over(jarA);
+             URLClassLoader clB = IndexClassLoaders.over(jarB)) {
+            assertThat(IndexedEventMappings.forClassLoader(clA))
+                    .isNotSameAs(IndexedEventMappings.forClassLoader(clB));
+        }
+    }
+
+    @Test
+    void forClassLoaderIsContentEqualToFreshLoad(@TempDir Path jar) throws Exception {
+        IndexClassLoaders.writeIndex(jar, ALPHA_CREATED, BETA_SHIPPED);
+
+        try (URLClassLoader cl = IndexClassLoaders.over(jar)) {
+            List<IndexedEventMappings.Entry> memoized = IndexedEventMappings.forClassLoader(cl).all();
+            List<IndexedEventMappings.Entry> fresh = IndexedEventMappings.load(cl).all();
+            assertThat(memoized).isEqualTo(fresh);
+        }
+    }
+
+    @Test
+    void forClassLoaderDoesNotCacheFailures(@TempDir Path jar) throws Exception {
+        IndexClassLoaders.writeIndex(jar, ALPHA_CREATED, NOT_AN_EVENT);
+
+        try (URLClassLoader cl = IndexClassLoaders.over(jar)) {
+            assertThatThrownBy(() -> IndexedEventMappings.forClassLoader(cl))
+                    .isInstanceOf(EventMappingRegistrationException.class)
+                    .hasMessageContaining("not annotated with @EventMapping");
+            // A throwing load stores nothing; a later call re-throws the same deterministic error.
+            assertThatThrownBy(() -> IndexedEventMappings.forClassLoader(cl))
+                    .isInstanceOf(EventMappingRegistrationException.class)
+                    .hasMessageContaining("not annotated with @EventMapping");
+        }
+    }
+
+    @Test
+    void forClassLoaderDoesNotPinAClosedClassLoader(@TempDir Path jar) throws Exception {
+        IndexClassLoaders.writeIndex(jar, ALPHA_CREATED);
+
+        URLClassLoader cl = IndexClassLoaders.over(jar);
+        IndexedEventMappings.forClassLoader(cl);
+        WeakReference<URLClassLoader> ref = new WeakReference<>(cl);
+        cl.close();
+        cl = null;
+
+        for (int i = 0; i < 50 && ref.get() != null; i++) {
+            System.gc();
+            Thread.sleep(20);
+        }
+        // Weak keys: the cache must not pin a GC-eligible (per-test / hot-reload) URLClassLoader.
+        assertThat(ref.get()).isNull();
     }
 
     private static TypeMapping mappingFor(List<IndexedEventMappings.Entry> entries, String simpleName) {

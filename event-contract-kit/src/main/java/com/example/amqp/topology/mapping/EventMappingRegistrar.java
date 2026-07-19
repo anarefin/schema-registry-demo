@@ -41,7 +41,7 @@ public final class EventMappingRegistrar implements ImportBeanDefinitionRegistra
         String targetPackage = targetPackage(importingClassMetadata);
         ClassLoader loader = classLoader != null ? classLoader : getClass().getClassLoader();
 
-        List<IndexedEventMappings.Entry> events = IndexedEventMappings.load(loader).inPackage(targetPackage);
+        List<IndexedEventMappings.Entry> events = IndexedEventMappings.forClassLoader(loader).inPackage(targetPackage);
         if (events.isEmpty()) {
             throw new EventMappingRegistrationException(
                     "No indexed @EventMapping events found in package " + targetPackage
