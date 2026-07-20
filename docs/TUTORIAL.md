@@ -116,7 +116,8 @@ the `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types, which is why
 2. **Mapping codegen** (`EventMappingProcessor`, a JDK annotation processor) — wired via
    `annotationProcessorPaths` on each contracts module's `maven-compiler-plugin`, it runs at the
    module's own `compile`, reads `@EventMapping` by FQCN, and emits one `GeneratedEventTypeMappings`
-   `@Configuration` of `@Bean TypeMapping` methods, which javac compiles in the same build.
+   `@AutoConfiguration` of `@Bean TypeMapping` methods plus `AutoConfiguration.imports`, which
+   javac compiles in the same build.
 
 No `META-INF/event-mappings.idx` is written or read — registration is compiled, not reflected
 (ADR-0011). The Java record, not the schema, is authored by hand.
@@ -126,10 +127,9 @@ No `META-INF/event-mappings.idx` is written or read — registration is compiled
 `order-contracts` and `customer-contracts` each own four things for their domain: the
 event records (`@GenerateSchema` + `@EventMapping`), the generated JSON Schemas, an **opt-in**
 `@Configuration` class (`OrderPublisherTopology` / `CustomerPublisherTopology`) that declares that
-domain's three **exchanges** (main / DLX / retry), and an auto-loaded `@AutoConfiguration` class
-(`OrderTypeMappingAutoConfiguration` / `CustomerTypeMappingAutoConfiguration`) that `@Import`s the
-build-generated `GeneratedEventTypeMappings` `@Bean TypeMapping` methods (no runtime reflection or
-index read — ADR-0011).
+domain's three **exchanges** (main / DLX / retry), and a build-generated auto-loaded
+`GeneratedEventTypeMappings` `@AutoConfiguration` of `@Bean TypeMapping` methods (no runtime
+reflection or index read — ADR-0011).
 
 Exchange ownership follows domain cardinality: only the **single service that publishes** a domain
 declares its exchanges, by `@Import`-ing that domain's `*PublisherTopology`. These classes are
@@ -139,17 +139,18 @@ to the publisher-owned exchanges — those per-service queues, DLQs, and retry l
 in `schema-messaging-core` by `ServiceQueueTopologyAutoConfiguration` from the `@BitsEventHandler`
 scan (see Services below and §4.5).
 
-The `*TypeMappingAutoConfiguration` classes stay auto-loaded — `TypeMapping` beans are plain data
-both roles need, and `TypeMapping` itself lives in `event-contract-kit`, not core, so this needs no
-dependency on `schema-messaging-core`. Nothing about AMQP topology or schema-mapping wiring lives
-in the services themselves.
+`GeneratedEventTypeMappings` self-activates via the processor-emitted `AutoConfiguration.imports` —
+`TypeMapping` beans are plain data both roles need, and `TypeMapping` itself lives in
+`event-contract-kit`, not core, so this needs no dependency on `schema-messaging-core`. Nothing
+about AMQP topology or schema-mapping wiring lives in the services themselves.
 
 ### Services
 
 `producer-service` and `consumer-service` are thin: just controllers (producer) or
 `@BitsEventHandler` methods (consumer). Each domain's `*-contracts` module registers its own
-`TypeMapping` beans (one per event) via an auto-loaded `*TypeMappingAutoConfiguration`. Converter
-and `TypeMapping` wiring therefore arrive automatically via Spring Boot auto-configuration.
+`TypeMapping` beans (one per event) via the build-generated auto-loaded
+`GeneratedEventTypeMappings`. Converter and `TypeMapping` wiring therefore arrive automatically
+via Spring Boot auto-configuration.
 
 `producer-service`, as the sole publisher of both domains, `@Import`s both
 `*PublisherTopology` classes on its `@SpringBootApplication` and so declares all six exchanges at
@@ -214,9 +215,8 @@ naming, so you don't have to keep looking them up mid-trace.
 | `PermanentFailure` | `schema-messaging-core` | Marker interface implemented by every permanent exception; `classify()` checks `instanceof` this, not a hand-maintained set. |
 | `EventTopologyFactory` / `TopologyNaming` | `event-contract-kit` | Builds the per-service queue/DLQ/retry-tier `Declarable`s for one routing key + service name (fan-out binding on the plain key + a private `routingKey.serviceName` binding), and supplies the naming convention. |
 | `OrderPublisherTopology` | `order-contracts` | **Opt-in** (`@Import`-ed by the publisher, not auto-loaded). Declares the `events.orders.*` **exchanges** only (main / DLX / retry). The queues are declared per-service by `ServiceQueueTopologyAutoConfiguration`. |
-| `OrderTypeMappingAutoConfiguration` | `order-contracts` | `@Import(GeneratedEventTypeMappings.class)` — pulls in this domain's build-generated `TypeMapping` beans. |
 | `@EventMapping` | `event-contract-kit` | Annotation on each event record (schema identity + AMQP route); read at build time by `EventMappingProcessor` to emit the mapping beans. |
-| `GeneratedEventTypeMappings` | generated into `<domain>.topology` (compiled into the contracts jar) | Build-generated `@Configuration` of one `@Bean @ConditionalOnMissingBean(name=…) TypeMapping` per record, built via `Mappings` (app override wins). Emitted by `schema-gen-tools`' `EventMappingProcessor` at the module's `compile`. |
+| `GeneratedEventTypeMappings` | generated into `<domain>.topology` (compiled into the contracts jar) | Build-generated `@AutoConfiguration` of one `@Bean @ConditionalOnMissingBean(name=…) TypeMapping` per record, built via `Mappings` (app override wins). Self-activates via processor-emitted `AutoConfiguration.imports`. Emitted by `schema-gen-tools`' `EventMappingProcessor` at the module's `compile`. |
 
 ## 4. Deep Dive: `OrderCreated` End-to-End
 
@@ -229,7 +229,7 @@ Roadmap (each numbered step below is one hop):
 
 1. HTTP request → `OrderController` builds the record and hands it to `EventPublisher`.
 2. `EventPublisher.publish()` looks up the `TypeMapping`, calls the converter, sends via `RabbitTemplate`.
-3. The `TypeMapping` bean itself, registered in `order-contracts` via `OrderTypeMappingAutoConfiguration`.
+3. The `TypeMapping` bean itself, registered in `order-contracts` via build-generated `GeneratedEventTypeMappings`.
 4. The converter's produce path (`toMessage`): catalog lookup → validate → serialize → stamp headers.
 5. The AMQP topology that the message lands in — declared once at startup, not per-publish.
 6. The consumer's listener container + `@BitsEventHandler`.
@@ -289,16 +289,9 @@ public record OrderCreated(...) {}
 
 At the module's own `compile`, `schema-gen-tools`' `EventMappingProcessor` reads `@EventMapping`
 and emits a `@Bean TypeMapping` method for `OrderCreated` into
-`com.example.contracts.orders.topology.GeneratedEventTypeMappings` — javac compiles it in the same
-build. At startup, `OrderTypeMappingAutoConfiguration` is a thin auto-config that just imports it:
-
-```java
-@AutoConfiguration
-@Import(GeneratedEventTypeMappings.class)
-public class OrderTypeMappingAutoConfiguration {}
-```
-
-The generated method builds the `TypeMapping` via `Mappings.forDomain(...).json(...)` and is
+`com.example.contracts.orders.topology.GeneratedEventTypeMappings` (annotated `@AutoConfiguration`,
+listed in the generated `AutoConfiguration.imports`) — javac compiles it in the same build. The
+generated method builds the `TypeMapping` via `Mappings.forDomain(...).json(...)` and is
 registered under bean name `orderCreatedMapping` (`Introspector.decapitalize(simpleName) +
 "Mapping"`):
 

@@ -30,7 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Exercises {@link EventMappingProcessor} by running it over in-memory {@code @EventMapping} sources
  * with an in-JVM {@code javac} in annotation-processing-only mode ({@code -proc:only}), then asserts
- * both the generated source content and the {@link Diagnostic.Kind#ERROR} diagnostics.
+ * both the generated source content, the {@code AutoConfiguration.imports} resource, and the
+ * {@link Diagnostic.Kind#ERROR} diagnostics.
  *
  * <p>{@code ToolProvider.getSystemJavaCompiler()} (not {@code compile-testing}) is used deliberately:
  * it adds no dependency, and {@code -proc:only} isolates the processor from downstream compilation of
@@ -55,7 +56,7 @@ class EventMappingProcessorTest {
             public enum SchemaType { JSON, AVRO }
             """;
 
-    // Minimal API stand-ins so the emitted @Configuration actually compiles against the shapes it
+    // Minimal API stand-ins so the emitted @AutoConfiguration actually compiles against the shapes it
     // calls — mirroring the real event-contract-kit + Spring types the contracts modules provide.
     // Keeping them in-memory preserves this build-only module's freedom from a compile dep on the kit.
     private static final String MAPPINGS = """
@@ -72,9 +73,9 @@ class EventMappingProcessorTest {
             public final class TypeMapping {}
             """;
 
-    private static final String CONFIGURATION = """
-            package org.springframework.context.annotation;
-            public @interface Configuration {}
+    private static final String AUTO_CONFIGURATION = """
+            package org.springframework.boot.autoconfigure;
+            public @interface AutoConfiguration {}
             """;
 
     private static final String BEAN = """
@@ -133,10 +134,12 @@ class EventMappingProcessorTest {
         assertThat(generated).contains("import com.example.amqp.topology.mapping.Mappings;");
         assertThat(generated).contains("import com.example.amqp.topology.mapping.TypeMapping;");
         assertThat(generated).contains(
+                "import org.springframework.boot.autoconfigure.AutoConfiguration;");
+        assertThat(generated).contains(
                 "import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;");
         assertThat(generated).contains("import org.springframework.context.annotation.Bean;");
-        assertThat(generated).contains("import org.springframework.context.annotation.Configuration;");
-        assertThat(generated).contains("@Configuration");
+        assertThat(generated).doesNotContain("import org.springframework.context.annotation.Configuration;");
+        assertThat(generated).contains("@AutoConfiguration");
         assertThat(generated).contains("public class GeneratedEventTypeMappings {");
 
         // OrderCreated: constants resolved to their string values, artifactId defaulted to simple name.
@@ -161,6 +164,9 @@ class EventMappingProcessorTest {
         // Byte-stable FQCN order: OrderCreated before OrderShipped.
         assertThat(generated.indexOf("orderCreatedMapping"))
                 .isLessThan(generated.indexOf("orderShippedMapping"));
+
+        assertThat(result.resources)
+                .containsEntry(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS, GENERATED_FQCN + "\n");
     }
 
     @Test
@@ -177,6 +183,7 @@ class EventMappingProcessorTest {
         assertThat(result.errorMessages()).anySatisfy(msg ->
                 assertThat(msg).contains("groupId").contains("non-blank"));
         assertThat(result.generated).doesNotContainKey(GENERATED_FQCN);
+        assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
     }
 
     @Test
@@ -195,6 +202,7 @@ class EventMappingProcessorTest {
         assertThat(result.errorMessages()).anySatisfy(msg ->
                 assertThat(msg).contains("schemaType").contains("JSON").contains("AVRO"));
         assertThat(result.generated).doesNotContainKey(GENERATED_FQCN);
+        assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
     }
 
     @Test
@@ -219,6 +227,7 @@ class EventMappingProcessorTest {
         assertThat(result.errorMessages()).anySatisfy(msg ->
                 assertThat(msg).contains("Duplicate effective schema coordinates").contains("Same"));
         assertThat(result.generated).doesNotContainKey(GENERATED_FQCN);
+        assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
     }
 
     @Test
@@ -243,6 +252,7 @@ class EventMappingProcessorTest {
         assertThat(result.ok).isFalse();
         assertThat(result.errorMessages()).anySatisfy(msg ->
                 assertThat(msg).contains("Duplicate mapping bean name").contains("widgetMapping"));
+        assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
     }
 
     // ---- in-JVM compilation harness ----
@@ -254,7 +264,7 @@ class EventMappingProcessorTest {
                 source("com.example.amqp.topology.mapping.SchemaType", SCHEMA_TYPE),
                 source("com.example.amqp.topology.mapping.Mappings", MAPPINGS),
                 source("com.example.amqp.topology.mapping.TypeMapping", TYPE_MAPPING),
-                source("org.springframework.context.annotation.Configuration", CONFIGURATION),
+                source("org.springframework.boot.autoconfigure.AutoConfiguration", AUTO_CONFIGURATION),
                 source("org.springframework.context.annotation.Bean", BEAN),
                 source("org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean",
                         CONDITIONAL_ON_MISSING_BEAN)));
@@ -262,8 +272,8 @@ class EventMappingProcessorTest {
 
     /**
      * Runs the processor over the {@link #stubs()} plus the given fixtures with an in-JVM
-     * {@code javac} in {@code -proc:only} mode. The emitted {@code @Configuration} is captured in
-     * memory (and, on the happy path, attributed against the stand-ins — proving it compiles).
+     * {@code javac} in {@code -proc:only} mode. The emitted {@code @AutoConfiguration} and
+     * {@code AutoConfiguration.imports} resource are captured in memory.
      */
     private static Result compile(JavaFileObject... fixtures) {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
@@ -286,7 +296,9 @@ class EventMappingProcessorTest {
 
         Map<String, String> generated = new HashMap<>();
         fileManager.generated.forEach((name, output) -> generated.put(name, output.content()));
-        return new Result(ok, diagnostics.getDiagnostics(), generated);
+        Map<String, String> resources = new HashMap<>();
+        fileManager.resources.forEach((name, output) -> resources.put(name, output.content()));
+        return new Result(ok, diagnostics.getDiagnostics(), generated, resources);
     }
 
     private static JavaFileObject source(String fqcn, String code) {
@@ -296,7 +308,8 @@ class EventMappingProcessorTest {
     private record Result(
             boolean ok,
             List<Diagnostic<? extends JavaFileObject>> diagnostics,
-            Map<String, String> generated) {
+            Map<String, String> generated,
+            Map<String, String> resources) {
 
         List<Diagnostic<? extends JavaFileObject>> errors() {
             return diagnostics.stream()
@@ -348,10 +361,28 @@ class EventMappingProcessorTest {
         }
     }
 
+    private static final class InMemoryResource extends SimpleJavaFileObject {
+        private final StringWriter writer = new StringWriter();
+
+        InMemoryResource(String relativeName) {
+            super(URI.create("mem:///" + relativeName), Kind.OTHER);
+        }
+
+        @Override
+        public Writer openWriter() {
+            return writer;
+        }
+
+        String content() {
+            return writer.toString();
+        }
+    }
+
     private static final class CapturingFileManager
             extends ForwardingJavaFileManager<StandardJavaFileManager> {
 
         private final Map<String, InMemoryOutput> generated = new HashMap<>();
+        private final Map<String, InMemoryResource> resources = new HashMap<>();
 
         CapturingFileManager(StandardJavaFileManager delegate) {
             super(delegate);
@@ -367,6 +398,21 @@ class EventMappingProcessorTest {
                 return output;
             }
             return super.getJavaFileForOutput(location, className, kind, sibling);
+        }
+
+        @Override
+        public FileObject getFileForOutput(
+                Location location, String packageName, String relativeName, FileObject sibling)
+                throws IOException {
+            if (location == StandardLocation.CLASS_OUTPUT) {
+                String key = packageName == null || packageName.isEmpty()
+                        ? relativeName
+                        : packageName.replace('.', '/') + '/' + relativeName;
+                InMemoryResource resource = new InMemoryResource(key);
+                resources.put(key, resource);
+                return resource;
+            }
+            return super.getFileForOutput(location, packageName, relativeName, sibling);
         }
     }
 }

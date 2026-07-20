@@ -17,14 +17,14 @@ import org.springframework.context.annotation.Configuration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end registration for the orders domain: indexed {@code @EventMapping} records become
- * named {@link TypeMapping} beans with prior coordinates/routing/bean names; app overrides win;
+ * End-to-end registration for the orders domain: build-generated {@code @EventMapping} beans
+ * become named {@link TypeMapping}s with prior coordinates/routing/bean names; app overrides win;
  * mapping registration never declares exchanges.
  */
 class OrderTypeMappingRegistrationTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(OrderTypeMappingAutoConfiguration.class);
+            .withUserConfiguration(GeneratedEventTypeMappings.class);
 
     @Test
     void registersFourNamedMappingsWithPriorCoordinatesAndRouting() {
@@ -49,7 +49,7 @@ class OrderTypeMappingRegistrationTest {
     @Test
     void applicationBeanOverrideWinsWhileOthersStillRegister() {
         new ApplicationContextRunner()
-                .withUserConfiguration(AppOverride.class, OrderTypeMappingAutoConfiguration.class)
+                .withUserConfiguration(AppOverride.class, GeneratedEventTypeMappings.class)
                 .run(context -> {
                     assertThat(context.getBeanNamesForType(TypeMapping.class)).containsExactlyInAnyOrder(
                             "orderCancelledMapping",
@@ -71,7 +71,7 @@ class OrderTypeMappingRegistrationTest {
     @Test
     void publisherTopologyStillDeclaresExchangesWhenImported() {
         new ApplicationContextRunner()
-                .withUserConfiguration(OrderTypeMappingAutoConfiguration.class, OrderPublisherTopology.class)
+                .withUserConfiguration(GeneratedEventTypeMappings.class, OrderPublisherTopology.class)
                 .run(context -> assertThat(context.getBeanNamesForType(TopicExchange.class))
                         .containsExactlyInAnyOrder(
                                 OrderEventRouting.BEAN_EXCHANGE,

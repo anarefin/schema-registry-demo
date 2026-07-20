@@ -127,28 +127,28 @@ Eight Maven modules (parent root = this directory):
   package and writing into its own `src/main/resources/schemas/`. (2) **Mapping codegen**
   (`EventMappingProcessor`, a JDK annotation processor wired via `annotationProcessorPaths` on each
   contracts module's `maven-compiler-plugin`): reads `@EventMapping` by FQCN at the module's own
-  `compile` and emits one `GeneratedEventTypeMappings` `@Configuration` of `@Bean TypeMapping`
-  methods, compiled by javac in the same build (no runtime reflection, no `.idx` index — ADR-0011).
-  Dependency-free with respect to every `*-contracts` module. **Never** on service runtime classpath.
+  `compile` and emits one `GeneratedEventTypeMappings` `@AutoConfiguration` of `@Bean TypeMapping`
+  methods plus `AutoConfiguration.imports`, compiled by javac in the same build (no runtime
+  reflection, no `.idx` index — ADR-0011). Dependency-free with respect to every `*-contracts`
+  module. **Never** on service runtime classpath.
 - **`order-contracts`** — four code-first order event records + generated schemas
   (`com.example.contracts.orders.*`), plus `OrderPublisherTopology` (domain **exchanges**
-  only: main / DLX / retry, delegating to `DomainTopology`) and `OrderTypeMappingAutoConfiguration`
-  (`TypeMapping` beans via `@Import(GeneratedEventTypeMappings.class)` — the build-generated `@Bean`
-  methods, each built through `Mappings`). Exchange ownership follows domain cardinality: only the
-  domain's single publisher declares its exchanges, by `@Import`-ing the **opt-in**
+  only: main / DLX / retry, delegating to `DomainTopology`) and build-generated
+  `GeneratedEventTypeMappings` (`TypeMapping` `@Bean` methods via `Mappings`, self-activating via
+  processor-emitted `AutoConfiguration.imports`). Exchange ownership follows domain cardinality:
+  only the domain's single publisher declares its exchanges, by `@Import`-ing the **opt-in**
   `OrderPublisherTopology` (`@Configuration`, deliberately **not** in `AutoConfiguration.imports`) —
   a contracts jar alone forces no exchanges. That publisher is the **only** role needing
   `configure`+`write` on the domain's exchanges (the **publisher** half of the least-privilege
-  split; consumers get no exchange `configure` — see ADR-0008).
-  `OrderTypeMappingAutoConfiguration` (plain-data beans
-  both roles need) **stays** self-activating via
-  `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
-  Depends on Jackson, jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and
-  `event-contract-kit` (plus a test-scope dependency on `schema-gen-tools` for its own determinism
-  test) — **no** dependency on `schema-messaging-core` (machine-enforced).
+  split; consumers get no exchange `configure` — see ADR-0008). `GeneratedEventTypeMappings`
+  (plain-data beans both roles need) self-activates; there is no hand-written
+  `*TypeMappingAutoConfiguration` wrapper. Depends on Jackson, jakarta.validation-api,
+  `spring-rabbit`, `spring-boot-autoconfigure`, and `event-contract-kit` (plus a test-scope
+  dependency on `schema-gen-tools` for its own determinism test) — **no** dependency on
+  `schema-messaging-core` (machine-enforced).
 - **`customer-contracts`** — mirror of `order-contracts` for the three customer events
   (`com.example.contracts.customers.*`, opt-in `topology.CustomerPublisherTopology` /
-  auto-loaded `topology.CustomerTypeMappingAutoConfiguration` — same `DomainTopology`/`Mappings`
+  build-generated auto-loaded `GeneratedEventTypeMappings` — same `DomainTopology`/`Mappings`
   delegation).
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
   both contracts modules. `producer-service` is the sole publisher of both domains and `@Import`s

@@ -16,14 +16,14 @@ import org.springframework.context.annotation.Configuration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end registration for the customers domain: indexed {@code @EventMapping} records become
- * named {@link TypeMapping} beans with prior coordinates/routing/bean names; app overrides win;
+ * End-to-end registration for the customers domain: build-generated {@code @EventMapping} beans
+ * become named {@link TypeMapping}s with prior coordinates/routing/bean names; app overrides win;
  * mapping registration never declares exchanges.
  */
 class CustomerTypeMappingRegistrationTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(CustomerTypeMappingAutoConfiguration.class);
+            .withUserConfiguration(GeneratedEventTypeMappings.class);
 
     @Test
     void registersThreeNamedMappingsWithPriorCoordinatesAndRouting() {
@@ -48,7 +48,7 @@ class CustomerTypeMappingRegistrationTest {
     @Test
     void applicationBeanOverrideWinsWhileOthersStillRegister() {
         new ApplicationContextRunner()
-                .withUserConfiguration(AppOverride.class, CustomerTypeMappingAutoConfiguration.class)
+                .withUserConfiguration(AppOverride.class, GeneratedEventTypeMappings.class)
                 .run(context -> {
                     assertThat(context.getBeanNamesForType(TypeMapping.class)).containsExactlyInAnyOrder(
                             "customerAddressAddedMapping",
@@ -70,7 +70,7 @@ class CustomerTypeMappingRegistrationTest {
     void publisherTopologyStillDeclaresExchangesWhenImported() {
         new ApplicationContextRunner()
                 .withUserConfiguration(
-                        CustomerTypeMappingAutoConfiguration.class, CustomerPublisherTopology.class)
+                        GeneratedEventTypeMappings.class, CustomerPublisherTopology.class)
                 .run(context -> assertThat(context.getBeanNamesForType(TopicExchange.class))
                         .containsExactlyInAnyOrder(
                                 CustomerEventRouting.BEAN_EXCHANGE,

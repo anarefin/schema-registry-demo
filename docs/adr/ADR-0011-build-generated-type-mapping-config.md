@@ -71,9 +71,12 @@ on annotation checks — redundant but both fail-fast, acceptable.)
 
 ### Registration wiring
 
-The hand-written `@AutoConfiguration` markers stay (still listed in each module's
-`AutoConfiguration.imports`, untouched); `@RegisterEventMappings("…")` is swapped for
-`@Import(GeneratedEventTypeMappings.class)`. A same-compilation forward reference to a generated
+`GeneratedEventTypeMappings` itself is the auto-config entry: the processor annotates it
+`@AutoConfiguration` (not plain `@Configuration`) and emits
+`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` into
+`CLASS_OUTPUT` listing that FQCN. There is no hand-written `*TypeMappingAutoConfiguration`
+wrapper and no committed `.imports` resource — both are build output. On validation failure the
+processor emits neither source nor imports. A same-compilation forward reference to a generated
 type is the standard MapStruct/Dagger pattern — javac's multi-round processing compiles the
 generated class first; works in Maven and in IDEs with annotation processing enabled.
 

@@ -11,7 +11,7 @@ class OrderTypeMappingArtifactIdTest {
     @Test
     void artifactIdEqualsJavaTypeSimpleNameForEveryMapping() {
         new ApplicationContextRunner()
-                .withUserConfiguration(OrderTypeMappingAutoConfiguration.class)
+                .withUserConfiguration(GeneratedEventTypeMappings.class)
                 .run(context -> assertThat(context.getBeansOfType(TypeMapping.class).values())
                         .hasSize(4)
                         .allSatisfy(mapping ->

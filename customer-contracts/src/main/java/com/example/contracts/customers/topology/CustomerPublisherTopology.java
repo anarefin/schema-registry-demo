@@ -21,8 +21,8 @@ import org.springframework.context.annotation.Configuration;
  * {@code ServiceQueueTopologyAutoConfiguration} in {@code schema-messaging-core} from the
  * {@code @BitsEventHandler} scan, not here.
  *
- * <p>{@code TypeMapping} beans (the plain-data mapping both roles need) still auto-load via
- * {@code CustomerTypeMappingAutoConfiguration}.
+ * <p>{@code TypeMapping} beans (the plain-data mapping both roles need) still auto-load via the
+ * build-generated {@code GeneratedEventTypeMappings} {@code @AutoConfiguration}.
  */
 @Configuration
 public class CustomerPublisherTopology {
