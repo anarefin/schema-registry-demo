@@ -38,10 +38,8 @@ public final class SchemaGeneratorCli {
             writeEventSchema(eventType, outputDir, classesDir);
         }
 
-        // Index lives only under build output — never committed under src/main/resources.
-        Path indexPath = EventMappingIndexWriter.write(classesDir, mappings);
-        System.out.println("Event mapping index written: " + indexPath.toAbsolutePath().normalize()
-                + " (" + mappings.size() + " mappings)");
+        System.out.println("Schemas generated and event mappings validated ("
+                + mappings.size() + " mappings)");
     }
 
     /**

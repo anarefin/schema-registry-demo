@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * Enforces the paired-annotation contract at {@code process-classes} and produces the validated,
- * effective metadata that seeds {@code META-INF/event-mappings.idx}. Every {@code @GenerateSchema}
+ * effective event-mapping metadata. Every {@code @GenerateSchema}
  * type discovered by {@link GenerateSchemaScanner} must:
  *
  * <ul>

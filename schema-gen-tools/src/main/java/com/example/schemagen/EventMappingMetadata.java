@@ -2,10 +2,10 @@ package com.example.schemagen;
 
 /**
  * Validated, effective metadata for one code-first event record, produced by
- * {@link EventMappingValidator} and consumed by {@link EventMappingIndexWriter}.
+ * {@link EventMappingValidator}.
  *
  * @param javaType   the event record type
- * @param fqcn       its fully-qualified class name (the index line)
+ * @param fqcn       its fully-qualified class name
  * @param groupId    the Apicurio group id from {@code @EventMapping}
  * @param artifactId the <em>effective</em> artifact id — the annotation value, or the simple class
  *                   name when the annotation left it blank
