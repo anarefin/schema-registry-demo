@@ -116,19 +116,25 @@ Eight Maven modules (parent root = this directory):
   library (naming conventions + retry-ladder factory + `DomainTopology`/`DomainExchanges` exchange
   factory, `com.example.amqp.topology.*`) plus, since the shared `TypeMapping`/`SchemaCoordinates`/
   `SchemaType` data types and `Mappings` builder (`com.example.amqp.topology.mapping.*`) and the
-  build-time `@GenerateSchema` marker used by `schema-gen-tools` to discover event records. A pure
+  build-time markers `@GenerateSchema` (schema discovery) and `@EventMapping` (schema identity + AMQP
+  route), both read by `schema-gen-tools` at build time. A pure
   leaf module itself: banned from depending on core or either `*-contracts` module. Depended on by
   `order-contracts`, `customer-contracts`, and `schema-messaging-core`.
-- **`schema-gen-tools`** — build-only schema generator (victools). Dependency-free with respect to
-  every `*-contracts` module: each contracts module declares it as a plugin-level
+- **`schema-gen-tools`** — build-only, two build-time jobs, both off the service runtime classpath.
+  (1) **Schema generator** (victools): each contracts module declares it as a plugin-level
   `exec-maven-plugin` dependency and invokes it at its own `process-classes`, scanning
   `${project.build.outputDirectory}` for `@GenerateSchema`-annotated types under the domain
-  package and writing into its own `src/main/resources/schemas/`. **Never** on service
-  runtime classpath.
+  package and writing into its own `src/main/resources/schemas/`. (2) **Mapping codegen**
+  (`EventMappingProcessor`, a JDK annotation processor wired via `annotationProcessorPaths` on each
+  contracts module's `maven-compiler-plugin`): reads `@EventMapping` by FQCN at the module's own
+  `compile` and emits one `GeneratedEventTypeMappings` `@Configuration` of `@Bean TypeMapping`
+  methods, compiled by javac in the same build (no runtime reflection, no `.idx` index — ADR-0011).
+  Dependency-free with respect to every `*-contracts` module. **Never** on service runtime classpath.
 - **`order-contracts`** — four code-first order event records + generated schemas
   (`com.example.contracts.orders.*`), plus `OrderPublisherTopology` (domain **exchanges**
   only: main / DLX / retry, delegating to `DomainTopology`) and `OrderTypeMappingAutoConfiguration`
-  (`TypeMapping` beans via `Mappings`). Exchange ownership follows domain cardinality: only the
+  (`TypeMapping` beans via `@Import(GeneratedEventTypeMappings.class)` — the build-generated `@Bean`
+  methods, each built through `Mappings`). Exchange ownership follows domain cardinality: only the
   domain's single publisher declares its exchanges, by `@Import`-ing the **opt-in**
   `OrderPublisherTopology` (`@Configuration`, deliberately **not** in `AutoConfiguration.imports`) —
   a contracts jar alone forces no exchanges. That publisher is the **only** role needing

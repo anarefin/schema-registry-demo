@@ -317,7 +317,8 @@ sequenceDiagram
 Adopters building their own services (not just this POC's producer/consumer) should:
 
 1. **Depend only on the `*-contracts` modules you publish or consume.** Each contracts jar
-   auto-registers its domain's `TypeMapping` beans from the build-time event index; unused
+   auto-registers its domain's `TypeMapping` beans from its build-generated
+   `GeneratedEventTypeMappings` config (compiled `@Bean` methods, no runtime reflection); unused
    domains stay off the classpath.
 2. **Consumers:** declare `@BitsEventHandler` methods for the events you handle.
    `ServiceQueueTopologyAutoConfiguration` declares only those queues, and
@@ -325,7 +326,8 @@ Adopters building their own services (not just this POC's producer/consumer) sho
    with classpath mappings). Optional filters: `events.mappings.include` /
    `events.mappings.exclude` (simple name, FQCN, or `groupId:artifactId` — **not** Spring bean
    names). To replace one mapping instance, define `@Bean("orderCreatedMapping")` (same name the
-   registrar uses); that is a different knob from include/exclude.
+   generated config uses — its method is `@ConditionalOnMissingBean(name=…)`); that is a different
+   knob from include/exclude.
 3. **Publishers:** no handlers → all classpath mappings stay registered (whole domain). Opt into
    exchanges with `@Import(OrderPublisherTopology.class)` (etc.) — **one publisher per domain**.
    Fat-jar producers that publish a subset can set `events.mappings.include=...`.
@@ -336,26 +338,27 @@ See [docs/TUTORIAL.md](docs/TUTORIAL.md) for the end-to-end walkthrough.
 
 ## Adding a new event
 
-No mapping `@Bean` method. Annotation-driven (see
-[ADR-0010](docs/adr/ADR-0010-annotation-driven-event-mappings.md)):
+No mapping `@Bean` method. Annotation-driven, build-generated (see
+[ADR-0011](docs/adr/ADR-0011-build-generated-type-mapping-config.md)):
 
 1. **Create a public top-level record** in the domain event package
-   (`com.example.contracts.orders` or `com.example.contracts.customers` — exact package; not a
-   sub-package).
+   (`com.example.contracts.orders` or `com.example.contracts.customers` — keep all of a domain's
+   records in one package; not a sub-package).
 2. **Annotate** with `@GenerateSchema` and `@EventMapping`, reusing `*EventRouting` constants for
    `exchange` / `routingKey` (add a new constant if needed).
-3. **Build** the contracts module (`./mvnw -pl order-contracts -am process-classes` or the
-   customer twin). `schema-gen-tools` regenerates the JSON Schema and
-   `target/classes/META-INF/event-mappings.idx`.
-4. **Commit the generated schema** under `src/main/resources/schemas/`. **Do not commit the
-   index** — it is build output only and ships inside the jar.
+3. **Build** the contracts module (`./mvnw -pl order-contracts -am install` or the customer twin).
+   At `compile`, `schema-gen-tools`' `EventMappingProcessor` regenerates
+   `GeneratedEventTypeMappings` (the `@Bean TypeMapping` for the new record); at `process-classes`
+   it regenerates the JSON Schema.
+4. **Commit the generated schema** under `src/main/resources/schemas/`. The generated mapping
+   config is build output (compiled into the jar) — nothing else to commit.
 5. **Consumer:** add a `@BitsEventHandler` method; the per-service queue/DLQ/retry ladder appears
    automatically. **Publisher:** if the exchange group is new, add three exchange beans to the
    domain's opt-in `*PublisherTopology` and `@Import` it from the sole publisher (ADR-0008).
 
-Build fails on unpaired/blank annotations or coordinate collisions. Startup fails on a
-missing/malformed index, annotation/index mismatch, or duplicate coordinates across jars — there
-is no runtime package-scan fallback.
+The build fails at the module's `compile` on blank required annotation attributes, a non-JSON
+`schemaType`, or within-module duplicate coordinates/bean names. At startup, `TypeMappingRegistry`
+still fails on duplicate coordinates or duplicate javaType across jars.
 
 ---
 

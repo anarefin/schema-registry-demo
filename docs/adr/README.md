@@ -26,7 +26,8 @@ After the delete, new decisions reused numbers under the `ADR-NNNN-*.md` filenam
 | [ADR-0007-domain-topology-mapping-factories.md](ADR-0007-domain-topology-mapping-factories.md) | `DomainTopology` / `Mappings` factories (mapping `@Bean` half superseded by ADR-0010) |
 | [ADR-0008-publisher-owned-messaging-topology.md](ADR-0008-publisher-owned-messaging-topology.md) | Publisher-owned exchanges / consumer queues |
 | [ADR-0009-schema-versioning-model.md](ADR-0009-schema-versioning-model.md) | Tier-1 compatible evolution only |
-| [ADR-0010-annotation-driven-event-mappings.md](ADR-0010-annotation-driven-event-mappings.md) | `@EventMapping` + build-time index → named `TypeMapping` beans |
+| [ADR-0010-annotation-driven-event-mappings.md](ADR-0010-annotation-driven-event-mappings.md) | `@EventMapping` + build-time index → named `TypeMapping` beans (runtime index-driven registration superseded by ADR-0011) |
+| [ADR-0011-build-generated-type-mapping-config.md](ADR-0011-build-generated-type-mapping-config.md) | `@EventMapping` → build-time annotation processor emits `@Bean TypeMapping` methods (no runtime index/reflection) |
 
 **Rule:** citations to bare `ADR-0003` / `0005` / `0006` mean the pre-`c0f9738` decisions (see
 tombstones). Citations to `ADR-0007` / `ADR-0008` / `ADR-0009` / `ADR-0010` mean the **current**

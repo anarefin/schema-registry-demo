@@ -1,12 +1,27 @@
 # ADR-0010: Annotation-driven event mappings with a build-generated index
 
-**Status:** Accepted  
+**Status:** Accepted, but **runtime registration superseded by
+[ADR-0011](ADR-0011-build-generated-type-mapping-config.md)**  
 **Date:** 2026-07-18  
 **Spec:** `spec/13-annotation-driven-event-mappings.md`  
 **Supersedes (in part):** [ADR-0007](ADR-0007-domain-topology-mapping-factories.md) — the manual
 per-event `TypeMapping` `@Bean` methods in each `*TypeMappingAutoConfiguration`  
+**Superseded (in part) by:** [ADR-0011](ADR-0011-build-generated-type-mapping-config.md) — the
+**runtime** index-driven registration below (`@RegisterEventMappings` + `EventMappingRegistrar` +
+`IndexedEventMappings` + `EventMappingIndexReader`/`Writer` + `META-INF/event-mappings.idx`) is
+gone; registration is now a build-time annotation processor emitting `@Bean TypeMapping` methods.
+The `@EventMapping` annotation, bean names, override semantics, and `Mappings` construction path in
+this ADR are retained.  
 **Does not supersede:** ADR-0007's `DomainTopology` / `Mappings` factories; named override
 semantics; [ADR-0008](ADR-0008-publisher-owned-messaging-topology.md) exchange ownership
+
+> **Superseded — runtime index.** The "Build-time index (not committed)" and "Runtime registration
+> from the index" sections below describe the **original** mechanism, removed by
+> [ADR-0011](ADR-0011-build-generated-type-mapping-config.md). No `META-INF/event-mappings.idx` is
+> written or read anywhere, and `@RegisterEventMappings` / `EventMappingRegistrar` /
+> `IndexedEventMappings` no longer exist. Read those two sections as history; everything else
+> (`@EventMapping` on the record, locked bean names, `@ConditionalOnMissingBean` override,
+> `Mappings` as the sole construction path, the two-knobs and exact-package notes) still holds.
 
 ## Context
 
@@ -44,7 +59,9 @@ public record OrderCreated(...) {}
 routing key — do not derive them from class names. The annotation never declares an exchange and
 carries no Spring or queue/DLQ/retry fields.
 
-### Build-time index (not committed)
+### Build-time index (not committed) — SUPERSEDED by ADR-0011
+
+> Superseded: no index is written. Registration is compiled at build time (ADR-0011).
 
 During the existing contracts-module `process-classes` `exec-maven-plugin` run,
 `schema-gen-tools` requires a paired `@EventMapping` on every `@GenerateSchema` type, validates
@@ -68,7 +85,12 @@ Build fails on unpaired annotations, blank required attributes, unsupported type
 non-record, non-public, etc.), duplicate Java types, duplicate effective `(groupId, artifactId)`
 within a module, or deterministic bean-name collisions within a module.
 
-### Runtime registration from the index
+### Runtime registration from the index — SUPERSEDED by ADR-0011
+
+> Superseded: `@RegisterEventMappings` / `EventMappingRegistrar` are removed. Each
+> `*TypeMappingAutoConfiguration` now does `@Import(GeneratedEventTypeMappings.class)` — the
+> build-generated `@Configuration` of `@Bean TypeMapping` methods (ADR-0011). No runtime index load,
+> no reflection, no package scan; the bean names / override semantics below are unchanged.
 
 Each `*TypeMappingAutoConfiguration` stays `@AutoConfiguration` and is thinned to:
 
