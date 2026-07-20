@@ -81,6 +81,28 @@
 
   <build>
     <plugins>
+      <!-- Run schema-gen-tools' EventMappingProcessor at this module's own compile (spec
+           15-build-generated-type-mapping-config). The processor reads @EventMapping and emits
+           com.example.contracts.customers.topology.GeneratedEventTypeMappings — the @Bean
+           TypeMapping source that CustomerTypeMappingAutoConfiguration @Imports. schema-gen-tools
+           ships the processor via META-INF/services, so it auto-activates on the
+           annotationProcessorPath (no <annotationProcessors> list needed); the path is isolated
+           from the compile classpath, and the processor matches @EventMapping by FQCN so it needs
+           nothing from it. release=25 is inherited from the parent pluginManagement. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>com.example</groupId>
+              <artifactId>schema-gen-tools</artifactId>
+              <version>${project.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+
       <!-- Contracts and core must not depend on each other (spec contract-owned-amqp-topology
            Principle 2, restored by ADR-0006 now that TypeMapping/SchemaCoordinates/SchemaType
            live in event-contract-kit instead of core). -->
