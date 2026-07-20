@@ -1,22 +1,26 @@
 package com.example.contracts.orders.topology;
 
-import com.example.amqp.topology.mapping.RegisterEventMappings;
 import com.example.amqp.topology.mapping.TypeMapping;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.context.annotation.Import;
 
 /**
- * Registers the {@code events.orders} domain's {@link TypeMapping} beans from the build-time
- * event index — one named bean per {@code @EventMapping} record in
- * {@code com.example.contracts.orders}. This module self-activates this wiring rather than
- * duplicating it in producer-service/consumer-service (pattern established by ADR-0005);
- * {@link TypeMapping} itself lives in {@code event-contract-kit}, not core, so this module needs
- * no dependency on schema-messaging-core (ADR-0006).
+ * Registers the {@code events.orders} domain's {@link TypeMapping} beans — one named bean per
+ * {@code @EventMapping} record in {@code com.example.contracts.orders}. The beans come from
+ * {@link GeneratedEventTypeMappings}, the {@code @Configuration} of explicit {@code @Bean}
+ * methods emitted at this module's own {@code compile} by schema-gen-tools' {@code
+ * EventMappingProcessor} (zero runtime reflection, no build-time index read). This module
+ * self-activates this wiring rather than duplicating it in producer-service/consumer-service
+ * (pattern established by ADR-0005); {@link TypeMapping} itself lives in {@code event-contract-kit},
+ * not core, so this module needs no dependency on schema-messaging-core (ADR-0006).
  *
  * <p>Unlike the exchange beans (opt-in via {@link OrderPublisherTopology}), these plain-data
  * mappings both roles need still auto-load — a publisher and a consumer alike must resolve Java
- * type ↔ schema coordinates. Mapping registration never declares exchanges.
+ * type ↔ schema coordinates. Each generated {@code @Bean} is
+ * {@code @ConditionalOnMissingBean(name = "…")}, so an application bean of the same name wins.
+ * Mapping registration never declares exchanges.
  */
 @AutoConfiguration
-@RegisterEventMappings("com.example.contracts.orders")
+@Import(GeneratedEventTypeMappings.class)
 public class OrderTypeMappingAutoConfiguration {
 }
