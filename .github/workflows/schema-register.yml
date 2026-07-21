@@ -2,11 +2,11 @@ name: Schema Registration
 
 # Post-merge WRITE path. After a contract change lands on main, register the new schema version
 # to the standing Apicurio registry. Runs on the SELF-HOSTED runner that shares a machine with the
-# registry (http://localhost:8080). `register` is idempotent (FIND_OR_CREATE_VERSION), so
-# registering every contract module every time is safe and keeps the workflow simple.
+# registry (http://localhost:8080). `registerSchemas` is idempotent (FIND_OR_CREATE_VERSION +
+# canonicalize), so registering every contract module every time is safe and keeps the workflow simple.
 #
 # Data-driven: the module list is DISCOVERED from every `*-contracts` directory that carries a
-# pom.xml, so adding a new domain needs no workflow edit.
+# build.gradle, so adding a new domain needs no workflow edit.
 
 on:
   push:
@@ -36,12 +36,12 @@ jobs:
       - name: Discover contract modules
         id: modules
         run: |
-          PL=$(for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done | sort | paste -sd, -)
-          echo "pl=$PL" >> "$GITHUB_OUTPUT"
-          echo "Discovered contract modules: $PL"
+          TASKS=$(for d in *-contracts; do [ -f "$d/build.gradle" ] && echo ":$d:registerSchemas"; done | sort | tr '\n' ' ')
+          echo "tasks=$TASKS" >> "$GITHUB_OUTPUT"
+          echo "Discovered registerSchemas tasks: $TASKS"
 
       - name: Register schemas
         run: |
-          ./mvnw -pl ${{ steps.modules.outputs.pl }} apicurio-registry:register \
-            -Dapicurio.registry.url=${REGISTRY_URL} \
-            --no-transfer-progress
+          ./gradlew ${{ steps.modules.outputs.tasks }} \
+            -Papicurio.registry.url=${REGISTRY_URL} \
+            --no-daemon

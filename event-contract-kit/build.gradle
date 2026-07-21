@@ -1,0 +1,14 @@
+plugins {
+    id 'com.example.java-library'
+    id 'com.example.dependency-bans'
+}
+
+ext {
+    bannedProjectNames = ['schema-messaging-core', 'order-contracts', 'customer-contracts']
+    banMessage = 'event-contract-kit must stay a pure leaf module (no dependency on core or any *-contracts module).'
+}
+
+dependencies {
+    implementation platform(libs.spring.boot.dependencies)
+    implementation 'org.springframework.amqp:spring-rabbit'
+}

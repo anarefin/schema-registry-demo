@@ -13,7 +13,7 @@ never call Apicurio at runtime. Apicurio remains the CI/governance tool (registe
 
 Work through the sections in order — later sections (evolution, CI) assume the infrastructure and
 services from earlier sections are already up. All commands assume you're running from the repo
-root with `./mvnw` (the Maven Wrapper — never a system `mvn`).
+root with `./gradlew` (the Gradle Wrapper — never a system `gradle`).
 
 Seven event types flow through this system — four orders, three customers:
 
@@ -28,12 +28,12 @@ Seven event types flow through this system — four orders, three customers:
 
 | Tool | Requirement |
 |---|---|
-| JDK | 25, with a `~/.m2/toolchains.xml` entry (`vendor=oracle`, `id=25-oracle`) |
+| JDK | 25 (Gradle Java toolchain) |
 | Docker | Compose v2 (`docker compose`, not the legacy `docker-compose`) |
-| Maven | None needed system-wide — always use the committed wrapper `./mvnw` |
+| Gradle | None needed system-wide — always use the committed wrapper `./gradlew` |
 
 ```bash
-./mvnw -v   # confirm the wrapper resolves Maven 3.9.11 and picks up the Java 25 toolchain
+./gradlew -v   # confirm the wrapper resolves Gradle 9.x and picks up the Java 25 toolchain
 ```
 
 ---
@@ -41,25 +41,25 @@ Seven event types flow through this system — four orders, three customers:
 ## 2. Build & unit tests
 
 ```bash
-./mvnw clean install -DskipTests
+./gradlew clean build -x test
 ```
 
 Builds all six runtime/library modules (`schema-messaging-core`, `event-contract-kit`,
 `order-contracts`, `customer-contracts`, `producer-service`, `consumer-service`, plus the
 build-only `schema-gen-tools`, seven total) and, as part of
-`schema-gen-tools`' `process-classes` phase, regenerates all seven JSON Schemas from the code-first
+`schema-gen-tools`' `generateSchemas` phase, regenerates all seven JSON Schemas from the code-first
 records. Expect `BUILD SUCCESS`.
 
 ```bash
-./mvnw test
+./gradlew test
 ```
 
-Runs only Surefire (`*Test.java`) — fast, mock-based, no Docker. Expect `BUILD SUCCESS` with test
+Runs only Gradle test (`*Test.java`) — fast, mock-based, no Docker. Expect `BUILD SUCCESS` with test
 counts across `schema-messaging-core`, `order-contracts`, `customer-contracts`, and
 `producer-service`.
 
 **What you verified:** the code-first records compile, schemas regenerate without error, and all
-mock-based unit tests pass. The `*Test.java` (Surefire) / `*IT.java` (Failsafe) split is
+mock-based unit tests pass. The `*Test.java` (Gradle test) / `*IT.java` (integrationTest) split is
 load-bearing — don't put a Testcontainers test under `*Test.java` or it'll silently run twice (once
 here, once in §5) or not at all.
 
@@ -71,7 +71,7 @@ This is exactly what `.github/workflows/schema-drift-check.yml` runs on every PR
 `*-contracts/**` or `schema-gen-tools/**`, and you can run it locally with no infrastructure:
 
 ```bash
-./mvnw -pl order-contracts,customer-contracts -am process-classes
+./gradlew :order-contracts:generateSchemas :customer-contracts:generateSchemas
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
 ```
 
@@ -84,12 +84,12 @@ regenerated.
 ```bash
 # Add a comment/description-only edit to a record, e.g. tweak the @JsonPropertyDescription
 # on OrderCreated.quantity() in order-contracts, then:
-./mvnw -pl order-contracts -am process-classes
+./gradlew :order-contracts:generateSchemas
 git diff -- '*-contracts/src/main/resources/schemas/order-created.schema.json'   # see the diff
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # now exits 1
 
 git checkout -- order-contracts/src/main/java/com/example/contracts/orders/OrderCreated.java
-./mvnw -pl order-contracts -am process-classes   # regenerate back to the committed baseline
+./gradlew :order-contracts:generateSchemas   # regenerate back to the committed baseline
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # back to exit 0
 ```
 
@@ -101,10 +101,10 @@ its committed schema is mechanically detectable without touching the registry.
 ## 4. Integration tests (Testcontainers)
 
 ```bash
-./mvnw verify
+./gradlew check
 ```
 
-Runs Failsafe (`*IT.java`) on top of everything in §2 — spins up real RabbitMQ (Testcontainers).
+Runs integrationTest (`*IT.java`) on top of everything in §2 — spins up real RabbitMQ (Testcontainers).
 Schema validation is local (`LocalSchemaCatalog`); no live registry is required for ITs. Expect
 `BUILD SUCCESS`. What each class proves:
 
@@ -116,7 +116,7 @@ Schema validation is local (`LocalSchemaCatalog`); no live registry is required 
 | `DlxRoutingIT` | Retry-ladder + DLQ matrix: deserialization poison / missing schema headers / unknown artifact → immediate DLQ (`X-Retry-Count=0`); downstream `RuntimeException` → retried 3× then DLQ; all `X-Failure-*` headers present on final DLQ. |
 | `LocalSchemaCatalogStartupIT` | A `TypeMapping` whose classpath schema resource is missing aborts Spring context refresh with `SchemaNotFoundException`. |
 
-Run a single IT: `./mvnw -pl consumer-service verify -Dit.test=DlxRoutingIT`.
+Run a single IT: `./gradlew :consumer-service:check --tests DlxRoutingIT`.
 
 ---
 
@@ -150,12 +150,12 @@ beyond waiting on health checks.
 
 ## 6. Register schemas & attach compatibility rules
 
-Schema registration is a **host-Maven step**, not a compose service — both contract modules already
+Schema registration is a **host-Gradle step**, not a compose service — both contract modules already
 carry the `apicurio-registry-maven-plugin`.
 
 ```bash
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew registerSchemas \
+       -Papicurio.registry.url=http://localhost:8080
 ```
 
 Then attach the **FORWARD** compatibility rule to all seven artifacts (register does not do this
@@ -203,10 +203,10 @@ dev loop — code change → restart without rebuilding an image — stop the eq
 
 ```bash
 # Terminal 1 — producer (port 8081)
-./mvnw -pl producer-service spring-boot:run
+./gradlew :producer-service:bootRun
 
 # Terminal 2 — consumer (port 8082)
-./mvnw -pl consumer-service spring-boot:run
+./gradlew :consumer-service:bootRun
 ```
 
 Verify health on both:
@@ -394,11 +394,11 @@ Add an optional field to `OrderCreated` (e.g. a nullable `notes` string with `@J
 no `@NotNull`), then:
 
 ```bash
-./mvnw -pl order-contracts -am process-classes     # regenerate order-created.schema.json
+./gradlew :order-contracts:generateSchemas     # regenerate order-created.schema.json
 git diff -- order-contracts/src/main/resources/schemas/order-created.schema.json   # see the new optional property
 
-./mvnw -pl order-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew :order-contracts:registerSchemas \
+       -Papicurio.registry.url=http://localhost:8080
 ```
 
 Expect success — an additive optional property is FORWARD-compatible. Revert the record and schema
@@ -412,20 +412,20 @@ edit the record, regenerate, register — with no manual schema authoring.
 ## 14. Schema evolution — rejected change
 
 ```bash
-./mvnw -pl order-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew :order-contracts:incompatibleDemo \
+       -Papicurio.registry.url=http://localhost:8080
 ```
 
-This profile dry-run-registers a schema where `quantity` has changed type (integer → string) — a
+This task dry-run-registers a schema where `quantity` has changed type (integer → string) — a
 change that violates every compatibility level, not just FORWARD. Expect `BUILD FAILURE` with
-Apicurio's rejection message in the Maven output (a 409-style compatibility violation, not a
+Apicurio's rejection message in the Gradle output (a 409-style compatibility violation, not a
 generic HTTP error).
 
 Same gate for customers:
 
 ```bash
-./mvnw -pl customer-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew :customer-contracts:incompatibleDemo \
+       -Papicurio.registry.url=http://localhost:8080
 ```
 
 **What you verified:** a genuinely breaking change is rejected before it ever reaches a shared
@@ -436,12 +436,12 @@ branch, for both domains.
 ## 15. Compatibility gate — the same check CI runs
 
 ```bash
-./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew compatCheckSchemas \
+       -Papicurio.registry.url=http://localhost:8080
 ```
 
-This is a **dry-run** register of exactly what `apicurio-registry:register` would publish (no
-writes) — it's the identical Maven invocation `.github/workflows/schema-compat-check.yml` runs on
+This is a **dry-run** check of exactly what `registerSchemas` would publish (no
+writes) — it's the identical Gradle invocation `.github/workflows/schema-compat-check.yml` runs on
 every PR touching `*-contracts/**`. With the working tree unchanged since §6, expect `BUILD SUCCESS`
 (current schemas are compatible with themselves).
 
@@ -452,14 +452,14 @@ baseline, before you ever open a PR.
 
 ## 16. CI governance workflows (structural walkthrough)
 
-All four workflows discover contract modules dynamically (`for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done`), so adding a seventh domain module needs no workflow edit. Read each file in `.github/workflows/` alongside this table:
+All four workflows discover contract modules dynamically (`for d in *-contracts; do [ -f "$d/build.gradle" ] && echo "$d"; done`), so adding a seventh domain module needs no workflow edit. Read each file in `.github/workflows/` alongside this table:
 
 | Workflow | Trigger | Runner | What it runs | Pass/fail condition |
 |---|---|---|---|---|
-| `schema-compat-check.yml` | `pull_request`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` (needs the standing registry at `localhost:8080`) | `./mvnw -pl <discovered> verify -Pcompat-check -Dapicurio.registry.url=...` | Fails if the dry-run registration is rejected as incompatible — same command as §15 |
+| `schema-compat-check.yml` | `pull_request`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` (needs the standing registry at `localhost:8080`) | `./gradlew :<discovered>:compatCheckSchemas -Papicurio.registry.url=...` | Fails if the dry-run registration is rejected as incompatible — same command as §15 |
 | `schema-drift-check.yml` | `pull_request`, paths `*-contracts/**`, `schema-gen-tools/**` | `ubuntu-latest` (no registry needed) | regenerate via `schema-gen-tools`, then `git diff --exit-code` on `*-contracts/**/schemas/` | Fails on any byte drift — same command as §3 |
 | `schema-governance-bootstrap.yml` | `workflow_dispatch` only (manual, optional `registry_url` input) | `[self-hosted, apicurio-local]` | re-registers all seven artifacts, then POSTs `{"ruleType":"COMPATIBILITY","config":"FORWARD"}` to each of the seven `/rules` endpoints (treats `200`/`204`/`409` as success), then re-`GET`s each artifact's rules to confirm | Fails if any rule-attach call returns an unexpected HTTP status — this is §6's manual steps, automated |
-| `schema-register.yml` | `push` to `main`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` | `apicurio-registry:register` (idempotent `FIND_OR_CREATE_VERSION`) | Fails only on a genuine Maven/plugin error — this is a post-merge publish step, not a gate |
+| `schema-register.yml` | `push` to `main`, paths `*-contracts/**` | `[self-hosted, apicurio-local]` | `registerSchemas` (idempotent `FIND_OR_CREATE_VERSION`) | Fails only on a genuine Gradle/API error — this is a post-merge publish step, not a gate |
 
 Because `schema-compat-check.yml`, `schema-governance-bootstrap.yml`, and `schema-register.yml` all
 require the `[self-hosted, apicurio-local]` runner label (they assume a standing registry reachable
@@ -544,15 +544,15 @@ Stop both Spring Boot services with `Ctrl-C` in their terminals.
 **Command reference:**
 
 ```bash
-./mvnw clean install -DskipTests                          # build everything
-./mvnw test                                                # unit tests only
-./mvnw verify                                              # unit + Testcontainers IT
-./mvnw -pl order-contracts,customer-contracts -am process-classes  # regenerate schemas
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080
-./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
-./mvnw -pl order-contracts verify -Pincompatible-demo -Dapicurio.registry.url=http://localhost:8080
-docker compose up --build                                  # infra + producer :8081 + consumer :8082
-./mvnw -pl producer-service spring-boot:run                # dev-loop alternative, port 8081
-./mvnw -pl consumer-service spring-boot:run                # dev-loop alternative, port 8082
+./gradlew clean build -x test                                # build everything
+./gradlew test                                               # unit tests only
+./gradlew check                                              # unit + Testcontainers IT
+./gradlew :order-contracts:generateSchemas :customer-contracts:generateSchemas  # regenerate schemas
+./gradlew registerSchemas -Papicurio.registry.url=http://localhost:8080
+./gradlew compatCheckSchemas -Papicurio.registry.url=http://localhost:8080
+./gradlew :order-contracts:incompatibleDemo -Papicurio.registry.url=http://localhost:8080
+docker compose up --build                                    # infra + producer :8081 + consumer :8082
+./gradlew :producer-service:bootRun                          # dev-loop alternative, port 8081
+./gradlew :consumer-service:bootRun                          # dev-loop alternative, port 8082
 docker compose up / down / down -v
 ```

@@ -1,0 +1,20 @@
+plugins {
+    id 'base'
+}
+
+allprojects {
+    group = providers.gradleProperty('group').get()
+    version = providers.gradleProperty('version').get()
+}
+
+tasks.register('registerSchemas') {
+    group = 'schema governance'
+    description = 'Register all contract schemas with Apicurio Registry'
+    dependsOn ':order-contracts:registerSchemas', ':customer-contracts:registerSchemas'
+}
+
+tasks.register('compatCheckSchemas') {
+    group = 'schema governance'
+    description = 'Dry-run compatibility check for all contract schemas'
+    dependsOn ':order-contracts:compatCheckSchemas', ':customer-contracts:compatCheckSchemas'
+}

@@ -1,0 +1,28 @@
+plugins {
+    id 'com.example.contracts'
+    id 'com.example.dependency-bans'
+}
+
+ext {
+    bannedProjectNames = ['schema-messaging-core']
+    banMessage = 'customer-contracts must not depend on schema-messaging-core (contracts and core must not depend on each other).'
+}
+
+contractSchemas {
+    basePackage = 'com.example.contracts.customers'
+    incompatibleGroup = 'events.customers'
+    incompatibleArtifactId = 'CustomerRegistered'
+    incompatibleFile = 'src/test/resources/schemas/customer-registered-incompatible.schema.json'
+    artifact 'events.customers', 'CustomerRegistered', 'src/main/resources/schemas/customer-registered.schema.json'
+    artifact 'events.customers', 'CustomerAddressAdded', 'src/main/resources/schemas/customer-address-added.schema.json'
+    artifact 'events.customers', 'CustomerTierChanged', 'src/main/resources/schemas/customer-tier-changed.schema.json'
+}
+
+dependencies {
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation libs.jakarta.validation.api
+    implementation 'org.springframework.amqp:spring-rabbit'
+    implementation 'org.springframework.boot:spring-boot-autoconfigure'
+    implementation project(':event-contract-kit')
+    testImplementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+}

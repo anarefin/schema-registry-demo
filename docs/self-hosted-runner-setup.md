@@ -17,25 +17,12 @@ Unit tests and offline schema **drift** do **not** need this runner — they use
    Wait until Apicurio is healthy (`http://localhost:8080`).
 2. **Seed schemas + FORWARD rules** once (cold start), same as [README §2](../README.md):
    ```bash
-   ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-     -Dapicurio.registry.url=http://localhost:8080
+   ./gradlew registerSchemas \
+     -Papicurio.registry.url=http://localhost:8080
    # then attach FORWARD rules (bootstrap workflow or README curl loop)
    ```
    Or run the **Schema Governance Bootstrap** workflow from the Actions UI.
-3. **JDK 25** installed; `JAVA_HOME` points at it.
-4. **`~/.m2/toolchains.xml`** with a JDK 25 entry matching parent POM
-   (`<version>25</version>` only is enough). Example Temurin:
-   ```xml
-   <toolchain>
-     <type>jdk</type>
-     <provides>
-       <version>25</version>
-     </provides>
-     <configuration>
-       <jdkHome>/path/to/jdk-25</jdkHome>
-     </configuration>
-   </toolchain>
-   ```
+3. **JDK 25** installed; `JAVA_HOME` points at it (Gradle toolchain uses this JDK).
 
 ## Install the runner
 

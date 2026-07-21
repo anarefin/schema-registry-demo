@@ -110,7 +110,7 @@ the `TypeMapping`/`SchemaCoordinates`/`SchemaType` data types, which is why
 
 `schema-gen-tools` is build-only and does two jobs, both off the service runtime classpath:
 
-1. **Schema generation** (victools) — invoked at `process-classes` via `exec-maven-plugin` (no
+1. **Schema generation** (victools) — invoked at `generateSchemas` via `exec-maven-plugin` (no
    Maven dependency on any contracts module). It reads compiled `@GenerateSchema`-annotated records
    (each must also carry `@EventMapping`) and writes their `*.schema.json` files.
 2. **Mapping codegen** (`EventMappingProcessor`, a JDK annotation processor) — wired via

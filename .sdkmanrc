@@ -1,0 +1,2 @@
+# Auto-select JDK for this repo (run: sdk env install)
+java=25-oracle

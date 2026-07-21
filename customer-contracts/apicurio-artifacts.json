@@ -1,0 +1,5 @@
+[
+  {"group": "events.customers", "artifact": "CustomerRegistered"},
+  {"group": "events.customers", "artifact": "CustomerAddressAdded"},
+  {"group": "events.customers", "artifact": "CustomerTierChanged"}
+]

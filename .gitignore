@@ -1,7 +1,10 @@
 target/
+build/
+.gradle/
 *.class
 .idea/
 *.iml
 .vscode/
 .DS_Store
 .gstack/
+!gradle/wrapper/gradle-wrapper.jar

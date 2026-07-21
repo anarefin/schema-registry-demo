@@ -14,8 +14,8 @@ DLX/DLQ/retry failure topology.
 |---|---|
 | Cold `compose up` → all services healthy | `docker compose up --build`, healthchecks |
 | Orders + customers (both JSON Schema) received & deserialized | Demo curls → consumer logs (all seven events) |
-| Seven artifacts with FORWARD compat rules | `apicurio-registry:register` + bootstrap workflow |
-| Incompatible v3 rejected with clear error | `verify -Pincompatible-demo` |
+| Seven artifacts with FORWARD compat rules | `registerSchemas` + bootstrap workflow |
+| Incompatible v3 rejected with clear error | `./gradlew :order-contracts:incompatibleDemo` |
 | Malformed payload → correct DLQ, all `X-Failure-*` headers | `POST /api/orders/poison` |
 | Missing/malformed local schema → service fails to start | `LocalSchemaCatalog` eager load (classpath validation) |
 | Producer/consumer runtime has zero dependency on Apicurio | `docker compose up rabbitmq producer-service consumer-service` (no Apicurio/Postgres) still processes messages |
@@ -27,28 +27,11 @@ DLX/DLQ/retry failure topology.
 
 | Tool | Version |
 |---|---|
-| JDK | 25 (entry in `~/.m2/toolchains.xml` — see snippet below) |
+| JDK | 25 (Gradle toolchain) |
 | Docker + Docker Compose | Compose v2 (`docker compose`) |
-| Maven | Provided via `./mvnw` (Maven Wrapper — **always use `./mvnw` not `mvn`**) |
+| Gradle | Provided via `./gradlew` (Gradle Wrapper — **always use `./gradlew` not `gradle`**) |
 
-No system Maven installation needed. The wrapper downloads Maven 3.9.11 automatically.
-
-`maven-toolchains-plugin` requires a JDK-25 entry in `~/.m2/toolchains.xml`. Either vendor works;
-CI uses Temurin. Example Temurin entry (adjust `jdkHome` to your install):
-
-```xml
-<toolchain>
-  <type>jdk</type>
-  <provides>
-    <version>25</version>
-  </provides>
-  <configuration>
-    <jdkHome>/path/to/jdk-25</jdkHome>
-  </configuration>
-</toolchain>
-```
-
-Parent POM matches on `<version>25</version>` only. Oracle-style (`vendor` / `id`) entries also work if present.
+No system Gradle installation needed. The wrapper downloads Gradle 9.2.1 automatically.
 
 ---
 
@@ -57,12 +40,12 @@ Parent POM matches on `<version>25</version>` only. Oracle-style (`vendor` / `id
 ### 1. Build all modules
 
 ```bash
-./mvnw clean install -DskipTests
+./gradlew build -x test
 ```
 
-Compiles all seven child modules (plus parent), generates JSON Schemas from the code-first records
-via `schema-gen-tools`, and installs JARs into the local Maven repository. Skip tests for speed;
-run them later with `./mvnw verify`.
+Compiles all seven child modules (plus root), generates JSON Schemas from the code-first records
+via `schema-gen-tools`, and produces JARs under each module's `build/libs/`. Skip tests for speed;
+run them later with `./gradlew check`.
 
 ### 2. Start infrastructure and services
 
@@ -83,8 +66,8 @@ again after any code change before re-running this:
 | `producer-service` | 8081 | REST endpoints for all seven events |
 | `consumer-service` | 8082 | `@BitsEventHandler` listeners + `/actuator/health` |
 
-Schema registration is **not** a compose service — it's a host-Maven step. The contracts modules
-already carry the `apicurio-registry-maven-plugin`, so once Apicurio is healthy you register both
+Schema registration is **not** a compose service — it's a host-Gradle step. The contracts modules
+already carry the `Gradle `registerSchemas` tasks`, so once Apicurio is healthy you register both
 schemas and attach their compatibility rules directly from the host.
 
 Both artifacts are JSON Schema and use the **FORWARD** compatibility level — in Apicurio's
@@ -94,8 +77,7 @@ under FORWARD.
 
 ```bash
 # 1. Register all seven schemas (four orders + three customers — generated from code-first records)
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew registerSchemas -Papicurio.registry.url=http://localhost:8080
 
 # 2. Attach FORWARD compatibility rules (register does not do this)
 #    Easiest: run the Schema Governance Bootstrap workflow, or POST each artifact:
@@ -126,10 +108,10 @@ instead, in its own terminal (stop the equivalent compose container first to fre
 
 ```bash
 # Terminal 1 — producer (port 8081)
-./mvnw -pl producer-service spring-boot:run
+./gradlew :producer-service bootRun
 
 # Terminal 2 — consumer (port 8082)
-./mvnw -pl consumer-service spring-boot:run
+./gradlew :consumer-service bootRun
 ```
 
 ### 4. Demo: publish messages
@@ -204,12 +186,12 @@ guest/guest) browse `orders.created.consumer-service.dlq` to inspect all `X-Fail
 ### 7. Demo: schema evolution — accept and reject
 
 **Accepted:** add an optional property to a record — FORWARD-compatible for all seven artifacts.
-Regenerate the schema (`./mvnw -pl order-contracts,customer-contracts -am process-classes`), commit, then register.
+Regenerate the schema (`./gradlew :order-contracts :customer-contracts -am process-classes`), commit, then register.
 
 ```bash
 # After adding an optional field to OrderCreated and regenerating the schema:
-./mvnw -pl order-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew :order-contracts registerSchemas \
+       -Papicurio.registry.url=http://localhost:8080
 ```
 
 **Rejected (incompatible):** changing an existing property's type (`quantity` integer → string)
@@ -217,15 +199,15 @@ violates every compatibility level.
 
 ```bash
 # Dry-run incompatible schema — BUILD FAILURE with Apicurio rejection message
-./mvnw -pl order-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew :order-contracts incompatibleDemo \
+       -Papicurio.registry.url=http://localhost:8080
 ```
 
 Same CI gate for customers:
 
 ```bash
-./mvnw -pl customer-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew :customer-contracts incompatibleDemo \
+       -Papicurio.registry.url=http://localhost:8080
 ```
 
 ---
@@ -287,7 +269,7 @@ sequenceDiagram
     participant A as ApicurioRegistry
 
     Dev->>CI: push incompatible schema change
-    CI->>A: apicurio-registry:register -DdryRun (compatibility check)
+    CI->>A: compatCheckSchemas (dry-run compatibility check)
     A-->>CI: 409 Conflict — compatibility rule violated (FORWARD)
     CI-->>Dev: BUILD FAILURE (clear rejection message)
     Note over Dev,A: Merge blocked — incompatible change never lands
@@ -346,7 +328,7 @@ No mapping `@Bean` method. Annotation-driven, build-generated (see
    records in one package; not a sub-package).
 2. **Annotate** with `@GenerateSchema` and `@EventMapping`, reusing `*EventRouting` constants for
    `exchange` / `routingKey` (add a new constant if needed).
-3. **Build** the contracts module (`./mvnw -pl order-contracts -am install` or the customer twin).
+3. **Build** the contracts module (`./gradlew :order-contracts:build` or the customer twin).
    At `compile`, `schema-gen-tools`' `EventMappingProcessor` regenerates
    `GeneratedEventTypeMappings` (the `@Bean TypeMapping` for the new record); at `process-classes`
    it regenerates the JSON Schema.
@@ -394,14 +376,14 @@ publisher cannot emit before declaring its own exchanges).
 ## Running the test suite
 
 ```bash
-./mvnw test           # unit tests only (fast, no Docker)
-./mvnw verify         # unit + Testcontainers integration tests
-./mvnw -pl schema-messaging-core test   # single-module
-./mvnw -pl schema-messaging-core test -Dtest=JsonSchemaStrategyTest#schemaType_isJson   # single test
+./gradlew test           # unit tests only (fast, no Docker)
+./gradlew check         # unit + Testcontainers integration tests
+./gradlew :schema-messaging-core test   # single-module
+./gradlew :schema-messaging-core test -Dtest=JsonSchemaStrategyTest#schemaType_isJson   # single test
 ```
 
-Tests are split by convention: `*Test.java` → Surefire (unit, mock-based);
-`*IT.java` → Failsafe (Testcontainers, real RabbitMQ). Schema validation is local
+Tests are split by convention: `*Test.java` → Gradle `test` (unit, mock-based);
+`*IT.java` → Gradle `integrationTest` (Testcontainers, real RabbitMQ). Schema validation is local
 (classpath) in both, so no Apicurio container is needed for either suite. Keep new tests on the
 correct side — the split is load-bearing.
 
@@ -458,51 +440,47 @@ They are not appropriate for production use as-is.
 | No consumer-side deduplication (honest at-least-once delivery) | Keeps the consumer stateless; no distributed dedup store | Redis / database deduplication store keyed on a producer-supplied message id |
 | Single-instance Apicurio Registry (no HA) | Simplifies compose topology; Apicurio is CI/governance-only, not a runtime dependency | Multi-node Apicurio behind a load balancer, connection pooling |
 | No schema hot-swap without redeploy | Schemas are baked into the contracts JAR at build time (`LocalSchemaCatalog`) | If live schema updates are needed, reintroduce a registry-backed resolution path with appropriate caching |
-| Schema registration is a manual host-Maven step after `docker compose up` | Keeps the build single-source (no second Maven toolchain in a container) | CI: run `apicurio-registry:register` + rule attachment as a dedicated post-deploy Maven step with a populated cache layer |
+| Schema registration is a manual host-Gradle step after `docker compose up` | Keeps the build single-source (no second Gradle toolchain in a container) | CI: run `registerSchemas` + rule attachment as a dedicated post-deploy Gradle step |
 
 ---
 
-## Maven command reference
+## Gradle command reference
 
 ```bash
 # Build
-./mvnw clean install                               # full build + local install
-./mvnw clean install -DskipTests                   # skip all tests
-./mvnw -pl schema-messaging-core compile           # compile one module
+./gradlew build                                    # full build
+./gradlew build -x test                            # skip all tests
+./gradlew :schema-messaging-core:compileJava       # compile one module
 
 # Test
-./mvnw test                                        # unit tests (Surefire, *Test.java)
-./mvnw verify                                      # unit + IT (Failsafe, *IT.java)
-./mvnw -pl consumer-service verify                 # IT for one module
+./gradlew test                                     # unit tests (*Test)
+./gradlew check                                    # unit + IT (*IT via integrationTest)
+./gradlew :consumer-service:integrationTest        # IT for consumer only
 
 # Schema governance (requires docker compose up)
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew registerSchemas -Papicurio.registry.url=http://localhost:8080
 
-./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew compatCheckSchemas -Papicurio.registry.url=http://localhost:8080
 
 # Incompatible change dry-run (CI gate demo)
-./mvnw -pl order-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
-./mvnw -pl customer-contracts verify -Pincompatible-demo \
-       -Dapicurio.registry.url=http://localhost:8080
+./gradlew :order-contracts:incompatibleDemo -Papicurio.registry.url=http://localhost:8080
+./gradlew :customer-contracts:incompatibleDemo -Papicurio.registry.url=http://localhost:8080
 
-# Run services — all-in-one via docker compose (rebuilds images from target/*.jar above)
+# Run services — all-in-one via docker compose (rebuilds images from build/libs/*.jar above)
 docker compose up --build                          # producer :8081, consumer :8082 + infra
 
 # Run services — fast local dev loop (no image rebuild)
-./mvnw -pl producer-service spring-boot:run        # port 8081
-./mvnw -pl consumer-service spring-boot:run        # port 8082
+./gradlew :producer-service:bootRun                # port 8081
+./gradlew :consumer-service:bootRun                # port 8082
 
 # Run with prod profile (structured JSON logging)
-./mvnw -pl producer-service spring-boot:run -Dspring-boot.run.profiles=prod
+./gradlew :producer-service:bootRun --args='--spring.profiles.active=prod'
 ```
 
 ---
 
-## Gradle migration (deferred)
+## Build system
 
-The POC uses Maven by design: `apicurio-registry-maven-plugin` provides first-class
-`register` and `test` goals with no trusted Gradle equivalent. Migrating the build to Gradle
-is explicitly out of scope for this POC and tracked as a future epic (spec §0.4).
+Gradle (Groovy DSL + Wrapper 9.2.1). Schema governance uses custom `buildSrc` tasks calling
+Apicurio Registry Core API v3 (`registerSchemas`, `compatCheckSchemas`, `incompatibleDemo`).
+Artifact coordinates live in each `*-contracts/apicurio-artifacts.json`.

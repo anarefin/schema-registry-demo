@@ -1,0 +1,29 @@
+plugins {
+    id 'com.example.contracts'
+    id 'com.example.dependency-bans'
+}
+
+ext {
+    bannedProjectNames = ['schema-messaging-core']
+    banMessage = 'order-contracts must not depend on schema-messaging-core (contracts and core must not depend on each other).'
+}
+
+contractSchemas {
+    basePackage = 'com.example.contracts.orders'
+    incompatibleGroup = 'events.orders'
+    incompatibleArtifactId = 'OrderCreated'
+    incompatibleFile = 'src/test/resources/schemas/order-created-incompatible.schema.json'
+    artifact 'events.orders', 'OrderCreated', 'src/main/resources/schemas/order-created.schema.json'
+    artifact 'events.orders', 'OrderShipped', 'src/main/resources/schemas/order-shipped.schema.json'
+    artifact 'events.orders', 'OrderCancelled', 'src/main/resources/schemas/order-cancelled.schema.json'
+    artifact 'events.orders', 'OrderFulfilled', 'src/main/resources/schemas/order-fulfilled.schema.json'
+}
+
+dependencies {
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation libs.jakarta.validation.api
+    implementation 'org.springframework.amqp:spring-rabbit'
+    implementation 'org.springframework.boot:spring-boot-autoconfigure'
+    implementation project(':event-contract-kit')
+    testImplementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+}

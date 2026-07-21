@@ -1,0 +1,23 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'schema-registry-demo'
+
+include 'event-contract-kit'
+include 'schema-gen-tools'
+include 'schema-messaging-core'
+include 'order-contracts'
+include 'customer-contracts'
+include 'producer-service'
+include 'consumer-service'

@@ -1,0 +1,22 @@
+[versions]
+spring-boot = "4.1.0"
+networknt-json-schema-validator = "1.5.6"
+testcontainers = "1.20.4"
+victools = "4.38.0"
+jakarta-validation-api = "3.1.1"
+
+[libraries]
+spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
+spring-boot-gradle-plugin = { module = "org.springframework.boot:spring-boot-gradle-plugin", version.ref = "spring-boot" }
+
+json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "networknt-json-schema-validator" }
+victools-generator = { module = "com.github.victools:jsonschema-generator", version.ref = "victools" }
+victools-jackson = { module = "com.github.victools:jsonschema-module-jackson", version.ref = "victools" }
+victools-jakarta-validation = { module = "com.github.victools:jsonschema-module-jakarta-validation", version.ref = "victools" }
+jakarta-validation-api = { module = "jakarta.validation:jakarta.validation-api", version.ref = "jakarta-validation-api" }
+
+testcontainers-rabbitmq = { module = "org.testcontainers:rabbitmq", version.ref = "testcontainers" }
+testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }

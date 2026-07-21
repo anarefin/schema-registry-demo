@@ -1,0 +1,25 @@
+plugins {
+    id 'com.example.java-library'
+    id 'com.example.dependency-bans'
+}
+
+ext {
+    bannedProjectNames = ['schema-messaging-core', 'order-contracts', 'customer-contracts']
+    banMessage = 'schema-gen-tools must not depend on core or any *-contracts module.'
+}
+
+dependencies {
+    implementation libs.victools.generator
+    implementation libs.victools.jackson
+    implementation libs.victools.jakarta.validation
+    implementation libs.jakarta.validation.api
+}
+
+// Processor ships via META-INF/services; disable self-activation on invalid test fixtures.
+tasks.named('compileJava', JavaCompile) {
+    options.compilerArgs << '-proc:none'
+}
+
+tasks.named('compileTestJava', JavaCompile) {
+    options.compilerArgs << '-proc:none'
+}

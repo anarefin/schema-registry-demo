@@ -1,0 +1,46 @@
+/**
+ * Fail the build if banned project modules appear on any resolvable configuration.
+ * Modules set ext.bannedProjectNames / ext.banMessage before or after apply; resolved in afterEvaluate.
+ */
+afterEvaluate {
+    def banned = (ext.find('bannedProjectNames') ?: []) as List<String>
+    def banMessage = (ext.find('banMessage') ?: "Banned project dependency detected: ${banned}") as String
+
+    if (banned.isEmpty()) {
+        return
+    }
+
+    def checkTask = tasks.register('checkDependencyBans') {
+        group = 'verification'
+        description = 'Fail if banned sibling modules appear on the dependency graph'
+        doLast {
+            def found = [] as Set
+            configurations.matching { it.canBeResolved }.each { Configuration cfg ->
+                try {
+                    cfg.incoming.resolutionResult.allDependencies.each { dep ->
+                        if (dep instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult) {
+                            def sel = dep.selected
+                            def name = sel.moduleVersion?.name
+                            if (name != null && banned.contains(name)) {
+                                found << "${cfg.name} -> ${sel.moduleVersion}"
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // Unresolvable configs — skip
+                }
+            }
+            if (!found.isEmpty()) {
+                throw new GradleException("${banMessage}\n  ${found.sort().join('\n  ')}")
+            }
+        }
+    }
+
+    tasks.named('check').configure {
+        dependsOn checkTask
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        dependsOn checkTask
+    }
+}

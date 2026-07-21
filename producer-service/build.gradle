@@ -1,0 +1,17 @@
+plugins {
+    id 'com.example.spring-boot-app'
+}
+
+// Boot fat jar only — avoid a competing plain jar confusing Docker COPY globs.
+tasks.named('jar') {
+    enabled = false
+}
+
+dependencies {
+    implementation project(':schema-messaging-core')
+    implementation project(':order-contracts')
+    implementation project(':customer-contracts')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+}

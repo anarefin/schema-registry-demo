@@ -14,4 +14,4 @@ classpath. Offline drift CI regenerates and `git diff --exit-code`s those files.
 ## Note
 
 The full pre-`c0f9738` prose is not restored here. Behaviour is described in `CLAUDE.md`,
-`README.md`, and each contracts module's `pom.xml` (`exec-maven-plugin` + determinism tests).
+`README.md`, and each contracts module's `build.gradle` (`generateSchemas` task + determinism tests).

@@ -1,8 +1,8 @@
 name: Build and Test
 
-# Runs unit tests (Surefire, *Test.java) on every PR and on pushes to main.
-# No Testcontainers / Failsafe here — use workflow_dispatch or local `./mvnw verify`
-# for *IT.java. Schema governance stays in the schema-* workflows (incl. self-hosted
+# Runs unit tests (*Test) on every PR and on pushes to main.
+# No Testcontainers / integrationTest here — use workflow_dispatch or local `./gradlew check`
+# for *IT. Schema governance stays in the schema-* workflows (incl. self-hosted
 # Apicurio runner for compat/register).
 
 on:
@@ -13,13 +13,13 @@ on:
   workflow_dispatch:
     inputs:
       run_verify:
-        description: 'Also run Failsafe integration tests (./mvnw verify)'
+        description: 'Also run integration tests (./gradlew check)'
         type: boolean
         default: false
 
 jobs:
   unit-tests:
-    name: Unit tests (./mvnw test)
+    name: Unit tests (./gradlew test)
     runs-on: ubuntu-latest
 
     steps:
@@ -31,33 +31,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: maven
-
-      - name: Write toolchains.xml (Temurin)
-        # Parent POM requires maven-toolchains-plugin with a JDK 25 entry; CI has no
-        # pre-existing ~/.m2/toolchains.xml. Point jdkHome at the setup-java install.
-        run: |
-          mkdir -p "$HOME/.m2"
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<toolchains>' \
-            '  <toolchain>' \
-            '    <type>jdk</type>' \
-            '    <provides>' \
-            '      <version>25</version>' \
-            '    </provides>' \
-            '    <configuration>' \
-            "      <jdkHome>${JAVA_HOME}</jdkHome>" \
-            '    </configuration>' \
-            '  </toolchain>' \
-            '</toolchains>' \
-            > "$HOME/.m2/toolchains.xml"
+          cache: gradle
 
       - name: Run unit tests
-        run: ./mvnw test --no-transfer-progress
+        run: ./gradlew test --no-daemon
 
   integration-tests:
-    name: Integration tests (./mvnw verify)
+    name: Integration tests (./gradlew check)
     if: github.event_name == 'workflow_dispatch' && inputs.run_verify
     runs-on: ubuntu-latest
 
@@ -70,25 +50,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: maven
+          cache: gradle
 
-      - name: Write toolchains.xml (Temurin)
-        run: |
-          mkdir -p "$HOME/.m2"
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<toolchains>' \
-            '  <toolchain>' \
-            '    <type>jdk</type>' \
-            '    <provides>' \
-            '      <version>25</version>' \
-            '    </provides>' \
-            '    <configuration>' \
-            "      <jdkHome>${JAVA_HOME}</jdkHome>" \
-            '    </configuration>' \
-            '  </toolchain>' \
-            '</toolchains>' \
-            > "$HOME/.m2/toolchains.xml"
-
-      - name: Run verify (unit + Testcontainers ITs)
-        run: ./mvnw verify --no-transfer-progress
+      - name: Run check (unit + Testcontainers ITs)
+        run: ./gradlew check --no-daemon

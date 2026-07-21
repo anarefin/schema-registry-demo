@@ -1,0 +1,136 @@
+import com.example.apicurio.ApicurioArtifact
+import com.example.apicurio.ApicurioRegistryClient
+
+plugins {
+    id 'com.example.java-library'
+}
+
+class ContractSchemasExtension {
+    String basePackage
+    String incompatibleGroup
+    String incompatibleArtifactId
+    String incompatibleFile
+    final List<Map> artifacts = []
+
+    void artifact(String groupId, String artifactId, String relativeFile) {
+        artifacts << [groupId: groupId, artifactId: artifactId, file: relativeFile]
+    }
+}
+
+extensions.create('contractSchemas', ContractSchemasExtension)
+
+dependencies {
+    implementation platform(libs.spring.boot.dependencies)
+    annotationProcessor project(':schema-gen-tools')
+    testImplementation project(':schema-gen-tools')
+}
+
+tasks.named('compileJava').configure {
+    dependsOn ':schema-gen-tools:classes'
+}
+
+def schemasExt = extensions.getByName('contractSchemas') as ContractSchemasExtension
+
+def generateSchemas = tasks.register('generateSchemas', JavaExec) {
+    group = 'build'
+    description = 'Generate JSON Schemas from @GenerateSchema records into src/main/resources/schemas'
+    dependsOn 'compileJava', ':schema-gen-tools:classes'
+    // Use compile output + resolved runtime jars — not sourceSets.main.runtimeClasspath
+    // (that depends on classes and would cycle if classes depended on this task).
+    classpath = files(sourceSets.main.java.classesDirectory.get()) +
+            configurations.runtimeClasspath +
+            project(':schema-gen-tools').configurations.runtimeClasspath +
+            files(project(':schema-gen-tools').sourceSets.main.java.classesDirectory.get()) +
+            files(project(':schema-gen-tools').sourceSets.main.output.resourcesDir)
+    mainClass = 'com.example.schemagen.SchemaGeneratorCli'
+    doFirst {
+        if (!schemasExt.basePackage) {
+            throw new GradleException('contractSchemas.basePackage must be set')
+        }
+        args(
+                layout.projectDirectory.dir('src/main/resources/schemas').asFile.absolutePath,
+                sourceSets.main.java.classesDirectory.get().asFile.absolutePath,
+                schemasExt.basePackage
+        )
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    dependsOn generateSchemas
+    // Schemas live in both processResources output and classesDir/schemas (CLI dual-write).
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.named('compileTestJava').configure {
+    dependsOn generateSchemas
+}
+
+tasks.named('test').configure {
+    dependsOn generateSchemas
+}
+
+def registryUrlProvider = providers.gradleProperty('apicurio.registry.url')
+        .orElse('http://localhost:8080')
+
+def toArtifacts = {
+    schemasExt.artifacts.collect { Map m ->
+        new ApicurioArtifact(
+                m.groupId as String,
+                m.artifactId as String,
+                layout.projectDirectory.file(m.file as String).asFile,
+                'JSON'
+        )
+    }
+}
+
+tasks.register('registerSchemas') {
+    group = 'schema governance'
+    description = 'Register contract schemas (FIND_OR_CREATE_VERSION + canonicalize)'
+    dependsOn generateSchemas
+    doLast {
+        def client = new ApicurioRegistryClient(registryUrlProvider.get())
+        toArtifacts().each { ApicurioArtifact a ->
+            if (!a.file.exists()) {
+                throw new GradleException("Schema file missing: ${a.file}")
+            }
+            logger.lifecycle("Registering ${a.groupId}/${a.artifactId} from ${a.file}")
+            client.register(a)
+        }
+    }
+}
+
+tasks.register('compatCheckSchemas') {
+    group = 'schema governance'
+    description = 'Dry-run compatibility check (does not persist)'
+    dependsOn generateSchemas
+    doLast {
+        def client = new ApicurioRegistryClient(registryUrlProvider.get())
+        toArtifacts().each { ApicurioArtifact a ->
+            if (!a.file.exists()) {
+                throw new GradleException("Schema file missing: ${a.file}")
+            }
+            logger.lifecycle("Compat-check ${a.groupId}/${a.artifactId}")
+            client.compatCheck(a)
+        }
+    }
+}
+
+tasks.register('incompatibleDemo') {
+    group = 'schema governance'
+    description = 'Dry-run register incompatible fixture (must fail under FORWARD)'
+    doLast {
+        def client = new ApicurioRegistryClient(registryUrlProvider.get())
+        def file = layout.projectDirectory.file(schemasExt.incompatibleFile).asFile
+        if (!file.exists()) {
+            throw new GradleException("Incompatible schema fixture missing: ${file}")
+        }
+        def artifact = new ApicurioArtifact(
+                schemasExt.incompatibleGroup,
+                schemasExt.incompatibleArtifactId,
+                file,
+                'JSON'
+        )
+        logger.lifecycle("Incompatible-demo ${artifact.groupId}/${artifact.artifactId}")
+        client.compatCheck(artifact)
+    }
+}

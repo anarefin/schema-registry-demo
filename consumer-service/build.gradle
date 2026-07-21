@@ -1,0 +1,50 @@
+plugins {
+    id 'com.example.spring-boot-app'
+}
+
+// Boot fat jar only — avoid a competing plain jar confusing Docker COPY globs.
+// integrationTest still uses test classpath / classes, not bootJar.
+tasks.named('jar') {
+    enabled = false
+}
+
+dependencies {
+    implementation project(':schema-messaging-core')
+    implementation project(':order-contracts')
+    implementation project(':customer-contracts')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    testImplementation 'org.springframework.amqp:spring-rabbit-test'
+    testImplementation 'com.fasterxml.jackson.core:jackson-databind'
+    testImplementation libs.testcontainers.rabbitmq
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+}
+
+// Failsafe parity: *IT runs only via integrationTest, not test.
+// bootJar must not run before ITs (fat jar mid-session breaks classpath).
+tasks.register('integrationTest', Test) {
+    description = 'Runs *IT integration tests (Testcontainers)'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/*IT.class'
+    shouldRunAfter test
+    // Use classes/testClasses — not bootJar (fat jar mid-session breaks classpath).
+    dependsOn testClasses, classes
+}
+
+tasks.named('check') {
+    dependsOn integrationTest
+}
+
+tasks.named('bootJar') {
+    mustRunAfter integrationTest
+}
+
+tasks.named('assemble') {
+    dependsOn bootJar
+}

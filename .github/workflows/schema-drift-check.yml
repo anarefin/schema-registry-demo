@@ -2,12 +2,12 @@ name: Schema Drift Check
 
 # Offline gate: regenerates every JSON Schema from its Java Record (each contracts module owns its
 # own generation via the shared build-only `schema-gen-tools` jar, ADR-0003) and fails if any
-# committed artifact differs. Runs without a registry — pure local Maven build.
+# committed artifact differs. Runs without a registry — pure local Gradle build.
 #
 # Catches: record/annotation changes that weren't followed by a schema regeneration + commit.
 #
 # Data-driven: contract modules are DISCOVERED from every top-level `*-contracts` directory that
-# carries a pom.xml (same pattern as schema-compat-check / schema-register), so adding a new
+# carries a build.gradle (same pattern as schema-compat-check / schema-register), so adding a new
 # domain needs no workflow edit. The schema diff glob already covers every `*-contracts` schemas dir.
 
 on:
@@ -33,44 +33,25 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: maven
-
-      - name: Write toolchains.xml (Temurin)
-        run: |
-          mkdir -p "$HOME/.m2"
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<toolchains>' \
-            '  <toolchain>' \
-            '    <type>jdk</type>' \
-            '    <provides>' \
-            '      <version>25</version>' \
-            '    </provides>' \
-            '    <configuration>' \
-            "      <jdkHome>${JAVA_HOME}</jdkHome>" \
-            '    </configuration>' \
-            '  </toolchain>' \
-            '</toolchains>' \
-            > "$HOME/.m2/toolchains.xml"
+          cache: gradle
 
       - name: Verify bootstrap artifact discovery
-        # Same POM <artifacts> list the governance bootstrap workflow consumes — fails if
-        # discovery drifts from the known seven order + customer coordinates.
+        # Same apicurio-artifacts.json catalogs the governance bootstrap workflow consumes.
         run: .github/scripts/discover-contract-artifacts_test.sh
 
       - name: Discover contract modules
         id: modules
         run: |
-          PL=$(for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done | sort | paste -sd, -)
-          echo "pl=$PL" >> "$GITHUB_OUTPUT"
-          echo "Discovered contract modules: $PL"
+          TASKS=$(for d in *-contracts; do [ -f "$d/build.gradle" ] && echo ":$d:generateSchemas"; done | sort | tr '\n' ' ')
+          echo "tasks=$TASKS" >> "$GITHUB_OUTPUT"
+          echo "Discovered generateSchemas tasks: $TASKS"
 
       - name: Regenerate all schemas
-        # Each contracts module's own process-classes phase invokes schema-gen-tools against its
-        # own records (ADR-0003); -am also builds schema-gen-tools itself first.
+        # Each contracts module's generateSchemas task invokes schema-gen-tools against its
+        # own records (ADR-0003); Gradle builds schema-gen-tools first via task dependencies.
         env:
-          CONTRACT_MODULES: ${{ steps.modules.outputs.pl }}
-        run: ./mvnw -pl "$CONTRACT_MODULES" -am process-classes --no-transfer-progress
+          GENERATE_TASKS: ${{ steps.modules.outputs.tasks }}
+        run: ./gradlew $GENERATE_TASKS --no-daemon
 
       - name: Fail if any schema differs from its committed artifact
         run: git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'

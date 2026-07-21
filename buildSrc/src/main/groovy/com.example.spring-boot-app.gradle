@@ -1,0 +1,28 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    include '**/*Test.class'
+    exclude '**/*IT.class'
+}
+
+dependencies {
+    implementation platform(libs.spring.boot.dependencies)
+    testImplementation platform(libs.spring.boot.dependencies)
+    testRuntimeOnly platform(libs.spring.boot.dependencies)
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}

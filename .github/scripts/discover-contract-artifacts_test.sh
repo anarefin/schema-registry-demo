@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verifies discover-contract-artifacts.sh emits the seven registry coordinates
-# declared in order-contracts + customer-contracts POM <artifacts> lists.
+# declared in order-contracts + customer-contracts apicurio-artifacts.json catalogs.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

@@ -1,0 +1,24 @@
+plugins {
+    id 'com.example.java-library'
+    id 'com.example.dependency-bans'
+}
+
+ext {
+    bannedProjectNames = ['order-contracts', 'customer-contracts']
+    banMessage = 'schema-messaging-core must not depend on any *-contracts module (it is domain-agnostic).'
+}
+
+dependencies {
+    implementation platform(libs.spring.boot.dependencies)
+    annotationProcessor platform(libs.spring.boot.dependencies)
+    implementation 'org.springframework.amqp:spring-amqp'
+    implementation 'org.springframework.amqp:spring-rabbit'
+    implementation 'org.springframework.boot:spring-boot-autoconfigure'
+    implementation libs.json.schema.validator
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+    compileOnly 'org.springframework.boot:spring-boot-configuration-processor'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+    // api: TypeMapping/TopologyNaming appear on core's public surface; Maven compile was transitive.
+    api project(':event-contract-kit')
+}

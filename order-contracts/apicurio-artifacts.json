@@ -1,0 +1,6 @@
+[
+  {"group": "events.orders", "artifact": "OrderCreated"},
+  {"group": "events.orders", "artifact": "OrderShipped"},
+  {"group": "events.orders", "artifact": "OrderCancelled"},
+  {"group": "events.orders", "artifact": "OrderFulfilled"}
+]

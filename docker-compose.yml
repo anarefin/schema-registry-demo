@@ -71,8 +71,8 @@ services:
       retries: 20
 
   # producer-service/consumer-service images are built from the jar already produced by a host
-  # `./mvnw clean install` — no Maven toolchain runs inside these Dockerfiles (same "single-source
-  # build" principle applied to schema registration below). Run `./mvnw clean install -DskipTests`
+  # `./gradlew build` — no Gradle toolchain runs inside these Dockerfiles (same "single-source
+  # build" principle applied to schema registration below). Run `./gradlew build -x test`
   # once before `docker compose up --build`.
   producer-service:
     build:
@@ -110,14 +110,13 @@ services:
       retries: 20
       start_period: 20s
 
-  # Schema registration is a host-Maven step (not a compose service): once Apicurio is healthy,
+  # Schema registration is a host-Gradle step (not a compose service): once Apicurio is healthy,
   # register both contracts and attach their compatibility rules from the host —
-  #   ./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-  #          -Dapicurio.registry.url=http://localhost:8080
+  #   ./gradlew registerSchemas -Papicurio.registry.url=http://localhost:8080
   # then POST the COMPATIBILITY rules — FORWARD for all seven artifacts
   # (JSON property additions only validate under FORWARD; see README §2) — or run the
-  # "Schema Governance Bootstrap" GitHub workflow. The contracts modules already carry the
-  # apicurio-registry-maven-plugin, so no separate Maven container is needed.
+  # "Schema Governance Bootstrap" GitHub workflow. Registration uses buildSrc Apicurio
+  # Registry v3 REST tasks — no separate registry client container is needed.
 
 # Named volume backing the standing Apicurio registry's Postgres data. Survives
 # `docker compose restart`/recreate; removed only on `docker compose down -v`.

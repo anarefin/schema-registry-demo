@@ -2,18 +2,17 @@ name: Schema Compatibility Check
 
 # Runs on every PR that touches a schema contract module.
 # Executes on a SELF-HOSTED runner that shares a machine with the standing Apicurio registry
-# (docker compose), reachable at http://localhost:8080. The check is READ-ONLY: the
-# `compat-check` profile runs `apicurio-registry:register` with dryRun=true, so it validates the
-# PR schema against the registry's real registered history without writing anything.
+# (docker compose), reachable at http://localhost:8080. The check is READ-ONLY: Gradle
+# `compatCheckSchemas` dry-runs version create against the registry without writing anything.
 #
 # Prereqs (see docs/self-hosted-runner-setup.md):
 #   - `docker compose up -d` is running on the runner host (registry healthy; the host cold-start
 #     step in README §2 has seeded all seven artifacts + their FORWARD compatibility rules — all
 #     JSON Schema artifacts).
-#   - the runner is labelled `apicurio-local` and has JDK 25 + ~/.m2/toolchains.xml.
+#   - the runner is labelled `apicurio-local` and has JDK 25.
 #
 # Data-driven: the module list is DISCOVERED from every `*-contracts` directory that carries a
-# pom.xml, so adding a new domain (e.g. `shipping-contracts`) needs no workflow edit.
+# build.gradle, so adding a new domain (e.g. `shipping-contracts`) needs no workflow edit.
 
 on:
   pull_request:
@@ -33,7 +32,6 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Java 25
-        # Runtime JVM matches the compile target (<release>25</release>), so no toolchains split.
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -41,14 +39,13 @@ jobs:
 
       - name: Discover contract modules
         id: modules
-        # Every top-level `*-contracts` dir with a pom.xml becomes a `-pl` entry (comma-joined).
         run: |
-          PL=$(for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done | sort | paste -sd, -)
-          echo "pl=$PL" >> "$GITHUB_OUTPUT"
-          echo "Discovered contract modules: $PL"
+          TASKS=$(for d in *-contracts; do [ -f "$d/build.gradle" ] && echo ":$d:compatCheckSchemas"; done | sort | tr '\n' ' ')
+          echo "tasks=$TASKS" >> "$GITHUB_OUTPUT"
+          echo "Discovered compatCheckSchemas tasks: $TASKS"
 
       - name: Run compatibility check (dry-run, no writes)
         run: |
-          ./mvnw -pl ${{ steps.modules.outputs.pl }} verify -Pcompat-check \
-            -Dapicurio.registry.url=${REGISTRY_URL} \
-            --no-transfer-progress
+          ./gradlew ${{ steps.modules.outputs.tasks }} \
+            -Papicurio.registry.url=${REGISTRY_URL} \
+            --no-daemon

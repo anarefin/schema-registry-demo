@@ -6,13 +6,13 @@ name: Schema Governance Bootstrap
 #
 # All artifacts are JSON Schema and use FORWARD — in Apicurio's JSON Schema checker, adding an
 # optional property is classified as a "narrowing" and is only FORWARD-compatible, never BACKWARD
-# (see README §2 / the parent POM note).
+# (see README §2).
 #
-# Data-driven: artifact coordinates are DISCOVERED from each *-contracts POM's
-# apicurio-registry-maven-plugin <artifacts> list (see .github/scripts/discover-contract-artifacts.sh).
-# Adding a new event only requires updating that POM — bootstrap cannot drift. It is safe to re-run:
-# `register` is idempotent (FIND_OR_CREATE_VERSION) and Apicurio returns 409 if a rule already
-# exists, which this workflow treats as success.
+# Data-driven: artifact coordinates are DISCOVERED from each *-contracts/apicurio-artifacts.json
+# (see .github/scripts/discover-contract-artifacts.sh). Adding a new event only requires updating
+# that catalog + build.gradle artifact list — bootstrap cannot drift. It is safe to re-run:
+# `registerSchemas` is idempotent (FIND_OR_CREATE_VERSION) and Apicurio returns 409 if a rule
+# already exists, which this workflow treats as success.
 #
 # Runs on the SELF-HOSTED runner so it can reach the standing local registry at
 # http://localhost:8080 (the default below). The host cold-start step (README §2) already performs
@@ -53,18 +53,18 @@ jobs:
       - name: Discover contract modules
         id: modules
         run: |
-          PL=$(for d in *-contracts; do [ -f "$d/pom.xml" ] && echo "$d"; done | sort | paste -sd, -)
-          echo "pl=$PL" >> "$GITHUB_OUTPUT"
-          echo "Discovered contract modules: $PL"
+          TASKS=$(for d in *-contracts; do [ -f "$d/build.gradle" ] && echo ":$d:registerSchemas"; done | sort | tr '\n' ' ')
+          echo "tasks=$TASKS" >> "$GITHUB_OUTPUT"
+          echo "Discovered registerSchemas tasks: $TASKS"
 
       - name: Discover contract artifacts
         id: artifacts
-        # Single source of truth: same POM <artifacts> lists that apicurio-registry:register uses.
+        # Single source of truth: same apicurio-artifacts.json catalogs that registerSchemas uses.
         run: |
           ARTIFACTS=$(.github/scripts/discover-contract-artifacts.sh)
           COUNT=$(printf '%s\n' "${ARTIFACTS}" | grep -c . || true)
           if [ "${COUNT}" -eq 0 ]; then
-            echo "ERROR: no artifacts discovered from *-contracts POMs" >&2
+            echo "ERROR: no artifacts discovered from *-contracts catalogs" >&2
             exit 1
           fi
           {
@@ -76,12 +76,12 @@ jobs:
           printf '%s\n' "${ARTIFACTS}"
 
       - name: Re-seed v1 — register every contract schema
-        # Idempotent (FIND_OR_CREATE_VERSION). Seeds all contract artifacts from their committed
-        # generated schemas before the rules are attached.
+        # Idempotent (FIND_OR_CREATE_VERSION + canonicalize). Seeds all contract artifacts from
+        # their committed generated schemas before the rules are attached.
         run: |
-          ./mvnw -pl ${{ steps.modules.outputs.pl }} apicurio-registry:register \
-            -Dapicurio.registry.url="${REGISTRY_URL}" \
-            --no-transfer-progress
+          ./gradlew ${{ steps.modules.outputs.tasks }} \
+            -Papicurio.registry.url="${REGISTRY_URL}" \
+            --no-daemon
 
       - name: Attach FORWARD compatibility rules
         # Loop discovered artifacts. JSON Schema: adding an optional property is

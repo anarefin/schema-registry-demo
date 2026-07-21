@@ -31,7 +31,7 @@ String priority  // no @NotNull → optional in JSON Schema
 2. **Regenerate** the schema (never hand-edit `order-created.schema.json`):
 
 ```bash
-./mvnw -pl order-contracts -am process-classes
+./gradlew :order-contracts:generateSchemas
 ```
 
 3. **Commit** the updated `order-contracts/src/main/resources/schemas/order-created.schema.json`
@@ -46,7 +46,7 @@ git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
 5. **Compat-check** (CI merge gate; needs a running registry for local runs):
 
 ```bash
-./mvnw -pl order-contracts verify -Pcompat-check -Dapicurio.registry.url=http://localhost:8080
+./gradlew :order-contracts:compatCheckSchemas -Papicurio.registry.url=http://localhost:8080
 ```
 
    Property addition passes under the artifact's **FORWARD** rule.
@@ -109,11 +109,11 @@ Copy into every `*-contracts` PR description:
 
 | Check | Question |
 |-------|----------|
-| **FORWARD?** | Does this change only *add* optional properties (or other FORWARD-safe edits)? Run `verify -Pcompat-check`. |
+| **FORWARD?** | Does this change only *add* optional properties (or other FORWARD-safe edits)? Run `verify `. |
 | **Optional?** | New record components lack `@NotNull` / `@NotBlank` / etc., so they stay out of `required`. |
 | **Producer first?** | Deploy order documented: publisher(s) before consumers. FORWARD assumes producers may lead. |
 | **Consumers listed?** | Every `@BitsEventHandler` owner for this event named, with adoption plan or "none lagging". |
-| **Schema committed?** | `process-classes` run; generated `*.schema.json` in the same PR as the Java record. |
+| **Schema committed?** | `generateSchemas` run; generated `*.schema.json` in the same PR as the Java record. |
 | **Drift clean?** | `git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'` passes. |
 
 If any box is "no" or "unknown", stop — this is not a Tier 1 change.
@@ -187,9 +187,9 @@ implemented in this POC; it requires explicit architecture review.
 
 | Action | Command / link |
 |--------|----------------|
-| Regenerate schemas | `./mvnw -pl order-contracts,customer-contracts -am process-classes` |
+| Regenerate schemas | `./gradlew :order-contracts:generateSchemas :customer-contracts:generateSchemas` |
 | Offline drift gate | `git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'` |
-| CI compat gate | `./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check` |
-| Register (governance) | `./mvnw -pl order-contracts,customer-contracts apicurio-registry:register -Dapicurio.registry.url=http://localhost:8080` |
+| CI compat gate | `./gradlew :order-contracts:check :customer-contracts:check ` |
+| Register (governance) | `./gradlew registerSchemas -Papicurio.registry.url=http://localhost:8080` |
 | Model ADR | [ADR-0009](adr/ADR-0009-schema-versioning-model.md) |
 | Glossary | [CONTEXT.md](../CONTEXT.md) |

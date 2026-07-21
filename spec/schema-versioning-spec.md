@@ -13,7 +13,7 @@ Harden the existing split so it is production-safe:
 | Schema **versioning** | Apicurio | Auto integer versions on content change; `FIND_OR_CREATE_VERSION` + canonicalize |
 | Schema **governance** | Apicurio + CI | FORWARD rule; register + compat-check merge gate; optional version state `DEPRECATED` |
 | Schema **authoring** | Domain contracts | Java records / POJOs + `@GenerateSchema` |
-| Schema **artifact** | Generated JSON Schema in `*-contracts` jar | `schema-gen-tools` at `process-classes` |
+| Schema **artifact** | Generated JSON Schema in `*-contracts` jar | `schema-gen-tools` at `generateSchemas` |
 | Runtime **validation** | Classpath only | `LocalSchemaCatalog` + converter; **no Apicurio call at runtime** |
 
 ### Locked decisions
@@ -73,7 +73,7 @@ public record OrderCreated(
 ) {}
 ```
 
-- Regenerate: `./mvnw -pl order-contracts -am process-classes`
+- Regenerate: `./gradlew -pl order-contracts -am generateSchemas`
 - Commit updated `order-created.schema.json`
 - CI: `compat-check` passes (property add = FORWARD under Apicurio JSON rules)
 - Deploy **producer** first (emits `priority` when set)
@@ -199,7 +199,7 @@ shared bean is removed.
 
 ### 1b — E2E test (QUAL-003)
 
-**New test** (prefer Failsafe IT or Spring Boot test in `schema-messaging-core` / `consumer-service`):
+**New test** (prefer integrationTest IT or Spring Boot test in `schema-messaging-core` / `consumer-service`):
 
 1. Define `@TestConfiguration` with:
 
@@ -272,15 +272,15 @@ Today each artifact has `ifExists=FIND_OR_CREATE_VERSION` without canonicalize �
 **Verify:**
 
 ```bash
-./mvnw -pl order-contracts,customer-contracts apicurio-registry:register \
-  -Dapicurio.registry.url=http://localhost:8080
+./gradlew -pl order-contracts,customer-contracts registerSchemas \
+  -Papicurio.registry.url=http://localhost:8080
 # run twice — second run must not create new versions for unchanged schemas
 ```
 
 Keep existing offline drift gate:
 
 ```bash
-./mvnw -pl order-contracts,customer-contracts -am process-classes
+./gradlew -pl order-contracts,customer-contracts -am generateSchemas
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
 ```
 
@@ -375,7 +375,6 @@ Do **not** register breaking content as version 2 of the same artifact under FOR
 
 - Handler idempotency (at-least-once duplicates) — use business id / `X-Correlation-Id`
 - Runtime Apicurio SerDes (`globalId` / `contentId`) — reverses ADR-0004
-- Gradle migration
 - Restoring all deleted ADRs (0003/5/6) — useful hygiene, not traffic safety
 
 ---
@@ -384,12 +383,12 @@ Do **not** register breaking content as version 2 of the same artifact under FOR
 
 | Check | Command / test |
 |-------|----------------|
-| Unit | `./mvnw -pl schema-messaging-core,schema-gen-tools test` |
+| Unit | `./gradlew -pl schema-messaging-core,schema-gen-tools test` |
 | Tolerant reader E2E | New test from Phase 1b |
-| Schema drift | `process-classes` + `git diff --exit-code` on schemas |
-| Compat | `./mvnw -pl order-contracts,customer-contracts verify -Pcompat-check` |
+| Schema drift | `generateSchemas` + `git diff --exit-code` on schemas |
+| Compat | `./gradlew -pl order-contracts,customer-contracts verify ` |
 | Canonicalize | Double register; no new version if unchanged |
-| Full IT | `./mvnw verify` (Testcontainers) |
+| Full IT | `./gradlew verify` (Testcontainers) |
 
 ---
 
@@ -401,8 +400,8 @@ Do **not** register breaking content as version 2 of the same artifact under FOR
 - [ ] E2E/auto-config test: strict app mapper + payload with extra field → successful consume
 - [ ] Generator emits `"additionalProperties": true` on every object node; `schema-gen-tools` test walks the parsed tree and fails if any node carries `"additionalProperties": false`
 - [ ] `<canonicalize>true</canonicalize>` on order-contracts and customer-contracts Apicurio register config
-- [ ] Double `apicurio-registry:register` on unchanged schemas creates no new versions
-- [ ] `./mvnw -pl order-contracts,customer-contracts -am process-classes` then `git diff --exit-code` on schemas still clean
+- [ ] Double `registerSchemas` on unchanged schemas creates no new versions
+- [ ] `./gradlew -pl order-contracts,customer-contracts -am generateSchemas` then `git diff --exit-code` on schemas still clean
 
 ### Phase 2
 
