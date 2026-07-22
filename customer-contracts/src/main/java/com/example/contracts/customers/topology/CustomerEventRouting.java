@@ -9,9 +9,10 @@ import com.example.amqp.topology.TopologyNaming;
  * {@code @EventMapping} on customer event records can reference them as compile-time constants.
  * Queue names are no longer declared here — listeners resolve them internally via
  * {@code @BitsEventHandler} from the routing key below (spec
- * {@code simplified-publish-and-listen.md} D4). The domain exchanges are declared by the opt-in
- * {@code CustomerPublisherTopology} (this module) via {@code amqp-topology-kit}; these constants
- * follow the same naming convention and are the single source of truth for the names.
+ * {@code simplified-publish-and-listen.md} D4). The domain exchanges are declared by the opt-in,
+ * build-generated {@code CustomersPublisherTopology} (this module) via {@code amqp-topology-kit};
+ * these constants follow the same naming convention and are the single source of truth for the
+ * names.
  *
  * <p>{@link #DLX} and {@link #RETRY_EXCHANGE} are derived from {@link #EXCHANGE} via
  * {@link TopologyNaming}, the same helper {@code DlxMessageRecoverer} uses at runtime to compute

@@ -1,7 +1,7 @@
 package com.example.consumer.support;
 
-import com.example.contracts.customers.topology.CustomerPublisherTopology;
-import com.example.contracts.orders.topology.OrderPublisherTopology;
+import com.example.contracts.customers.topology.CustomersPublisherTopology;
+import com.example.contracts.orders.topology.OrdersPublisherTopology;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
 
@@ -9,8 +9,8 @@ import org.springframework.context.annotation.Import;
  * Test-only stand-in for the publisher. In production the sole publisher (producer-service)
  * declares the orders/customers exchanges; the consumer only binds its private queues to them.
  * Consumer ITs run without a producer, so those exchanges would not otherwise exist — this config
- * imports both {@code *PublisherTopology} classes so the exchanges the consumer's bindings target
- * are present on the broker.
+ * imports both build-generated {@code *PublisherTopology} classes so the exchanges the consumer's
+ * bindings target are present on the broker.
  *
  * <p>{@code @TestConfiguration} (not plain {@code @Configuration}) so it is excluded from
  * {@code ConsumerApplication}'s component scan — it lives under the scanned base package
@@ -19,6 +19,6 @@ import org.springframework.context.annotation.Import;
  * every consumer context.
  */
 @TestConfiguration
-@Import({OrderPublisherTopology.class, CustomerPublisherTopology.class})
+@Import({OrdersPublisherTopology.class, CustomersPublisherTopology.class})
 public class PublisherOwnedExchanges {
 }

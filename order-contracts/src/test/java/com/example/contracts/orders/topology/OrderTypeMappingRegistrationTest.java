@@ -71,12 +71,35 @@ class OrderTypeMappingRegistrationTest {
     @Test
     void publisherTopologyStillDeclaresExchangesWhenImported() {
         new ApplicationContextRunner()
-                .withUserConfiguration(GeneratedEventTypeMappings.class, OrderPublisherTopology.class)
-                .run(context -> assertThat(context.getBeanNamesForType(TopicExchange.class))
-                        .containsExactlyInAnyOrder(
-                                OrderEventRouting.BEAN_EXCHANGE,
-                                OrderEventRouting.BEAN_DLX,
-                                OrderEventRouting.BEAN_RETRY_EXCHANGE));
+                .withUserConfiguration(GeneratedEventTypeMappings.class, OrdersPublisherTopology.class)
+                .run(context -> {
+                    assertThat(context.getBeanNamesForType(TopicExchange.class))
+                            .containsExactlyInAnyOrder(
+                                    OrderEventRouting.BEAN_EXCHANGE,
+                                    OrderEventRouting.BEAN_DLX,
+                                    OrderEventRouting.BEAN_RETRY_EXCHANGE);
+                    assertThat(context.getBean(OrderEventRouting.BEAN_EXCHANGE, TopicExchange.class)
+                            .getName()).isEqualTo(OrderEventRouting.EXCHANGE);
+                    assertThat(context.getBean(OrderEventRouting.BEAN_DLX, TopicExchange.class)
+                            .getName()).isEqualTo(OrderEventRouting.DLX);
+                    assertThat(context.getBean(OrderEventRouting.BEAN_RETRY_EXCHANGE, TopicExchange.class)
+                            .getName()).isEqualTo(OrderEventRouting.RETRY_EXCHANGE);
+                });
+    }
+
+    @Test
+    void applicationExchangeOverrideWinsWhilePublisherTopologyProvidesTheOtherTwo() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(AppExchangeOverride.class, OrdersPublisherTopology.class)
+                .run(context -> {
+                    assertThat(context.getBeanNamesForType(TopicExchange.class))
+                            .containsExactlyInAnyOrder(
+                                    OrderEventRouting.BEAN_EXCHANGE,
+                                    OrderEventRouting.BEAN_DLX,
+                                    OrderEventRouting.BEAN_RETRY_EXCHANGE);
+                    assertThat(context.getBean(OrderEventRouting.BEAN_EXCHANGE, TopicExchange.class)
+                            .getName()).isEqualTo("app.override.exchange");
+                });
     }
 
     private static void assertMapping(TypeMapping mapping, Class<?> javaType, String artifactId,
@@ -96,6 +119,15 @@ class OrderTypeMappingRegistrationTest {
         TypeMapping orderCreatedMapping() {
             return Mappings.forDomain("events.orders", OrderEventRouting.EXCHANGE)
                     .json(OrderCreated.class, "app.override");
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class AppExchangeOverride {
+
+        @Bean(OrderEventRouting.BEAN_EXCHANGE)
+        TopicExchange ordersExchangeOverride() {
+            return new TopicExchange("app.override.exchange");
         }
     }
 }

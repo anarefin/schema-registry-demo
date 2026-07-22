@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Parity test for 03-dlx-retry-exchange-naming-parity-enforced: the DLX/retry exchange names
- * declared by {@code CustomerPublisherTopology} must agree with the names
+ * declared by {@code CustomersPublisherTopology} must agree with the names
  * {@code DlxMessageRecoverer} derives at runtime via {@link TopologyNaming} from a message's
  * received exchange. Both read from {@link CustomerEventRouting}, so this fails if that class's
  * constants are ever hand-edited back to independent literals instead of staying derived.
