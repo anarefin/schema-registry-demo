@@ -32,31 +32,39 @@ import javax.tools.StandardLocation;
 
 /**
  * Build-only annotation processor that reads {@code @EventMapping} during a contracts module's own
- * {@code compile} and emits one {@code @AutoConfiguration} of explicit {@code @Bean TypeMapping}
- * methods per module — so {@link com.example.amqp.topology.mapping.TypeMapping} registration is
- * known at build time with zero runtime reflection.
+ * {@code compile} and emits two generated sources per module:
+ *
+ * <ol>
+ *   <li>{@code GeneratedEventTypeMappings} — one {@code @AutoConfiguration} of explicit
+ *       {@code @Bean TypeMapping} methods, so {@link com.example.amqp.topology.mapping.TypeMapping}
+ *       registration is known at build time with zero runtime reflection. Self-activates via the
+ *       generated {@code AutoConfiguration.imports} resource.
+ *   <li>{@code <beanPrefix>PublisherTopology} — a plain {@code @Configuration} (never
+ *       {@code @AutoConfiguration}) declaring the module's domain exchanges (main/DLX/retry) via
+ *       {@code DomainTopology}. Deliberately absent from {@code AutoConfiguration.imports}: only the
+ *       domain's single publisher should {@code @Import} it.
+ * </ol>
  *
  * <p>Keeps no compile dependency on {@code event-contract-kit}: the annotation is matched by FQCN
  * (mirroring {@link GenerateSchemaScanner}) and its attribute values are read through
- * {@link AnnotationMirror}, never a typed annotation instance. The generated source references the
- * kit's {@code Mappings}/{@code TypeMapping} and Spring's {@code @AutoConfiguration}/{@code @Bean}/
- * {@code @ConditionalOnMissingBean} by name only — those types resolve on the <em>contracts</em>
+ * {@link AnnotationMirror}, never a typed annotation instance. Both generated sources reference the
+ * kit's {@code Mappings}/{@code TypeMapping}/{@code DomainTopology}/{@code DomainExchanges} and
+ * Spring's annotation/bean types by name only — those types resolve on the <em>contracts</em>
  * module's classpath, never here.
  *
- * <p>Also emits {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}
- * into {@link StandardLocation#CLASS_OUTPUT} listing the generated FQCN, so the contracts jar
- * self-activates without a hand-written auto-config wrapper.
- *
- * <p>Output is byte-stable: methods are sorted by the event type's FQCN, and the generated content
- * carries no timestamp. Each method is
+ * <p>Output is byte-stable: methods/beans are sorted by the event type's FQCN, and the generated
+ * content carries no timestamp. Each {@code TypeMapping} method is
  * {@code @Bean @ConditionalOnMissingBean(name = "<decapitalizedSimpleName>Mapping")} returning a
  * {@code TypeMapping} built only via
  * {@code Mappings.forDomain(group, exchange).json(type, artifactId, routingKey)}.
  *
  * <p>The build fails ({@link Diagnostic.Kind#ERROR}) on a blank {@code groupId}/{@code exchange}/
- * {@code routingKey}, a {@code schemaType} other than {@code JSON}, or a within-module duplicate
- * {@code (groupId, artifactId)} or bean name; on any such error nothing is emitted (neither source
- * nor imports resource).
+ * {@code routingKey}, a {@code schemaType} other than {@code JSON}, a within-module duplicate
+ * {@code (groupId, artifactId)} or bean name, a module mixing more than one effective
+ * {@code groupId} or {@code exchange} (a contracts module represents exactly one domain), or a
+ * {@code groupId}/event-package final segment that cannot be used to derive a Java identifier. On
+ * any such error nothing is emitted — neither generated source, nor the imports resource — the
+ * whole module's generation is all-or-nothing.
  */
 @SupportedAnnotationTypes(EventMappingProcessor.EVENT_MAPPING_ANNOTATION)
 @SupportedSourceVersion(SourceVersion.RELEASE_25)
@@ -68,6 +76,9 @@ public final class EventMappingProcessor extends AbstractProcessor {
 
     /** Simple name of the emitted {@code @AutoConfiguration} class. */
     static final String GENERATED_SIMPLE_NAME = "GeneratedEventTypeMappings";
+
+    /** Suffix appended to the derived class name of the generated publisher-topology class. */
+    static final String PUBLISHER_TOPOLOGY_SUFFIX = "PublisherTopology";
 
     /** Spring Boot 3+ auto-configuration entry listing (relative to CLASS_OUTPUT). */
     static final String AUTO_CONFIGURATION_IMPORTS =
@@ -112,6 +123,38 @@ public final class EventMappingProcessor extends AbstractProcessor {
             return;
         }
 
+        List<MappingDescriptor> descriptors = perEventValidation();
+        if (descriptors == null) {
+            return; // never emit partial or invalid output
+        }
+        if (descriptors.isEmpty()) {
+            return; // every annotated type was unexpectedly unmatched by eventMappingMirror(...)
+        }
+
+        DomainDescriptor domain = domainValidation(descriptors);
+        if (domain == null) {
+            return; // never emit partial or invalid output
+        }
+
+        descriptors.sort(Comparator.comparing(MappingDescriptor::typeFqcn));
+        String eventPackage = commonEventPackage(annotatedTypes);
+        String topologyPackage = eventPackage + ".topology";
+
+        String mappingFqcn = topologyPackage + "." + GENERATED_SIMPLE_NAME;
+        String topologyFqcn = topologyPackage + "." + domain.publisherTopologySimpleName();
+
+        writeSource(mappingFqcn, renderMappings(topologyPackage, descriptors));
+        writeSource(topologyFqcn, renderPublisherTopology(topologyPackage, domain));
+        writeImports(mappingFqcn);
+    }
+
+    /**
+     * Validates every {@code @EventMapping} type in isolation (blank attributes, non-JSON
+     * {@code schemaType}, duplicate coordinates/bean names) and returns the resulting descriptors,
+     * or {@code null} if any type failed — in which case diagnostics have already been emitted and
+     * nothing should be written.
+     */
+    private List<MappingDescriptor> perEventValidation() {
         List<MappingDescriptor> descriptors = new ArrayList<>();
         Map<String, Element> seenCoordinates = new HashMap<>();
         Map<String, Element> seenBeanNames = new HashMap<>();
@@ -174,19 +217,69 @@ public final class EventMappingProcessor extends AbstractProcessor {
             }
 
             descriptors.add(new MappingDescriptor(
-                    type.getQualifiedName().toString(), beanName, groupId, exchange, artifactId,
-                    routingKey));
+                    type, type.getQualifiedName().toString(), beanName, groupId, exchange,
+                    artifactId, routingKey));
+        }
+
+        return failed ? null : descriptors;
+    }
+
+    /**
+     * Validates the module represents exactly one domain — a single effective {@code groupId} and
+     * {@code exchange} shared by every event — and that both the {@code groupId}'s and the shared
+     * event package's final segment can be turned into a legal Java identifier. Returns the
+     * resulting {@link DomainDescriptor}, or {@code null} if invalid (diagnostics already emitted).
+     */
+    private DomainDescriptor domainValidation(List<MappingDescriptor> descriptors) {
+        boolean failed = false;
+
+        MappingDescriptor first = descriptors.get(0);
+        for (MappingDescriptor d : descriptors) {
+            if (!d.groupId().equals(first.groupId())) {
+                error("Mixed @EventMapping.groupId within one contracts module: '" + first.groupId()
+                        + "' (" + first.typeFqcn() + ") vs '" + d.groupId() + "' (" + d.typeFqcn()
+                        + ") — a contracts module represents exactly one domain and must share a "
+                        + "single groupId", d.element());
+                failed = true;
+            }
+            if (!d.exchange().equals(first.exchange())) {
+                error("Mixed @EventMapping.exchange within one contracts module: '"
+                        + first.exchange() + "' (" + first.typeFqcn() + ") vs '" + d.exchange()
+                        + "' (" + d.typeFqcn() + ") — a contracts module represents exactly one "
+                        + "domain and must share a single exchange", d.element());
+                failed = true;
+            }
+        }
+        if (failed) {
+            return null;
+        }
+
+        String groupId = first.groupId();
+        String exchange = first.exchange();
+        String beanPrefix = lastSegment(groupId);
+        if (!SourceVersion.isIdentifier(beanPrefix)) {
+            error("@EventMapping.groupId '" + groupId + "' has a final segment '" + beanPrefix
+                    + "' that is not a valid Java identifier — needed to derive the generated "
+                    + "PublisherTopology bean names (<segment>Exchange/Dlx/RetryExchange)",
+                    first.element());
+            failed = true;
+        }
+
+        String eventPackage = commonEventPackage(annotatedTypes);
+        String eventPackageSegment = lastSegment(eventPackage);
+        if (eventPackage.isEmpty() || !SourceVersion.isIdentifier(eventPackageSegment)) {
+            error("@EventMapping event types in this module share no common package with a valid "
+                    + "final segment ('" + eventPackage + "') — needed to derive the generated "
+                    + "PublisherTopology class name", first.element());
+            failed = true;
         }
 
         if (failed) {
-            return; // never emit partial or invalid output
+            return null;
         }
 
-        descriptors.sort(Comparator.comparing(MappingDescriptor::typeFqcn));
-        String packageName = topologyPackage(annotatedTypes);
-        String fqcn = packageName + "." + GENERATED_SIMPLE_NAME;
-        writeSource(fqcn, render(packageName, descriptors));
-        writeImports(fqcn);
+        String publisherTopologySimpleName = capitalize(eventPackageSegment) + PUBLISHER_TOPOLOGY_SUFFIX;
+        return new DomainDescriptor(groupId, exchange, beanPrefix, publisherTopologySimpleName);
     }
 
     private void writeSource(String fqcn, String source) {
@@ -259,18 +352,17 @@ public final class EventMappingProcessor extends AbstractProcessor {
     // ---- package derivation ----
 
     /**
-     * The generated {@code @AutoConfiguration} lives in {@code <eventPackage>.topology}, where
-     * {@code <eventPackage>} is the package shared by every {@code @EventMapping} record in the
-     * module (all contract events sit in one package). Falls back to the longest common package
-     * prefix if they ever diverge.
+     * The package shared by every {@code @EventMapping} record in the module (all contract events
+     * sit in one package). Falls back to the longest common package prefix if they ever diverge —
+     * an empty result (no common prefix at all) is caught by {@link #domainValidation}, which is
+     * always run before this value is used to generate anything.
      */
-    private String topologyPackage(List<TypeElement> types) {
+    private String commonEventPackage(List<TypeElement> types) {
         List<String> packages = new ArrayList<>();
         for (TypeElement type : types) {
             packages.add(elements.getPackageOf(type).getQualifiedName().toString());
         }
-        String common = longestCommonPackage(packages);
-        return common.isEmpty() ? "topology" : common + ".topology";
+        return longestCommonPackage(packages);
     }
 
     private static String longestCommonPackage(List<String> packages) {
@@ -288,9 +380,18 @@ public final class EventMappingProcessor extends AbstractProcessor {
         return String.join(".", List.of(prefix).subList(0, matched));
     }
 
+    private static String lastSegment(String dotted) {
+        int lastDot = dotted.lastIndexOf('.');
+        return lastDot < 0 ? dotted : dotted.substring(lastDot + 1);
+    }
+
+    private static String capitalize(String s) {
+        return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
     // ---- source rendering (byte-stable) ----
 
-    static String render(String packageName, List<MappingDescriptor> descriptors) {
+    static String renderMappings(String packageName, List<MappingDescriptor> descriptors) {
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(packageName).append(";\n\n");
         sb.append("import com.example.amqp.topology.mapping.Mappings;\n");
@@ -320,6 +421,50 @@ public final class EventMappingProcessor extends AbstractProcessor {
         return sb.toString();
     }
 
+    static String renderPublisherTopology(String packageName, DomainDescriptor domain) {
+        String exchangeBean = domain.beanPrefix() + "Exchange";
+        String dlxBean = domain.beanPrefix() + "Dlx";
+        String retryExchangeBean = domain.beanPrefix() + "RetryExchange";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(packageName).append(";\n\n");
+        sb.append("import com.example.amqp.topology.DomainExchanges;\n");
+        sb.append("import com.example.amqp.topology.DomainTopology;\n\n");
+        sb.append("import org.springframework.amqp.core.TopicExchange;\n");
+        sb.append("import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;\n");
+        sb.append("import org.springframework.context.annotation.Bean;\n");
+        sb.append("import org.springframework.context.annotation.Configuration;\n\n");
+        sb.append("/**\n");
+        sb.append(" * Generated by schema-gen-tools {@code EventMappingProcessor} from the module's\n");
+        sb.append(" * {@code @EventMapping} records. Do not edit — regenerated on every compile.\n");
+        sb.append(" *\n");
+        sb.append(" * <p>Opt-in, not auto-configured: declares this domain's three AMQP exchanges\n");
+        sb.append(" * (main/DLX/retry) but is deliberately absent from\n");
+        sb.append(" * {@code AutoConfiguration.imports} — only the domain's single publisher should\n");
+        sb.append(" * {@code @Import} this class.\n");
+        sb.append(" */\n");
+        sb.append("@Configuration\n");
+        sb.append("public class ").append(domain.publisherTopologySimpleName()).append(" {\n\n");
+        sb.append("    private static final DomainExchanges EX = DomainTopology.of(\"")
+                .append(domain.exchange()).append("\");\n");
+
+        appendExchangeBean(sb, exchangeBean, "main");
+        appendExchangeBean(sb, dlxBean, "dlx");
+        appendExchangeBean(sb, retryExchangeBean, "retry");
+
+        sb.append("}\n");
+        return sb.toString();
+    }
+
+    private static void appendExchangeBean(StringBuilder sb, String beanName, String accessor) {
+        sb.append('\n');
+        sb.append("    @Bean\n");
+        sb.append("    @ConditionalOnMissingBean(name = \"").append(beanName).append("\")\n");
+        sb.append("    public TopicExchange ").append(beanName).append("() {\n");
+        sb.append("        return EX.").append(accessor).append("();\n");
+        sb.append("    }\n");
+    }
+
     private void error(String message, Element element) {
         messager.printMessage(Diagnostic.Kind.ERROR, message, element);
     }
@@ -330,10 +475,23 @@ public final class EventMappingProcessor extends AbstractProcessor {
 
     /** Validated, effective coordinates for one generated {@code @Bean TypeMapping} method. */
     record MappingDescriptor(
+            Element element,
             String typeFqcn,
             String beanName,
             String groupId,
             String exchange,
             String artifactId,
             String routingKey) {}
+
+    /**
+     * Validated, effective per-module domain coordinates for the generated publisher-topology
+     * class: {@code beanPrefix} is the final {@code groupId} segment (e.g. {@code events.customers}
+     * → {@code customers}); {@code publisherTopologySimpleName} is
+     * {@code capitalize(lastEventPackageSegment) + "PublisherTopology"} (no singularization).
+     */
+    record DomainDescriptor(
+            String groupId,
+            String exchange,
+            String beanPrefix,
+            String publisherTopologySimpleName) {}
 }

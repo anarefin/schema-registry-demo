@@ -88,6 +88,38 @@ class EventMappingProcessorTest {
             public @interface ConditionalOnMissingBean { String[] name() default {}; }
             """;
 
+    private static final String CONFIGURATION = """
+            package org.springframework.context.annotation;
+            public @interface Configuration {}
+            """;
+
+    private static final String TOPIC_EXCHANGE = """
+            package org.springframework.amqp.core;
+            public final class TopicExchange {
+                public TopicExchange(String name, boolean durable, boolean autoDelete) {}
+            }
+            """;
+
+    private static final String DOMAIN_EXCHANGES = """
+            package com.example.amqp.topology;
+            import org.springframework.amqp.core.TopicExchange;
+            public record DomainExchanges(TopicExchange main, TopicExchange dlx, TopicExchange retry) {}
+            """;
+
+    private static final String DOMAIN_TOPOLOGY = """
+            package com.example.amqp.topology;
+            import org.springframework.amqp.core.TopicExchange;
+            public final class DomainTopology {
+                private DomainTopology() {}
+                public static DomainExchanges of(String mainExchangeName) {
+                    return new DomainExchanges(
+                            new TopicExchange(mainExchangeName, true, false),
+                            new TopicExchange(mainExchangeName + ".dlx", true, false),
+                            new TopicExchange(mainExchangeName + ".retry", true, false));
+                }
+            }
+            """;
+
     private static final String ROUTING = """
             package demo.events;
             public final class Routing {
@@ -98,6 +130,7 @@ class EventMappingProcessorTest {
             """;
 
     private static final String GENERATED_FQCN = "demo.events.topology.GeneratedEventTypeMappings";
+    private static final String TOPOLOGY_FQCN = "demo.events.topology.EventsPublisherTopology";
 
     @Test
     void emitsSortedConfigurationWithResolvedConstantsAndDefaultedArtifactId() {
@@ -167,6 +200,50 @@ class EventMappingProcessorTest {
 
         assertThat(result.resources)
                 .containsEntry(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS, GENERATED_FQCN + "\n");
+        // Only the mapping config self-activates — the topology class is never in imports, and no
+        // second Spring imports resource is created.
+        assertThat(result.resources).containsOnlyKeys(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
+
+        // groupId "events.demo" -> beanPrefix "demo"; shared package "demo.events" -> "EventsPublisherTopology".
+        String topology = result.generated.get(TOPOLOGY_FQCN);
+        assertThat(topology).isNotNull();
+
+        assertThat(topology).contains("package demo.events.topology;");
+        assertThat(topology).contains("import com.example.amqp.topology.DomainExchanges;");
+        assertThat(topology).contains("import com.example.amqp.topology.DomainTopology;");
+        assertThat(topology).contains("import org.springframework.amqp.core.TopicExchange;");
+        assertThat(topology).contains(
+                "import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;");
+        assertThat(topology).contains("import org.springframework.context.annotation.Bean;");
+        assertThat(topology).contains("import org.springframework.context.annotation.Configuration;");
+        assertThat(topology).doesNotContain("import org.springframework.boot.autoconfigure.AutoConfiguration;");
+        assertThat(topology).contains("@Configuration");
+        assertThat(topology).doesNotContain("@AutoConfiguration");
+        assertThat(topology).contains("public class EventsPublisherTopology {");
+        assertThat(topology).contains(
+                "private static final DomainExchanges EX = DomainTopology.of(\"events.demo.exchange\");");
+
+        assertThat(topology).contains("""
+                    @Bean
+                    @ConditionalOnMissingBean(name = "demoExchange")
+                    public TopicExchange demoExchange() {
+                        return EX.main();
+                    }
+                """);
+        assertThat(topology).contains("""
+                    @Bean
+                    @ConditionalOnMissingBean(name = "demoDlx")
+                    public TopicExchange demoDlx() {
+                        return EX.dlx();
+                    }
+                """);
+        assertThat(topology).contains("""
+                    @Bean
+                    @ConditionalOnMissingBean(name = "demoRetryExchange")
+                    public TopicExchange demoRetryExchange() {
+                        return EX.retry();
+                    }
+                """);
     }
 
     @Test
@@ -255,6 +332,107 @@ class EventMappingProcessorTest {
         assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
     }
 
+    @Test
+    void failsOnMixedGroupIdWithinModule() {
+        // A contracts module represents exactly one domain — every event must share one groupId.
+        String eventA = """
+                package demo.events;
+                import com.example.amqp.topology.mapping.EventMapping;
+                @EventMapping(groupId = "events.demo", exchange = "events.demo.exchange", routingKey = "demo.a")
+                public record EventA(String id) {}
+                """;
+        String eventB = """
+                package demo.events;
+                import com.example.amqp.topology.mapping.EventMapping;
+                @EventMapping(groupId = "events.other", exchange = "events.demo.exchange", routingKey = "demo.b")
+                public record EventB(String id) {}
+                """;
+        Result result = compile(
+                source("demo.events.EventA", eventA),
+                source("demo.events.EventB", eventB));
+
+        assertThat(result.ok).isFalse();
+        assertThat(result.errorMessages()).anySatisfy(msg ->
+                assertThat(msg).contains("Mixed @EventMapping.groupId")
+                        .contains("events.demo").contains("events.other")
+                        .contains("EventA").contains("EventB"));
+        assertThat(result.generated).isEmpty();
+        assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
+    }
+
+    @Test
+    void failsOnMixedExchangeWithinModule() {
+        // A contracts module represents exactly one domain — every event must share one exchange.
+        String eventA = """
+                package demo.events;
+                import com.example.amqp.topology.mapping.EventMapping;
+                @EventMapping(groupId = "events.demo", exchange = "events.demo.exchange", routingKey = "demo.a")
+                public record EventA(String id) {}
+                """;
+        String eventB = """
+                package demo.events;
+                import com.example.amqp.topology.mapping.EventMapping;
+                @EventMapping(groupId = "events.demo", exchange = "events.other.exchange", routingKey = "demo.b")
+                public record EventB(String id) {}
+                """;
+        Result result = compile(
+                source("demo.events.EventA", eventA),
+                source("demo.events.EventB", eventB));
+
+        assertThat(result.ok).isFalse();
+        assertThat(result.errorMessages()).anySatisfy(msg ->
+                assertThat(msg).contains("Mixed @EventMapping.exchange")
+                        .contains("events.demo.exchange").contains("events.other.exchange")
+                        .contains("EventA").contains("EventB"));
+        assertThat(result.generated).isEmpty();
+        assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
+    }
+
+    @Test
+    void failsOnGroupIdSegmentThatIsNotAValidJavaIdentifier() {
+        // Final groupId segment "123bad" starts with a digit, so it cannot become a bean-name prefix.
+        String source = """
+                package demo.events;
+                import com.example.amqp.topology.mapping.EventMapping;
+                @EventMapping(groupId = "events.123bad", exchange = "e", routingKey = "r")
+                public record BadGroupSegment(String id) {}
+                """;
+        Result result = compile(source("demo.events.BadGroupSegment", source));
+
+        assertThat(result.ok).isFalse();
+        assertThat(result.errorMessages()).anySatisfy(msg ->
+                assertThat(msg).contains("not a valid Java identifier").contains("123bad"));
+        assertThat(result.generated).isEmpty();
+        assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
+    }
+
+    @Test
+    void failsWhenEventTypesShareNoCommonPackage() {
+        // "alpha" and "beta" share no package prefix at all, so no publisher-topology class name
+        // (and no topology package) can be derived.
+        String eventA = """
+                package alpha;
+                import com.example.amqp.topology.mapping.EventMapping;
+                @EventMapping(groupId = "events.demo", exchange = "events.demo.exchange", routingKey = "demo.a")
+                public record EventA(String id) {}
+                """;
+        String eventB = """
+                package beta;
+                import com.example.amqp.topology.mapping.EventMapping;
+                @EventMapping(groupId = "events.demo", exchange = "events.demo.exchange", routingKey = "demo.b")
+                public record EventB(String id) {}
+                """;
+        Result result = compile(
+                source("alpha.EventA", eventA),
+                source("beta.EventB", eventB));
+
+        assertThat(result.ok).isFalse();
+        assertThat(result.errorMessages()).anySatisfy(msg ->
+                assertThat(msg).contains("share no common package"));
+        assertThat(result.generated).isEmpty();
+        assertThat(result.resources).doesNotContainKey(EventMappingProcessor.AUTO_CONFIGURATION_IMPORTS);
+    }
+
     // ---- in-JVM compilation harness ----
 
     /** The in-memory {@code @EventMapping}/{@code SchemaType} + {@code Mappings}/Spring stand-ins. */
@@ -267,7 +445,11 @@ class EventMappingProcessorTest {
                 source("org.springframework.boot.autoconfigure.AutoConfiguration", AUTO_CONFIGURATION),
                 source("org.springframework.context.annotation.Bean", BEAN),
                 source("org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean",
-                        CONDITIONAL_ON_MISSING_BEAN)));
+                        CONDITIONAL_ON_MISSING_BEAN),
+                source("org.springframework.context.annotation.Configuration", CONFIGURATION),
+                source("org.springframework.amqp.core.TopicExchange", TOPIC_EXCHANGE),
+                source("com.example.amqp.topology.DomainExchanges", DOMAIN_EXCHANGES),
+                source("com.example.amqp.topology.DomainTopology", DOMAIN_TOPOLOGY)));
     }
 
     /**
