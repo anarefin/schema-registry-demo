@@ -22,7 +22,7 @@ import java.util.UUID;
         exchange = CustomerEventRouting.EXCHANGE,
         routingKey = CustomerEventRouting.ADDRESS_ADDED_ROUTING_KEY)
 @JsonClassDescription("Emitted when a customer adds a postal address.")
-public record CustomerAddressAdded(
+public record CustomerAddressAdded (
 
         @NotNull
         @JsonPropertyDescription("Unique identifier of the customer.")
