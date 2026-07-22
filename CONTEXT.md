@@ -35,7 +35,7 @@ account identified by `customerId`.
 
 | Term | Meaning |
 |------|---------|
-| **Contract** | A Maven module (`*-contracts`) holding event records, generated JSON Schemas, routing constants, the domain's **publisher-owned exchange** config (opt-in `*PublisherTopology`, not auto-loaded), and `TypeMapping` wiring (build-generated auto-loaded `GeneratedEventTypeMappings`). Per-service queues/DLQs/retry ladders are **not** declared here — see `ServiceQueueTopologyAutoConfiguration` in `schema-messaging-core`. |
+| **Contract** | A Maven module (`*-contracts`) holding event records, generated JSON Schemas, routing constants, the domain's **publisher-owned exchange** config (build-generated, opt-in `*PublisherTopology` — e.g. `OrdersPublisherTopology` — not auto-loaded), and `TypeMapping` wiring (build-generated auto-loaded `GeneratedEventTypeMappings`). Both are emitted by the same `EventMappingProcessor` pass (ADR-0011); neither has a hand-written source left. Per-service queues/DLQs/retry ladders are **not** declared here — see `ServiceQueueTopologyAutoConfiguration` in `schema-messaging-core`. |
 | **Code-first / source of truth** | The Java **record** (with validation annotations) is authored by developers. The JSON Schema is **generated**, never hand-edited. |
 | **Generated schema** | The committed `*.schema.json` file under `src/main/resources/schemas/`, produced by `schema-gen-tools` from the record via victools. |
 | **`@GenerateSchema`** | Build-time marker on an event record (`event-contract-kit`). `schema-gen-tools` package-scans `target/classes` for this annotation at `generateSchemas`; nested value objects must not carry it. Must be paired with `@EventMapping`. |
@@ -59,10 +59,10 @@ account identified by `customerId`.
 
 | Module | Role |
 |--------|------|
-| `schema-gen-tools` | Build-only. (1) Schema generator (victools): discovers `@GenerateSchema` types via package scan at `generateSchemas`, requires paired `@EventMapping`, writes schemas. (2) `EventMappingProcessor` (APT): reads `@EventMapping` at each contracts module's `compile` and emits the `GeneratedEventTypeMappings` `@AutoConfiguration` + `AutoConfiguration.imports`. Never on service classpath. |
+| `schema-gen-tools` | Build-only. (1) Schema generator (victools): discovers `@GenerateSchema` types via package scan at `generateSchemas`, requires paired `@EventMapping`, writes schemas. (2) `EventMappingProcessor` (APT): reads `@EventMapping` at each contracts module's `compile` and emits **two** sources — the `GeneratedEventTypeMappings` `@AutoConfiguration` + `AutoConfiguration.imports` (auto-loaded), and the opt-in `*PublisherTopology` (e.g. `OrdersPublisherTopology`, never auto-loaded — ADR-0011). Never on service classpath. |
 | `schema-messaging-core` | Domain-agnostic messaging library (converter, `LocalSchemaCatalog`, publisher, DLX/retry routing, `@BitsEventHandler` registration, per-service queue topology via `ServiceQueueTopologyAutoConfiguration`). Owns **per-service queues/DLQs/retry ladders** for handled events; does **not** own domain exchanges. Depends on `event-contract-kit` for `TypeMapping`/`SchemaCoordinates`/`SchemaType`. No mapping discovery of its own. |
 | `event-contract-kit` (formerly `amqp-topology-kit`) | Domain-agnostic AMQP topology-building library (naming conventions, retry-ladder factory) plus `TypeMapping`/`SchemaCoordinates`/`SchemaType`, `@GenerateSchema`, `@EventMapping`, and the `Mappings` builder. Used by both `*-contracts` (exchanges + generated mappings) and `schema-messaging-core` (per-service queues). |
-| `order-contracts` / `customer-contracts` | Event records (`@GenerateSchema` + `@EventMapping`), generated schemas, opt-in publisher-owned **exchange** config (`*PublisherTopology`), and build-generated auto-loaded `GeneratedEventTypeMappings` per domain. |
+| `order-contracts` / `customer-contracts` | Event records (`@GenerateSchema` + `@EventMapping`), generated schemas, build-generated opt-in publisher-owned **exchange** config (`OrdersPublisherTopology` / `CustomersPublisherTopology`), and build-generated auto-loaded `GeneratedEventTypeMappings` per domain — both topology and mapping classes emitted by `EventMappingProcessor` (ADR-0011). |
 | `producer-service` / `consumer-service` | Spring Boot demo apps (:8081 / :8082). |
 
 ## AMQP topology ownership

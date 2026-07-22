@@ -122,36 +122,41 @@ Eight Gradle modules (root = this directory):
   (1) **Schema generator** (victools): each contracts module invokes `SchemaGeneratorCli` via the
   `generateSchemas` Gradle task after `compileJava`, scanning the module's classes for
   `@GenerateSchema`-annotated types and writing into its own `src/main/resources/schemas/`.
-  (2) **Mapping codegen** (`EventMappingProcessor`, a JDK annotation processor on the contracts
-  module's `annotationProcessor` path): reads `@EventMapping` by FQCN at compile and emits one
-  `GeneratedEventTypeMappings` `@AutoConfiguration` of `@Bean TypeMapping` methods plus
-  `AutoConfiguration.imports`, compiled by javac in the same build (no runtime reflection, no
-  `.idx` index — ADR-0011). Dependency-free with respect to every `*-contracts` module. **Never**
-  on service runtime classpath.
+  (2) **Mapping + topology codegen** (`EventMappingProcessor`, a JDK annotation processor on the
+  contracts module's `annotationProcessor` path): reads `@EventMapping` by FQCN at compile and
+  emits **two** generated sources into `<eventPackage>.topology`, both javac-compiled in the same
+  build (no runtime reflection, no `.idx` index — ADR-0011) — `GeneratedEventTypeMappings`, an
+  `@AutoConfiguration` of `@Bean TypeMapping` methods plus `AutoConfiguration.imports` (auto-loads),
+  and `<eventPackageSegment>PublisherTopology` (e.g. `OrdersPublisherTopology`), a plain `@Configuration`
+  of the domain's three exchange `@Bean`s, deliberately **absent** from `AutoConfiguration.imports`
+  (opt-in `@Import` only — see ADR-0008). Both share one fail-fast validation pass: on error,
+  neither is emitted. Dependency-free with respect to every `*-contracts` module. **Never** on
+  service runtime classpath.
 - **`order-contracts`** — four code-first order event records + generated schemas
-  (`com.example.contracts.orders.*`), plus `OrderPublisherTopology` (domain **exchanges**
-  only: main / DLX / retry, delegating to `DomainTopology`) and build-generated
-  `GeneratedEventTypeMappings` (`TypeMapping` `@Bean` methods via `Mappings`, self-activating via
-  processor-emitted `AutoConfiguration.imports`). Exchange ownership follows domain cardinality:
-  only the domain's single publisher declares its exchanges, by `@Import`-ing the **opt-in**
-  `OrderPublisherTopology` (`@Configuration`, deliberately **not** in `AutoConfiguration.imports`) —
-  a contracts jar alone forces no exchanges. That publisher is the **only** role needing
-  `configure`+`write` on the domain's exchanges (the **publisher** half of the least-privilege
-  split; consumers get no exchange `configure` — see ADR-0008). `GeneratedEventTypeMappings`
-  (plain-data beans both roles need) self-activates; there is no hand-written
-  `*TypeMappingAutoConfiguration` wrapper. Depends on Jackson, jakarta.validation-api,
-  `spring-rabbit`, `spring-boot-autoconfigure`, and `event-contract-kit` (plus a test-scope
-  dependency on `schema-gen-tools` for its own determinism test) — **no** dependency on
-  `schema-messaging-core` (machine-enforced).
+  (`com.example.contracts.orders.*`), plus two build-generated sources from the processor pass
+  above: `OrdersPublisherTopology` (domain **exchanges** only: main / DLX / retry, delegating to
+  `DomainTopology`) and `GeneratedEventTypeMappings` (`TypeMapping` `@Bean` methods via `Mappings`,
+  self-activating via processor-emitted `AutoConfiguration.imports`). Exchange ownership follows
+  domain cardinality: only the domain's single publisher declares its exchanges, by `@Import`-ing
+  the **opt-in** `OrdersPublisherTopology` (`@Configuration`, deliberately **not** in
+  `AutoConfiguration.imports`) — a contracts jar alone forces no exchanges. That publisher is the
+  **only** role needing `configure`+`write` on the domain's exchanges (the **publisher** half of
+  the least-privilege split; consumers get no exchange `configure` — see ADR-0008).
+  `GeneratedEventTypeMappings` (plain-data beans both roles need) self-activates; there is no
+  hand-written `*TypeMappingAutoConfiguration` wrapper, and no hand-written topology class either —
+  both generated outputs replace what were formerly hand-written classes. Depends on Jackson,
+  jakarta.validation-api, `spring-rabbit`, `spring-boot-autoconfigure`, and `event-contract-kit`
+  (plus a test-scope dependency on `schema-gen-tools` for its own determinism test) — **no**
+  dependency on `schema-messaging-core` (machine-enforced).
 - **`customer-contracts`** — mirror of `order-contracts` for the three customer events
-  (`com.example.contracts.customers.*`, opt-in `topology.CustomerPublisherTopology` /
-  build-generated auto-loaded `GeneratedEventTypeMappings` — same `DomainTopology`/`Mappings`
-  delegation).
+  (`com.example.contracts.customers.*`, build-generated `topology.CustomersPublisherTopology` +
+  auto-loaded `GeneratedEventTypeMappings` — same `DomainTopology`/`Mappings` delegation).
 - **`producer-service`** / **`consumer-service`** — Spring Boot apps that depend on core +
   both contracts modules. `producer-service` is the sole publisher of both domains and `@Import`s
-  both `*PublisherTopology` classes, declaring all six exchanges at startup; `consumer-service`
-  imports no topology and binds its queues to those publisher-owned exchanges. `TypeMapping` wiring
-  comes from contracts auto-config; per-service queues/DLQs/retry ladders come from core's
+  both generated `*PublisherTopology` classes (`OrdersPublisherTopology`,
+  `CustomersPublisherTopology`), declaring all six exchanges at startup; `consumer-service` imports
+  no topology and binds its queues to those publisher-owned exchanges. `TypeMapping` wiring comes
+  from contracts auto-config; per-service queues/DLQs/retry ladders come from core's
   `ServiceQueueTopologyAutoConfiguration` (nothing declared if the service has no
   `@BitsEventHandler` methods). The consumer listener stack (`rabbitListenerContainerFactory`,
   `BitsEventHandlerRegistrar`, DLX/retry advice) is likewise gated on `@BitsEventHandler` presence
@@ -189,9 +194,9 @@ Supporting pieces in core:
   which event types a service handles (registrar, topology, health indicator all use it).
 - **AMQP topology** — split ownership by role, tracking domain cardinality:
   - `*-contracts`: domain exchanges (`events.{orders,customers}.{exchange,dlx,retry.exchange}`)
-    via the **opt-in** `OrderPublisherTopology` / `CustomerPublisherTopology`, `@Import`-ed only by
-    the domain's single publisher (`producer-service`). Not auto-loaded — a contracts jar alone
-    declares no exchanges.
+    via the **opt-in**, build-generated `OrdersPublisherTopology` / `CustomersPublisherTopology`
+    (ADR-0011), `@Import`-ed only by the domain's single publisher (`producer-service`). Not
+    auto-loaded — a contracts jar alone declares no exchanges.
   - `schema-messaging-core`: per-service queues/DLQs/retry ladders (and their bindings to the
     publisher-owned exchanges) via `ServiceQueueTopologyAutoConfiguration`, built with
     `event-contract-kit`'s `EventTopologyFactory.declarablesForEvent(...)` and `TopologyNaming`.

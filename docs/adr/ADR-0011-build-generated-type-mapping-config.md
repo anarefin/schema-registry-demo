@@ -1,8 +1,8 @@
 # ADR-0011: Build-generated `TypeMapping` config via an annotation processor
 
 **Status:** Accepted  
-**Date:** 2026-07-20  
-**Spec:** `spec/15-build-generated-type-mapping-config.md`  
+**Date:** 2026-07-20 (amended 2026-07-22 — second processor output)  
+**Spec:** `spec/15-build-generated-type-mapping-config.md`, `spec/16-build-generated-publisher-topology.md`  
 **Supersedes (in part):** [ADR-0010](ADR-0010-annotation-driven-event-mappings.md) — the runtime
 index-driven registration (`@RegisterEventMappings` + `EventMappingRegistrar` +
 `IndexedEventMappings` + `EventMappingIndexReader`/`Writer` + `META-INF/event-mappings.idx`)  
@@ -11,7 +11,9 @@ AMQP route; the locked `Introspector.decapitalize(simpleName) + "Mapping"` bean 
 `@ConditionalOnMissingBean(name=…)` app-override-wins; `Mappings` as the sole `TypeMapping`
 construction path; mapping registration never declares an exchange  
 **Does not supersede:** ADR-0007's `DomainTopology` / `Mappings` factories;
-[ADR-0008](ADR-0008-publisher-owned-messaging-topology.md) exchange ownership; ADR-0009 versioning
+[ADR-0008](ADR-0008-publisher-owned-messaging-topology.md) exchange ownership (this ADR now
+generates the class that carries that ownership split — see "Second processor output" below);
+ADR-0009 versioning
 
 ## Context
 
@@ -60,6 +62,44 @@ public TypeMapping orderCreatedMapping() {
 }
 ```
 
+### Second processor output: the generated publisher topology
+
+The same build-time pass also has everything it needs to emit the domain's AMQP **exchanges**
+(main/DLX/retry) — every `@EventMapping` in a module already carries that module's `exchange`, and
+ADR-0008 established that a contracts module represents exactly one domain. So
+`EventMappingProcessor` emits a **second** generated source per module, alongside
+`GeneratedEventTypeMappings`: `<eventPackageSegment>PublisherTopology` (e.g.
+`OrdersPublisherTopology`, `CustomersPublisherTopology` — the capitalized final segment of the
+shared event package, no singularization). It is a plain `@Configuration` declaring three
+`@Bean @ConditionalOnMissingBean(name=…) TopicExchange` methods, named from a separate
+`beanPrefix` (the final segment of `groupId`, e.g. `ordersExchange`/`ordersDlx`/
+`ordersRetryExchange`) and built from `DomainTopology.of(exchange)`, byte-stable and regenerated
+on every compile like its sibling. In this POC `beanPrefix` and `eventPackageSegment` coincide
+(`events.orders` / `com.example.contracts.orders` both end in `orders`), but they are two
+independent derivations — one from `groupId`, one from the event package — that only need to agree
+by convention, not by code.
+
+The two generated outputs have **deliberately different activation rules**, which is the load-bearing
+part of this ADR's amendment:
+
+| Generated class | Activation | Why |
+|---|---|---|
+| `GeneratedEventTypeMappings` | Auto-loaded — the processor also emits `META-INF/spring/…AutoConfiguration.imports` naming it | `TypeMapping` beans are plain data every role (publisher and every consumer) needs; nothing is lost by loading them unconditionally. |
+| `<beanPrefix>PublisherTopology` | **Never** auto-loaded — deliberately absent from `AutoConfiguration.imports`; requires an explicit `@Import(OrdersPublisherTopology.class)` on the domain's single publisher | Declaring an exchange is a broker-mutating `configure` operation (ADR-0008's least-privilege split). Auto-loading it would put exchange declaration back on the classpath-presence trigger ADR-0008 explicitly rejected — any service with the contracts jar, not just the publisher, would declare exchanges. |
+
+Both classes are written by the same `generate()` call and share the same fail-fast validation
+(`perEventValidation()` + `domainValidation()`): on any error, **neither** file is emitted — the
+module's generation is all-or-nothing, so a broken exchange name can't silently ship a working
+`TypeMapping` config with a missing topology class or vice versa. `domainValidation()` additionally
+rejects a module whose `@EventMapping`s carry more than one effective `groupId` or `exchange` (a
+contracts module must represent exactly one domain) and a `groupId`/event-package final segment that
+isn't a legal Java identifier — both needed to derive the publisher-topology bean and class names.
+
+This replaces the hand-written `OrderPublisherTopology` / `CustomerPublisherTopology` classes
+(introduced by ADR-0008) with generated equivalents of the same shape, `@Import`-ed the same way;
+ADR-0008's ownership decision — publisher-owned, opt-in, never auto-loaded — is unchanged, only
+*who writes the source* moved from hand-authoring to codegen.
+
 ### Build-time validation (fail-fast)
 
 The processor fails the build via `Diagnostic.Kind.ERROR` — emitting nothing — on a blank
@@ -69,7 +109,7 @@ duplicate `(groupId, artifactId)` or bean name. JSON Schema generation (`@Genera
 only `.idx` writing is removed. (Processor at `compile` and validator at `process-classes` overlap
 on annotation checks — redundant but both fail-fast, acceptable.)
 
-### Registration wiring
+### Registration wiring (`GeneratedEventTypeMappings` only)
 
 `GeneratedEventTypeMappings` itself is the auto-config entry: the processor annotates it
 `@AutoConfiguration` (not plain `@Configuration`) and emits
@@ -78,7 +118,10 @@ on annotation checks — redundant but both fail-fast, acceptable.)
 wrapper and no committed `.imports` resource — both are build output. On validation failure the
 processor emits neither source nor imports. A same-compilation forward reference to a generated
 type is the standard MapStruct/Dagger pattern — javac's multi-round processing compiles the
-generated class first; works in Maven and in IDEs with annotation processing enabled.
+generated class first; works with annotation processing enabled in the build and in IDEs.
+
+The sibling `<beanPrefix>PublisherTopology` is **not** named in this `.imports` file — see
+"Second processor output" above for why its activation is opt-in `@Import` only.
 
 ### Build wiring
 
@@ -134,6 +177,10 @@ consumer. If registration is compiled, the index has no reader — remove it.
   compile**, earlier than the old startup abort, before a broken jar ships.
 - **Positive:** New-event onboarding is unchanged for authors — annotate the record + build +
   commit the generated schema; **no** mapping `@Bean` (the codegen writes it).
+- **Positive:** The hand-written `OrderPublisherTopology` / `CustomerPublisherTopology` classes
+  (ADR-0008) are gone — the same processor pass now generates them from the same `@EventMapping`
+  data, so exchange name, DLX name, and retry-exchange name can never drift from the mapping's
+  `exchange` value within a module.
 - **Neutral:** `schema-messaging-core` unchanged for mapping discovery (still injects
   `List<TypeMapping>`); `@EventMapping` semantics, bean names, coordinates, routing, exchanges, and
   app-override-wins are all preserved from ADR-0010.

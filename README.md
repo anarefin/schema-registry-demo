@@ -311,8 +311,9 @@ Adopters building their own services (not just this POC's producer/consumer) sho
    generated config uses — its method is `@ConditionalOnMissingBean(name=…)`); that is a different
    knob from include/exclude.
 3. **Publishers:** no handlers → all classpath mappings stay registered (whole domain). Opt into
-   exchanges with `@Import(OrderPublisherTopology.class)` (etc.) — **one publisher per domain**.
-   Fat-jar producers that publish a subset can set `events.mappings.include=...`.
+   exchanges with `@Import(OrdersPublisherTopology.class)` (etc. — build-generated, see "Adding a
+   new event" below) — **one publisher per domain**. Fat-jar producers that publish a subset can
+   set `events.mappings.include=...`.
 
 See [docs/TUTORIAL.md](docs/TUTORIAL.md) for the end-to-end walkthrough.
 
@@ -335,8 +336,11 @@ No mapping `@Bean` method. Annotation-driven, build-generated (see
 4. **Commit the generated schema** under `src/main/resources/schemas/`. The generated mapping
    config is build output (compiled into the jar) — nothing else to commit.
 5. **Consumer:** add a `@BitsEventHandler` method; the per-service queue/DLQ/retry ladder appears
-   automatically. **Publisher:** if the exchange group is new, add three exchange beans to the
-   domain's opt-in `*PublisherTopology` and `@Import` it from the sole publisher (ADR-0008).
+   automatically. **Publisher:** nothing to add by hand — the same build regenerates the domain's
+   opt-in `*PublisherTopology` (e.g. `OrdersPublisherTopology`) from the module's `@EventMapping`
+   exchange, and it stays `@Import`-ed from the sole publisher (ADR-0008, ADR-0011). Only a
+   genuinely new domain (a new `*-contracts` module with its own `exchange`) needs a new
+   `@Import` line in `producer-service`.
 
 The build fails at the module's `compile` on blank required annotation attributes, a non-JSON
 `schemaType`, or within-module duplicate coordinates/bean names. At startup, `TypeMappingRegistry`
