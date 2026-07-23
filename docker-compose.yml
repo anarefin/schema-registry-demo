@@ -99,6 +99,12 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      # Consumer binds its per-service queues to producer-owned exchanges at startup; those
+      # bindings are a one-shot best-effort declare (ignoreDeclarationExceptions=true just
+      # suppresses/logs a 404, it does not retry), so the consumer must not race the producer
+      # for exchange existence on a cold `docker compose up` or every binding silently fails.
+      producer-service:
+        condition: service_healthy
     environment:
       RABBITMQ_HOST: rabbitmq
     ports:

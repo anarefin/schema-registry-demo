@@ -61,9 +61,16 @@ public class SchemaMessagingConsumerAutoConfiguration {
     @ConditionalOnMissingBean(AmqpAdmin.class)
     public RabbitAdmin rabbitAdmin(ConnectionFactory connectionFactory, ApplicationContext applicationContext) {
         RabbitAdmin rabbitAdmin = new RabbitAdmin(connectionFactory);
-        // Consumers that boot before the publisher need ignore=true so bindings to not-yet-declared
-        // exchanges self-heal on reconnect. Producers must fail fast on exchange declare failures —
-        // only enable ignore when this app has @BitsEventHandler methods.
+        // ignore=true keeps a consumer that boots before the publisher from aborting context
+        // refresh on a 404 (exchange not yet declared) — it logs and continues instead of failing
+        // fast. This is NOT automatic self-healing: ServiceQueueTopologyAutoConfiguration declares
+        // queues/bindings imperatively (not as ApplicationContext Declarable beans), so Spring
+        // AMQP's redeclare-on-reconnect never covers them, and a suppressed 404 is never retried.
+        // A consumer that truly boots before its publisher has exchanges needs an explicit restart
+        // (or start-order dependency, e.g. docker-compose `depends_on: producer: service_healthy`)
+        // once the publisher is up — see the same fix in docker-compose.yml.
+        // Producers must fail fast on exchange declare failures — only enable ignore when this app
+        // has @BitsEventHandler methods.
         if (!BitsEventHandlerScanner.discoverHandledJavaTypes(applicationContext).isEmpty()) {
             rabbitAdmin.setIgnoreDeclarationExceptions(true);
         }
