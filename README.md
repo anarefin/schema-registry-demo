@@ -485,6 +485,6 @@ docker compose up --build                          # producer :8081, consumer :8
 
 ## Build system
 
-Gradle (Groovy DSL + Wrapper 9.2.1). Schema governance uses custom `buildSrc` tasks calling
+Gradle (Groovy DSL + Wrapper 9.2.1). Schema governance uses custom `build-logic` tasks calling
 Apicurio Registry Core API v3 (`registerSchemas`, `compatCheckSchemas`, `incompatibleDemo`).
 Artifact coordinates live in each `*-contracts/apicurio-artifacts.json`.

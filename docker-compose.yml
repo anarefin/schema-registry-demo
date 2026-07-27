@@ -121,7 +121,7 @@ services:
   #   ./gradlew registerSchemas -Papicurio.registry.url=http://localhost:8080
   # then POST the COMPATIBILITY rules — FORWARD for all seven artifacts
   # (JSON property additions only validate under FORWARD; see README §2) — or run the
-  # "Schema Governance Bootstrap" GitHub workflow. Registration uses buildSrc Apicurio
+  # "Schema Governance Bootstrap" GitHub workflow. Registration uses build-logic Apicurio
   # Registry v3 REST tasks — no separate registry client container is needed.
 
 # Named volume backing the standing Apicurio registry's Postgres data. Survives

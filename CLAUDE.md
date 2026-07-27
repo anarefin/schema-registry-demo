@@ -45,7 +45,7 @@ The build uses the **committed Gradle Wrapper** (`./gradlew`) — always prefer 
 ./gradlew :order-contracts:generateSchemas :customer-contracts:generateSchemas
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'
 
-# Schema governance (buildSrc Apicurio Registry v3 REST; requires a running registry)
+# Schema governance (build-logic Apicurio Registry v3 REST; requires a running registry)
 ./gradlew registerSchemas -Papicurio.registry.url=http://localhost:8080
 
 # CI merge gate — fails on incompatible schema changes (all contract modules)
@@ -88,7 +88,7 @@ Run a single test class/method with Gradle test filters, e.g.
   must never depend on a contracts module. It **does** legitimately depend on `event-contract-kit`
   (`api`) for shared `TypeMapping`/`SchemaCoordinates`/`SchemaType` types. `*-contracts ↛ core`
   and kit leaf bans are enforced the same way.
-- **Gradle is the POC build.** Schema registration/compat-gating use custom `buildSrc` tasks that
+- **Gradle is the POC build.** Schema registration/compat-gating use custom `build-logic` tasks that
   call Apicurio Registry Core API v3 (register = `FIND_OR_CREATE_VERSION` + `canonical=true`;
   compat = dry-run version create — never `FIND_OR_CREATE_VERSION`+`dryRun` together). Artifact
   coordinates live in each `*-contracts/apicurio-artifacts.json` (also consumed by CI discovery).
