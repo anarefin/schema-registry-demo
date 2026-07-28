@@ -91,7 +91,17 @@ class ConsumerListenerGatingTest {
                 ReflectionTestUtils.getField(admin, "ignoreDeclarationExceptions"));
     }
 
-    record TestEvent(String id) {}
+    static final class TestEvent {
+        private final String id;
+
+        TestEvent(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     static class ConsumerWithHandler {
         @BitsEventHandler

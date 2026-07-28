@@ -24,7 +24,17 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class EventPublisherTest {
 
-    record Order(String id) {}
+    static final class Order {
+        private final String id;
+
+        Order(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     @Mock private RabbitTemplate rabbitTemplate;
     @Mock private SchemaAwareMessageConverter messageConverter;

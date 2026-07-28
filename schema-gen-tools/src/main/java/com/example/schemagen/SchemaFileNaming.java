@@ -3,7 +3,7 @@ package com.example.schemagen;
 import java.util.Locale;
 
 /**
- * Converts an event record's simple class name into the committed schema filename, e.g.
+ * Converts an event class's simple name into the committed schema filename, e.g.
  * {@code OrderCreated} -&gt; {@code order-created.schema.json}.
  *
  * <p>This algorithm must stay byte-identical to

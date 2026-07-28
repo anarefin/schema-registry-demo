@@ -21,7 +21,17 @@ import static org.mockito.Mockito.when;
 
 class BitsEventHandlerScannerTest {
 
-    record DemoEvent(String id) {}
+    static final class DemoEvent {
+        private final String id;
+
+        DemoEvent(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     interface HandlerApi {
         void onDemo(DemoEvent event);

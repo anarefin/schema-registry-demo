@@ -10,4 +10,15 @@ import com.example.amqp.topology.mapping.GenerateSchema;
         exchange = "events.widgets.exchange",
         routingKey = "widgets.one",
         artifactId = "WidgetOne")
-public record Widget(String id) {}
+public final class Widget {
+
+    private final String id;
+
+    public Widget(String id) {
+        this.id = id;
+    }
+
+    public String getId() {
+        return id;
+    }
+}

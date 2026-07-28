@@ -56,13 +56,13 @@ public class SchemaAwareMessageConverter implements MessageConverter {
         // that strategy must be able to eagerly prepare (e.g. compile) its schema content —
         // catching a missing or malformed schema at startup rather than on the first message.
         typeMappingRegistry.all().forEach(mapping -> {
-            SerializationStrategy strategy = this.strategies.get(mapping.schemaType());
+            SerializationStrategy strategy = this.strategies.get(mapping.getSchemaType());
             if (strategy == null) {
                 throw new IllegalStateException(
-                        "No SerializationStrategy registered for SchemaType." + mapping.schemaType()
-                        + " (required by TypeMapping for " + mapping.javaType().getName() + ")");
+                        "No SerializationStrategy registered for SchemaType." + mapping.getSchemaType()
+                        + " (required by TypeMapping for " + mapping.getJavaType().getName() + ")");
             }
-            strategy.warm(localSchemaCatalog.get(mapping.coordinates()));
+            strategy.warm(localSchemaCatalog.get(mapping.getCoordinates()));
         });
     }
 
@@ -76,8 +76,8 @@ public class SchemaAwareMessageConverter implements MessageConverter {
                 .orElseThrow(() -> new MessageConversionException(
                         "No TypeMapping registered for " + type.getName()));
 
-        ResolvedSchema schema = localSchemaCatalog.get(mapping.coordinates());
-        SerializationStrategy strategy = strategyFor(mapping.schemaType());
+        ResolvedSchema schema = localSchemaCatalog.get(mapping.getCoordinates());
+        SerializationStrategy strategy = strategyFor(mapping.getSchemaType());
 
         byte[] bytes;
         try {
@@ -89,11 +89,11 @@ public class SchemaAwareMessageConverter implements MessageConverter {
         }
 
         ensureCorrelationId(messageProperties);
-        SchemaMessageHeaders.setSchemaHeaders(messageProperties, mapping.coordinates(),
-                mapping.schemaType(), strategy.contentType());
+        SchemaMessageHeaders.setSchemaHeaders(messageProperties, mapping.getCoordinates(),
+                mapping.getSchemaType(), strategy.contentType());
 
         log.info("Serialized {} to {} bytes [coordinates={}, routingKey={}]",
-                type.getSimpleName(), bytes.length, mapping.coordinates(), mapping.routingKey());
+                type.getSimpleName(), bytes.length, mapping.getCoordinates(), mapping.getRoutingKey());
         return new Message(bytes, messageProperties);
     }
 
@@ -118,25 +118,25 @@ public class SchemaAwareMessageConverter implements MessageConverter {
                 .findByGroupAndArtifact(groupId, artifactId)
                 .orElseThrow(() -> new UnknownSchemaArtifactException(groupId, artifactId));
 
-        if (!headerTypeName.equalsIgnoreCase(mapping.schemaType().name())) {
+        if (!headerTypeName.equalsIgnoreCase(mapping.getSchemaType().name())) {
             throw new IncompatibleSchemaTypeException(
-                    mapping.schemaType().name(), headerTypeName,
+                    mapping.getSchemaType().name(), headerTypeName,
                     groupId + ":" + artifactId);
         }
 
-        ResolvedSchema schema = localSchemaCatalog.get(mapping.coordinates());
-        SerializationStrategy strategy = strategyFor(mapping.schemaType());
+        ResolvedSchema schema = localSchemaCatalog.get(mapping.getCoordinates());
+        SerializationStrategy strategy = strategyFor(mapping.getSchemaType());
 
         byte[] body = message.getBody();
         try {
-            Object result = strategy.deserialize(body, mapping.javaType(), schema);
+            Object result = strategy.deserialize(body, mapping.getJavaType(), schema);
             log.debug("Deserialized {} bytes → {} [coordinates={}]",
-                    body.length, mapping.javaType().getSimpleName(), mapping.coordinates());
+                    body.length, mapping.getJavaType().getSimpleName(), mapping.getCoordinates());
             return result;
         } catch (SchemaMessagingException e) {
             throw e;
         } catch (Exception e) {
-            throw new DeserializationException(mapping.javaType().getSimpleName(), e);
+            throw new DeserializationException(mapping.getJavaType().getSimpleName(), e);
         }
     }
 

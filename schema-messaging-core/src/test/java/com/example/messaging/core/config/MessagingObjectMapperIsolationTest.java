@@ -5,6 +5,8 @@ import com.example.amqp.topology.mapping.SchemaType;
 import com.example.amqp.topology.mapping.TypeMapping;
 import com.example.messaging.core.converter.SchemaAwareMessageConverter;
 import com.example.messaging.core.converter.SchemaMessageHeaders;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
@@ -16,6 +18,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -36,7 +39,34 @@ class MessagingObjectMapperIsolationTest {
             "test.fixture",
             "events.test.exchange");
 
-    record FixtureEvent(String id) {}
+    static final class FixtureEvent {
+        private final String id;
+
+        @JsonCreator
+        FixtureEvent(@JsonProperty("id") String id) {
+            this.id = id;
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof FixtureEvent other)) {
+                return false;
+            }
+            return Objects.equals(id, other.id);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(id);
+        }
+    }
 
     private static ObjectMapper strictAppObjectMapper() {
         ObjectMapper mapper = new ObjectMapper();

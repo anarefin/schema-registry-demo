@@ -22,7 +22,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrderContractsSchemaDeterminismTest {
 
     /** (event type -> committed schema file), mirroring this module's exec-maven-plugin arguments. */
-    private record Target(Class<?> eventType, String relativePath) {}
+    private static final class Target {
+        private final Class<?> eventType;
+        private final String relativePath;
+
+        Target(Class<?> eventType, String relativePath) {
+            this.eventType = eventType;
+            this.relativePath = relativePath;
+        }
+
+        Class<?> getEventType() {
+            return eventType;
+        }
+
+        String getRelativePath() {
+            return relativePath;
+        }
+
+        @Override
+        public String toString() {
+            return eventType.getSimpleName();
+        }
+    }
 
     static List<Target> targets() {
         return List.of(
@@ -35,18 +56,18 @@ class OrderContractsSchemaDeterminismTest {
     @ParameterizedTest(name = "generation is byte-stable: {0}")
     @MethodSource("targets")
     void generatingTwiceProducesByteIdenticalOutput(Target target) {
-        String first = SchemaGenerator.generate(target.eventType());
-        String second = SchemaGenerator.generate(target.eventType());
+        String first = SchemaGenerator.generate(target.getEventType());
+        String second = SchemaGenerator.generate(target.getEventType());
         assertThat(second)
-                .as("Non-deterministic generation for %s", target.eventType().getSimpleName())
+                .as("Non-deterministic generation for %s", target.getEventType().getSimpleName())
                 .isEqualTo(first);
     }
 
     @ParameterizedTest(name = "committed file matches fresh generation: {0}")
     @MethodSource("targets")
     void committedFileMatchesFreshGeneration(Target target) throws IOException {
-        String fresh = SchemaGenerator.generate(target.eventType());
-        Path committed = Paths.get(target.relativePath());
+        String fresh = SchemaGenerator.generate(target.getEventType());
+        Path committed = Paths.get(target.getRelativePath());
         String onDisk = Files.readString(committed, StandardCharsets.UTF_8);
         assertThat(fresh)
                 .as("Committed schema %s differs from fresh generation — run "

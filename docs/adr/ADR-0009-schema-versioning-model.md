@@ -90,7 +90,7 @@ misdescribing itself.
 | **Governance** | version state | Drift telemetry → evidence → safe `DEPRECATED` flip |
 
 **Authoring.** No version attribute on `@GenerateSchema`. Field deprecation is a convention:
-`@Deprecated` on a record component, surfaced through the generator's `description`. The standard
+`@Deprecated` on a field, surfaced through the generator's `description`. The standard
 `deprecated` keyword is unavailable — it arrived in JSON Schema 2019-09, and the draft is pinned to
 Draft-07 because Apicurio 3.2.0's everit checker HTTP-500s on 2020-12, which would disable the
 FORWARD gate entirely

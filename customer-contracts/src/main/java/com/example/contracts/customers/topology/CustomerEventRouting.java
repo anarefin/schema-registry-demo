@@ -6,7 +6,7 @@ import com.example.amqp.topology.TopologyNaming;
  * AMQP routing constants for the three customer events (spec §9/§10.4, code-first D3).
  *
  * <p>Plain {@code String} constants only — no Spring dependency — so the poison demo and
- * {@code @EventMapping} on customer event records can reference them as compile-time constants.
+ * {@code @EventMapping} on customer event classes can reference them as compile-time constants.
  * Queue names are no longer declared here — listeners resolve them internally via
  * {@code @BitsEventHandler} from the routing key below (spec
  * {@code simplified-publish-and-listen.md} D4). The domain exchanges are declared by the opt-in,

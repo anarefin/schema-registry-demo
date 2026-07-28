@@ -20,6 +20,7 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 
 import java.util.List;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,7 +46,38 @@ class SchemaAwareMessageConverterTest {
             new ResolvedSchema(COORDS, SchemaType.JSON, "{}".getBytes());
 
     // A minimal stand-in for a domain object
-    record Order(String id) {}
+    static final class Order {
+        private final String id;
+
+        Order(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Order other)) {
+                return false;
+            }
+            return Objects.equals(id, other.id);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(id);
+        }
+
+        @Override
+        public String toString() {
+            return "Order[id=" + id + "]";
+        }
+    }
 
     @BeforeEach
     void setUp() {

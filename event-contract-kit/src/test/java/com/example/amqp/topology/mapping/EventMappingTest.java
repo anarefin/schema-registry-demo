@@ -17,7 +17,9 @@ class EventMappingTest {
             groupId = "events.orders",
             exchange = "events.orders.exchange",
             routingKey = "orders.created")
-    record SampleWithDefaults() {}
+    static final class SampleWithDefaults {
+        private SampleWithDefaults() {}
+    }
 
     @EventMapping(
             groupId = "events.customers",
@@ -25,7 +27,9 @@ class EventMappingTest {
             routingKey = "customers.registered",
             artifactId = "CustomArtifact",
             schemaType = SchemaType.JSON)
-    record SampleWithExplicitValues() {}
+    static final class SampleWithExplicitValues {
+        private SampleWithExplicitValues() {}
+    }
 
     @Test
     void defaultsArtifactIdToEmptyAndSchemaTypeToJson() {

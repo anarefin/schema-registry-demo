@@ -68,14 +68,14 @@ class OrderFulfilledIT {
                 verify(orderEventListener).onOrderFulfilled(captor.capture()));
 
         OrderFulfilled received = captor.getValue();
-        assertThat(received.orderId()).isEqualTo(event.orderId());
-        assertThat(received.buyer().email()).isEqualTo("buyer@example.com");
-        assertThat(received.buyer().displayName()).isEqualTo("Jane Doe");
-        assertThat(received.shipping().city()).isEqualTo("London");
-        assertThat(received.shipping().countryCode()).isEqualTo("GB");
-        assertThat(received.payment().method()).isEqualTo("CARD");
-        assertThat(received.payment().amount()).isEqualByComparingTo("149.99");
-        assertThat(received.payment().currency()).isEqualTo("GBP");
+        assertThat(received.getOrderId()).isEqualTo(event.getOrderId());
+        assertThat(received.getBuyer().getEmail()).isEqualTo("buyer@example.com");
+        assertThat(received.getBuyer().getDisplayName()).isEqualTo("Jane Doe");
+        assertThat(received.getShipping().getCity()).isEqualTo("London");
+        assertThat(received.getShipping().getCountryCode()).isEqualTo("GB");
+        assertThat(received.getPayment().getMethod()).isEqualTo("CARD");
+        assertThat(received.getPayment().getAmount()).isEqualByComparingTo("149.99");
+        assertThat(received.getPayment().getCurrency()).isEqualTo("GBP");
     }
 
     @Test
@@ -112,10 +112,10 @@ class OrderFulfilledIT {
 
         assertThat(result).isInstanceOf(OrderFulfilled.class);
         OrderFulfilled parsed = (OrderFulfilled) result;
-        assertThat(parsed.orderId()).isEqualTo(original.orderId());
-        assertThat(parsed.buyer().customerId()).isEqualTo(original.buyer().customerId());
-        assertThat(parsed.shipping().line1()).isEqualTo("221B Baker Street");
-        assertThat(parsed.payment().method()).isEqualTo("CARD");
+        assertThat(parsed.getOrderId()).isEqualTo(original.getOrderId());
+        assertThat(parsed.getBuyer().getCustomerId()).isEqualTo(original.getBuyer().getCustomerId());
+        assertThat(parsed.getShipping().getLine1()).isEqualTo("221B Baker Street");
+        assertThat(parsed.getPayment().getMethod()).isEqualTo("CARD");
     }
 
     private static OrderFulfilled buildEvent() {

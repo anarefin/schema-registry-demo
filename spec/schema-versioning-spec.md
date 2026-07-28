@@ -12,14 +12,14 @@ Harden the existing split so it is production-safe:
 |---------|--------|-----------|
 | Schema **versioning** | Apicurio | Auto integer versions on content change; `FIND_OR_CREATE_VERSION` + canonicalize |
 | Schema **governance** | Apicurio + CI | FORWARD rule; register + compat-check merge gate; optional version state `DEPRECATED` |
-| Schema **authoring** | Domain contracts | Java records / POJOs + `@GenerateSchema` |
+| Schema **authoring** | Domain contracts | Immutable Java classes + `@GenerateSchema` |
 | Schema **artifact** | Generated JSON Schema in `*-contracts` jar | `schema-gen-tools` at `generateSchemas` |
 | Runtime **validation** | Classpath only | `LocalSchemaCatalog` + converter; **no Apicurio call at runtime** |
 
 ### Locked decisions
 
 - **Apicurio** = versioning + governance (CI only).
-- **Domain contracts JSON Schema** (generated from Java records) = runtime validation.
+- **Domain contracts JSON Schema** (generated from immutable Java classes) = runtime validation.
 - **No wire hash required** for correctness.
 - **No runtime Apicurio client.**
 - **Tier 1 only:** compatible evolution via expand/contract. Breaking change = new artifact (Phase 4), never same-artifact major under FORWARD.
@@ -40,7 +40,7 @@ Harden the existing split so it is production-safe:
 ```mermaid
 flowchart TB
   subgraph ci [Build and CI]
-    record[Java record] --> gen[schema-gen-tools]
+    eventClass[Immutable event class] --> gen[schema-gen-tools]
     gen --> schema[JSON Schema in contracts jar]
     schema --> drift[git diff drift gate]
     schema --> reg[Apicurio register canonicalize]
@@ -65,12 +65,10 @@ flowchart TB
 Today [`OrderCreated.java`](../order-contracts/src/main/java/com/example/contracts/orders/OrderCreated.java) has required business fields only. Change:
 
 ```java
-public record OrderCreated(
-    String orderId,
-    String customerId,
+public final class OrderCreated {
     // ... existing fields ...
-    String priority  // NEW — optional in JSON Schema terms: not in "required" array
-) {}
+    private final String priority;  // NEW — optional in JSON Schema terms: not in "required" array
+}
 ```
 
 - Regenerate: `./gradlew -pl order-contracts -am generateSchemas`

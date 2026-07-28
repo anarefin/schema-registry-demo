@@ -19,7 +19,17 @@ import static org.mockito.Mockito.when;
 
 class HandledEventTypesCacheTest {
 
-    record DemoEvent(String id) {}
+    static final class DemoEvent {
+        private final String id;
+
+        DemoEvent(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     static class Handler {
         @BitsEventHandler

@@ -20,7 +20,7 @@ semantics; [ADR-0008](ADR-0008-publisher-owned-messaging-topology.md) exchange o
 > [ADR-0011](ADR-0011-build-generated-type-mapping-config.md). No `META-INF/event-mappings.idx` is
 > written or read anywhere, and `@RegisterEventMappings` / `EventMappingRegistrar` /
 > `IndexedEventMappings` no longer exist. Read those two sections as history; everything else
-> (`@EventMapping` on the record, locked bean names, `@ConditionalOnMissingBean` override,
+> (`@EventMapping` on the event class, locked bean names, `@ConditionalOnMissingBean` override,
 > `Mappings` as the sole construction path, the two-knobs and exact-package notes) still holds.
 
 ## Context
@@ -28,7 +28,7 @@ semantics; [ADR-0008](ADR-0008-publisher-owned-messaging-topology.md) exchange o
 ADR-0007 reduced each contracts module's mapping wiring to one-line `@Bean` delegations through
 `Mappings.forDomain(...).json(...)`. That removed copy-paste inside each method body, but every
 new event still needed a hand-written `@Bean("…Mapping")` + `@ConditionalOnMissingBean` method —
-schema identity and AMQP route lived next to the record in spirit, yet were authored twice (record
+schema identity and AMQP route lived next to the event class in spirit, yet were authored twice (event class
 fields in one file; mapping coordinates in auto-config).
 
 Schema generation already had a build-time discovery path (`@GenerateSchema` + `schema-gen-tools`
@@ -41,9 +41,9 @@ failures non-deterministic across jars, and blur the build-time / runtime bounda
 
 ## Decision
 
-### Declarative metadata on the event record
+### Declarative metadata on the event class
 
-Each code-first event record carries both annotations:
+Each code-first event class carries both annotations:
 
 ```java
 @GenerateSchema
@@ -51,7 +51,7 @@ Each code-first event record carries both annotations:
         groupId = "events.orders",
         exchange = OrderEventRouting.EXCHANGE,
         routingKey = OrderEventRouting.CREATED_ROUTING_KEY)
-public record OrderCreated(...) {}
+public final class OrderCreated { ... }
 ```
 
 `@EventMapping` (in `event-contract-kit`) holds schema identity and AMQP route only. Empty
@@ -82,7 +82,7 @@ Index rules:
 | Packaging | The contracts jar must contain the index; IT/package asserts this |
 
 Build fails on unpaired annotations, blank required attributes, unsupported type shapes (nested,
-non-record, non-public, etc.), duplicate Java types, duplicate effective `(groupId, artifactId)`
+Java record type, non-public, etc.), duplicate Java types, duplicate effective `(groupId, artifactId)`
 within a module, or deterministic bean-name collisions within a module.
 
 ### Runtime registration from the index — SUPERSEDED by ADR-0011
@@ -107,7 +107,7 @@ registrar:
 2. Validates globally (annotation/index mismatch, duplicate coordinates across jars, bean-name
    collisions across jars) before filtering.
 3. Keeps only types whose `class.getPackageName()` **equals** the imported package (exact match —
-   not `startsWith`). Event records must stay in that package.
+   not `startsWith`). Event classes must stay in that package.
 4. Builds each `TypeMapping` **only** via `Mappings.forDomain(...).json(...)`.
 5. Registers bean name `Introspector.decapitalize(simpleName) + "Mapping"` (e.g.
    `OrderCreated` → `orderCreatedMapping`), **skipping** when
@@ -127,8 +127,8 @@ Mapping registration never declares exchanges. `schema-messaging-core` still inj
 ### Exact-package invariant
 
 `@RegisterEventMappings("com.example.contracts.orders")` registers only types in that exact
-package. A record in `…orders.nested` is invisible to the orders auto-config. Keep domain event
-records in the package named by the domain's `@RegisterEventMappings`.
+package. An event class in `…orders.nested` is invisible to the orders auto-config. Keep domain event
+classes in the package named by the domain's `@RegisterEventMappings`.
 
 ## Rejected alternatives
 

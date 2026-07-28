@@ -103,7 +103,19 @@ class EventMappingProcessorTest {
     private static final String DOMAIN_EXCHANGES = """
             package com.example.amqp.topology;
             import org.springframework.amqp.core.TopicExchange;
-            public record DomainExchanges(TopicExchange main, TopicExchange dlx, TopicExchange retry) {}
+            public final class DomainExchanges {
+                private final TopicExchange main;
+                private final TopicExchange dlx;
+                private final TopicExchange retry;
+                public DomainExchanges(TopicExchange main, TopicExchange dlx, TopicExchange retry) {
+                    this.main = main;
+                    this.dlx = dlx;
+                    this.retry = retry;
+                }
+                public TopicExchange getMain() { return main; }
+                public TopicExchange getDlx() { return dlx; }
+                public TopicExchange getRetry() { return retry; }
+            }
             """;
 
     private static final String DOMAIN_TOPOLOGY = """
@@ -142,7 +154,11 @@ class EventMappingProcessorTest {
                 @EventMapping(groupId = "events.demo",
                         exchange = Routing.EXCHANGE,
                         routingKey = Routing.CREATED_ROUTING_KEY)
-                public record OrderCreated(String id) {}
+                public final class OrderCreated {
+                    private final String id;
+                    public OrderCreated(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         String orderShipped = """
                 package demo.events;
@@ -151,7 +167,11 @@ class EventMappingProcessorTest {
                         exchange = "events.demo.exchange",
                         routingKey = "demo.shipped",
                         artifactId = "OrderShippedV1")
-                public record OrderShipped(String id) {}
+                public final class OrderShipped {
+                    private final String id;
+                    public OrderShipped(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
 
         Result result = compile(
@@ -227,21 +247,21 @@ class EventMappingProcessorTest {
                     @Bean
                     @ConditionalOnMissingBean(name = "demoExchange")
                     public TopicExchange demoExchange() {
-                        return EX.main();
+                        return EX.getMain();
                     }
                 """);
         assertThat(topology).contains("""
                     @Bean
                     @ConditionalOnMissingBean(name = "demoDlx")
                     public TopicExchange demoDlx() {
-                        return EX.dlx();
+                        return EX.getDlx();
                     }
                 """);
         assertThat(topology).contains("""
                     @Bean
                     @ConditionalOnMissingBean(name = "demoRetryExchange")
                     public TopicExchange demoRetryExchange() {
-                        return EX.retry();
+                        return EX.getRetry();
                     }
                 """);
     }
@@ -252,7 +272,11 @@ class EventMappingProcessorTest {
                 package demo.events;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "", exchange = "e", routingKey = "r")
-                public record BlankGroup(String id) {}
+                public final class BlankGroup {
+                    private final String id;
+                    public BlankGroup(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         Result result = compile(source("demo.events.BlankGroup", source));
 
@@ -271,7 +295,11 @@ class EventMappingProcessorTest {
                 import com.example.amqp.topology.mapping.SchemaType;
                 @EventMapping(groupId = "g", exchange = "e", routingKey = "r",
                         schemaType = SchemaType.AVRO)
-                public record AvroEvent(String id) {}
+                public final class AvroEvent {
+                    private final String id;
+                    public AvroEvent(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         Result result = compile(source("demo.events.AvroEvent", source));
 
@@ -288,13 +316,21 @@ class EventMappingProcessorTest {
                 package demo.events;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "g", exchange = "e", routingKey = "r1", artifactId = "Same")
-                public record DupA(String id) {}
+                public final class DupA {
+                    private final String id;
+                    public DupA(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         String dupB = """
                 package demo.events;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "g", exchange = "e", routingKey = "r2", artifactId = "Same")
-                public record DupB(String id) {}
+                public final class DupB {
+                    private final String id;
+                    public DupB(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         Result result = compile(
                 source("demo.events.DupA", dupA),
@@ -314,13 +350,21 @@ class EventMappingProcessorTest {
                 package demo.events.a;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "g.a", exchange = "e", routingKey = "r")
-                public record Widget(String id) {}
+                public final class Widget {
+                    private final String id;
+                    public Widget(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         String widgetB = """
                 package demo.events.b;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "g.b", exchange = "e", routingKey = "r")
-                public record Widget(String id) {}
+                public final class Widget {
+                    private final String id;
+                    public Widget(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         Result result = compile(
                 source("demo.events.a.Widget", widgetA),
@@ -339,13 +383,21 @@ class EventMappingProcessorTest {
                 package demo.events;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "events.demo", exchange = "events.demo.exchange", routingKey = "demo.a")
-                public record EventA(String id) {}
+                public final class EventA {
+                    private final String id;
+                    public EventA(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         String eventB = """
                 package demo.events;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "events.other", exchange = "events.demo.exchange", routingKey = "demo.b")
-                public record EventB(String id) {}
+                public final class EventB {
+                    private final String id;
+                    public EventB(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         Result result = compile(
                 source("demo.events.EventA", eventA),
@@ -367,13 +419,21 @@ class EventMappingProcessorTest {
                 package demo.events;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "events.demo", exchange = "events.demo.exchange", routingKey = "demo.a")
-                public record EventA(String id) {}
+                public final class EventA {
+                    private final String id;
+                    public EventA(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         String eventB = """
                 package demo.events;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "events.demo", exchange = "events.other.exchange", routingKey = "demo.b")
-                public record EventB(String id) {}
+                public final class EventB {
+                    private final String id;
+                    public EventB(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         Result result = compile(
                 source("demo.events.EventA", eventA),
@@ -395,7 +455,11 @@ class EventMappingProcessorTest {
                 package demo.events;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "events.123bad", exchange = "e", routingKey = "r")
-                public record BadGroupSegment(String id) {}
+                public final class BadGroupSegment {
+                    private final String id;
+                    public BadGroupSegment(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         Result result = compile(source("demo.events.BadGroupSegment", source));
 
@@ -414,13 +478,21 @@ class EventMappingProcessorTest {
                 package alpha;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "events.demo", exchange = "events.demo.exchange", routingKey = "demo.a")
-                public record EventA(String id) {}
+                public final class EventA {
+                    private final String id;
+                    public EventA(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         String eventB = """
                 package beta;
                 import com.example.amqp.topology.mapping.EventMapping;
                 @EventMapping(groupId = "events.demo", exchange = "events.demo.exchange", routingKey = "demo.b")
-                public record EventB(String id) {}
+                public final class EventB {
+                    private final String id;
+                    public EventB(String id) { this.id = id; }
+                    public String getId() { return id; }
+                }
                 """;
         Result result = compile(
                 source("alpha.EventA", eventA),
@@ -487,11 +559,23 @@ class EventMappingProcessorTest {
         return new StringSource(fqcn, code);
     }
 
-    private record Result(
-            boolean ok,
-            List<Diagnostic<? extends JavaFileObject>> diagnostics,
-            Map<String, String> generated,
-            Map<String, String> resources) {
+    private static final class Result {
+
+        final boolean ok;
+        final List<Diagnostic<? extends JavaFileObject>> diagnostics;
+        final Map<String, String> generated;
+        final Map<String, String> resources;
+
+        Result(
+                boolean ok,
+                List<Diagnostic<? extends JavaFileObject>> diagnostics,
+                Map<String, String> generated,
+                Map<String, String> resources) {
+            this.ok = ok;
+            this.diagnostics = diagnostics;
+            this.generated = generated;
+            this.resources = resources;
+        }
 
         List<Diagnostic<? extends JavaFileObject>> errors() {
             return diagnostics.stream()

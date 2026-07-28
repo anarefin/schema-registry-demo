@@ -10,16 +10,16 @@ class DomainTopologyTest {
     void ofBuildsThreeDurableNonAutoDeleteExchanges() {
         DomainExchanges exchanges = DomainTopology.of("events.orders.exchange");
 
-        assertThat(exchanges.main().getName()).isEqualTo("events.orders.exchange");
-        assertThat(exchanges.dlx().getName()).isEqualTo(TopologyNaming.dlxExchangeName("events.orders.exchange"));
-        assertThat(exchanges.retry().getName()).isEqualTo(TopologyNaming.retryExchangeName("events.orders.exchange"));
+        assertThat(exchanges.getMain().getName()).isEqualTo("events.orders.exchange");
+        assertThat(exchanges.getDlx().getName()).isEqualTo(TopologyNaming.dlxExchangeName("events.orders.exchange"));
+        assertThat(exchanges.getRetry().getName()).isEqualTo(TopologyNaming.retryExchangeName("events.orders.exchange"));
 
-        assertThat(exchanges.main().isDurable()).isTrue();
-        assertThat(exchanges.dlx().isDurable()).isTrue();
-        assertThat(exchanges.retry().isDurable()).isTrue();
+        assertThat(exchanges.getMain().isDurable()).isTrue();
+        assertThat(exchanges.getDlx().isDurable()).isTrue();
+        assertThat(exchanges.getRetry().isDurable()).isTrue();
 
-        assertThat(exchanges.main().isAutoDelete()).isFalse();
-        assertThat(exchanges.dlx().isAutoDelete()).isFalse();
-        assertThat(exchanges.retry().isAutoDelete()).isFalse();
+        assertThat(exchanges.getMain().isAutoDelete()).isFalse();
+        assertThat(exchanges.getDlx().isAutoDelete()).isFalse();
+        assertThat(exchanges.getRetry().isAutoDelete()).isFalse();
     }
 }

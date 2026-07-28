@@ -11,9 +11,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Value-object tests for the code-first order events. The record IS the contract; the wire format
+ * Value-object tests for the code-first order events. The class IS the contract; the wire format
  * is the raw JSON document only (spec §6 — no envelope). These verify Jackson round-trips the
- * record shape faithfully (field names, types, optional fields) so producer/consumer agree.
+ * class shape faithfully (field names, types, optional fields) so producer/consumer agree.
  */
 class OrderEventsTest {
 
@@ -39,7 +39,7 @@ class OrderEventsTest {
     }
 
     @Test
-    void orderCreatedFieldNamesMatchRecordComponents() throws Exception {
+    void orderCreatedFieldNamesMatchProperties() throws Exception {
         OrderCreated event = new OrderCreated(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 1, new BigDecimal("10.50"), "EUR", Instant.parse("2026-06-01T12:00:00Z"));
@@ -60,7 +60,7 @@ class OrderEventsTest {
         OrderShipped parsed = mapper.readValue(mapper.writeValueAsBytes(original), OrderShipped.class);
 
         assertThat(parsed).isEqualTo(original);
-        assertThat(parsed.carrier()).isEqualTo("UPS");
+        assertThat(parsed.getCarrier()).isEqualTo("UPS");
     }
 
     @Test
@@ -77,7 +77,7 @@ class OrderEventsTest {
         OrderCancelled parsedNoRefund =
                 mapper.readValue(mapper.writeValueAsBytes(withoutRefund), OrderCancelled.class);
         assertThat(parsedNoRefund).isEqualTo(withoutRefund);
-        assertThat(parsedNoRefund.refundAmount()).isNull();
+        assertThat(parsedNoRefund.getRefundAmount()).isNull();
     }
 
     @Test
@@ -104,7 +104,7 @@ class OrderEventsTest {
         OrderFulfilled parsed =
                 mapper.readValue(mapper.writeValueAsBytes(original), OrderFulfilled.class);
         assertThat(parsed).isEqualTo(original);
-        assertThat(parsed.shipping().line2()).isNull();
+        assertThat(parsed.getShipping().getLine2()).isNull();
     }
 
     @Test
@@ -123,8 +123,8 @@ class OrderEventsTest {
 
         OrderCreated parsed = mapper.readValue(json, OrderCreated.class);
 
-        assertThat(parsed.orderId()).isEqualTo(UUID.fromString("3fa85f64-5717-4562-b3fc-2c963f66afa6"));
-        assertThat(parsed.totalAmount()).isEqualByComparingTo("99.90");
-        assertThat(parsed.currency()).isEqualTo("GBP");
+        assertThat(parsed.getOrderId()).isEqualTo(UUID.fromString("3fa85f64-5717-4562-b3fc-2c963f66afa6"));
+        assertThat(parsed.getTotalAmount()).isEqualByComparingTo("99.90");
+        assertThat(parsed.getCurrency()).isEqualTo("GBP");
     }
 }

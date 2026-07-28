@@ -61,7 +61,7 @@ public class QueueDepthHealthIndicator implements HealthIndicator {
 
             Set<TypeMapping> handledMappings = handledEventTypesCache.handledTypeMappings();
             for (TypeMapping mapping : handledMappings) {
-                String rk = mapping.routingKey();
+                String rk = mapping.getRoutingKey();
                 int dlqDepth = queueDepth(TopologyNaming.serviceDlqName(rk, serviceName), details);
                 int mainDepth = queueDepth(TopologyNaming.serviceQueueName(rk, serviceName), details);
                 if (dlqDepth < 0 || mainDepth < 0) {

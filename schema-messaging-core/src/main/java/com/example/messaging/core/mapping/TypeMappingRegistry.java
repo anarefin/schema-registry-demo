@@ -21,8 +21,8 @@ public class TypeMappingRegistry {
 
     public TypeMappingRegistry(List<TypeMapping> mappings) {
         this.all = Collections.unmodifiableList(mappings);
-        this.byJavaType = indexBy(mappings, TypeMapping::javaType, "java type");
-        this.byCoordinates = indexBy(mappings, TypeMapping::coordinates, "coordinates");
+        this.byJavaType = indexBy(mappings, TypeMapping::getJavaType, "java type");
+        this.byCoordinates = indexBy(mappings, TypeMapping::getCoordinates, "coordinates");
     }
 
     private static <K> Map<K, TypeMapping> indexBy(
@@ -36,8 +36,8 @@ public class TypeMappingRegistry {
             if (previous != null) {
                 throw new IllegalArgumentException(
                         "Duplicate TypeMapping " + keyLabel + ": " + key
-                        + " (already mapped to " + previous.javaType().getName()
-                        + ", also " + mapping.javaType().getName() + ")");
+                        + " (already mapped to " + previous.getJavaType().getName()
+                        + ", also " + mapping.getJavaType().getName() + ")");
             }
         }
         return Map.copyOf(map);

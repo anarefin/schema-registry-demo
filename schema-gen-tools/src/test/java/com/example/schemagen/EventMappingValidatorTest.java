@@ -10,10 +10,10 @@ import com.example.schemagen.mappingfixtures.EventEnum;
 import com.example.schemagen.mappingfixtures.EventInterface;
 import com.example.schemagen.mappingfixtures.GoodOrderCreated;
 import com.example.schemagen.mappingfixtures.GoodOrderShipped;
-import com.example.schemagen.mappingfixtures.NotARecord;
 import com.example.schemagen.mappingfixtures.Outer;
+import com.example.schemagen.mappingfixtures.RecordShape;
 import com.example.schemagen.mappingfixtures.URLPing;
-import com.example.schemagen.mappingfixtures.UnpairedRecord;
+import com.example.schemagen.mappingfixtures.UnpairedEvent;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -28,18 +28,18 @@ class EventMappingValidatorTest {
         List<EventMappingMetadata> metadata = EventMappingValidator.validate(
                 List.of(GoodOrderShipped.class, GoodOrderCreated.class));
 
-        assertThat(metadata).extracting(EventMappingMetadata::fqcn).containsExactly(
+        assertThat(metadata).extracting(EventMappingMetadata::getFqcn).containsExactly(
                 GoodOrderCreated.class.getName(),
                 GoodOrderShipped.class.getName());
 
         EventMappingMetadata created = metadata.get(0);
-        assertThat(created.groupId()).isEqualTo("events.orders");
-        assertThat(created.artifactId()).isEqualTo("GoodOrderCreated"); // defaulted to simple name
-        assertThat(created.beanName()).isEqualTo("goodOrderCreatedMapping");
+        assertThat(created.getGroupId()).isEqualTo("events.orders");
+        assertThat(created.getArtifactId()).isEqualTo("GoodOrderCreated"); // defaulted to simple name
+        assertThat(created.getBeanName()).isEqualTo("goodOrderCreatedMapping");
 
         EventMappingMetadata shipped = metadata.get(1);
-        assertThat(shipped.artifactId()).isEqualTo("OrderShipped"); // explicit
-        assertThat(shipped.beanName()).isEqualTo("goodOrderShippedMapping");
+        assertThat(shipped.getArtifactId()).isEqualTo("OrderShipped"); // explicit
+        assertThat(shipped.getBeanName()).isEqualTo("goodOrderShippedMapping");
     }
 
     @Test
@@ -47,50 +47,50 @@ class EventMappingValidatorTest {
         List<EventMappingMetadata> metadata = EventMappingValidator.validate(List.of(URLPing.class));
 
         assertThat(metadata).singleElement()
-                .extracting(EventMappingMetadata::beanName)
+                .extracting(EventMappingMetadata::getBeanName)
                 .isEqualTo("URLPingMapping");
     }
 
     @Test
     void rejectsUnpairedGenerateSchemaType() {
-        assertThatThrownBy(() -> EventMappingValidator.validate(List.of(UnpairedRecord.class)))
+        assertThatThrownBy(() -> EventMappingValidator.validate(List.of(UnpairedEvent.class)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("missing a paired @EventMapping")
-                .hasMessageContaining(UnpairedRecord.class.getName());
+                .hasMessageContaining(UnpairedEvent.class.getName());
     }
 
     @Test
     void rejectsNonRecordType() {
-        assertThatThrownBy(() -> EventMappingValidator.validate(List.of(NotARecord.class)))
+        assertThatThrownBy(() -> EventMappingValidator.validate(List.of(RecordShape.class)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("must be a record");
+                .hasMessageContaining("must be a class, not a record");
     }
 
     @Test
     void rejectsAbstractType() {
         assertThatThrownBy(() -> EventMappingValidator.validate(List.of(AbstractShape.class)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("must be a record");
+                .hasMessageContaining("must be a concrete class");
     }
 
     @Test
     void rejectsInterfaceType() {
         assertThatThrownBy(() -> EventMappingValidator.validate(List.of(EventInterface.class)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("must be a record, not an interface");
+                .hasMessageContaining("must be a class, not an interface");
     }
 
     @Test
     void rejectsEnumType() {
         assertThatThrownBy(() -> EventMappingValidator.validate(List.of(EventEnum.class)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("must be a record, not an enum");
+                .hasMessageContaining("must be a class, not an enum");
     }
 
     @Test
     void rejectsNonPublicType() {
-        // Reference the package-private record reflectively so the test class stays clean.
-        Class<?> packagePrivate = firstNested("com.example.schemagen.mappingfixtures.PackagePrivateRecord");
+        // Reference the package-private class reflectively so the test class stays clean.
+        Class<?> packagePrivate = firstNested("com.example.schemagen.mappingfixtures.PackagePrivateEvent");
         assertThatThrownBy(() -> EventMappingValidator.validate(List.of(packagePrivate)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("must be public");

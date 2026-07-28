@@ -71,12 +71,12 @@ class OrderCreatedIT {
                 verify(orderEventListener).onOrderCreated(captor.capture()));
 
         OrderCreated received = captor.getValue();
-        assertThat(received.orderId()).isEqualTo(event.orderId());
-        assertThat(received.customerId()).isEqualTo(event.customerId());
-        assertThat(received.productId()).isEqualTo(event.productId());
-        assertThat(received.quantity()).isEqualTo(3);
-        assertThat(received.totalAmount()).isEqualByComparingTo("99.99");
-        assertThat(received.currency()).isEqualTo("USD");
+        assertThat(received.getOrderId()).isEqualTo(event.getOrderId());
+        assertThat(received.getCustomerId()).isEqualTo(event.getCustomerId());
+        assertThat(received.getProductId()).isEqualTo(event.getProductId());
+        assertThat(received.getQuantity()).isEqualTo(3);
+        assertThat(received.getTotalAmount()).isEqualByComparingTo("99.99");
+        assertThat(received.getCurrency()).isEqualTo("USD");
     }
 
     // ---- TC-3.4: content-type + X-Schema-* headers -------------------------
@@ -117,9 +117,9 @@ class OrderCreatedIT {
 
         assertThat(result).isInstanceOf(OrderCreated.class);
         OrderCreated parsed = (OrderCreated) result;
-        assertThat(parsed.orderId()).isEqualTo(original.orderId());
-        assertThat(parsed.quantity()).isEqualTo(5);
-        assertThat(parsed.totalAmount()).isEqualByComparingTo("149.95");
+        assertThat(parsed.getOrderId()).isEqualTo(original.getOrderId());
+        assertThat(parsed.getQuantity()).isEqualTo(5);
+        assertThat(parsed.getTotalAmount()).isEqualByComparingTo("149.95");
     }
 
     // ---- helpers -----------------------------------------------------------

@@ -43,7 +43,7 @@ No system Gradle installation needed. The wrapper downloads Gradle 9.2.1 automat
 ./gradlew build -x test
 ```
 
-Compiles all seven child modules (plus root), generates JSON Schemas from the code-first records
+Compiles all seven child modules (plus root), generates JSON Schemas from the code-first classes
 via `schema-gen-tools`, and produces JARs under each module's `build/libs/`. Skip tests for speed;
 run them later with `./gradlew check`.
 
@@ -76,7 +76,7 @@ JSON Schema checker, adding a property (even an optional/permissive one) is clas
 under FORWARD.
 
 ```bash
-# 1. Register all seven schemas (four orders + three customers — generated from code-first records)
+# 1. Register all seven schemas (four orders + three customers — generated from code-first classes)
 ./gradlew registerSchemas -Papicurio.registry.url=http://localhost:8080
 
 # 2. Attach FORWARD compatibility rules (register does not do this)
@@ -117,7 +117,7 @@ instead, in its own terminal (stop the equivalent compose container first to fre
 ### 4. Demo: publish messages
 
 All seven events have REST endpoints on the producer (:8081). Each maps a request DTO to the
-code-first record and publishes via `EventPublisher.publish(event)` — exchange and routing key
+code-first event class and publishes via `EventPublisher.publish(event)` — exchange and routing key
 come from the event's `TypeMapping`; `SchemaAwareMessageConverter` validates before send.
 
 ```bash
@@ -185,7 +185,7 @@ guest/guest) browse `orders.created.consumer-service.dlq` to inspect all `X-Fail
 
 ### 7. Demo: schema evolution — accept and reject
 
-**Accepted:** add an optional property to a record — FORWARD-compatible for all seven artifacts.
+**Accepted:** add an optional property to an event class — FORWARD-compatible for all seven artifacts.
 Regenerate the schema (`./gradlew :order-contracts :customer-contracts -am process-classes`), commit, then register.
 
 ```bash
@@ -324,14 +324,14 @@ See [docs/TUTORIAL.md](docs/TUTORIAL.md) for the end-to-end walkthrough.
 No mapping `@Bean` method. Annotation-driven, build-generated (see
 [ADR-0011](docs/adr/ADR-0011-build-generated-type-mapping-config.md)):
 
-1. **Create a public top-level record** in the domain event package
+1. **Create a public top-level immutable class** in the domain event package
    (`com.example.contracts.orders` or `com.example.contracts.customers` — keep all of a domain's
-   records in one package; not a sub-package).
+   event classes in one package; not a sub-package).
 2. **Annotate** with `@GenerateSchema` and `@EventMapping`, reusing `*EventRouting` constants for
    `exchange` / `routingKey` (add a new constant if needed).
 3. **Build** the contracts module (`./gradlew :order-contracts:build` or the customer twin).
    At `compile`, `schema-gen-tools`' `EventMappingProcessor` regenerates
-   `GeneratedEventTypeMappings` (the `@Bean TypeMapping` for the new record); at `process-classes`
+   `GeneratedEventTypeMappings` (the `@Bean TypeMapping` for the new event class); at `process-classes`
    it regenerates the JSON Schema.
 4. **Commit the generated schema** under `src/main/resources/schemas/`. The generated mapping
    config is build output (compiled into the jar) — nothing else to commit.

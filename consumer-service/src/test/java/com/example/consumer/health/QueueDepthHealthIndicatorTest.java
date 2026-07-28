@@ -23,7 +23,17 @@ class QueueDepthHealthIndicatorTest {
 
     private static final String SERVICE = "consumer-service";
 
-    record DemoEvent(String id) {}
+    static final class DemoEvent {
+        private final String id;
+
+        DemoEvent(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     private static TypeMapping mapping() {
         return new TypeMapping(

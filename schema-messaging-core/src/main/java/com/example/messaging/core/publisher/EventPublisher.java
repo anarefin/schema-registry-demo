@@ -49,7 +49,7 @@ public class EventPublisher {
         Message message = messageConverter.toMessage(event, props);
 
         log.info("Publishing {} to exchange={} routingKey={}",
-                event.getClass().getSimpleName(), mapping.exchange(), mapping.routingKey());
-        rabbitTemplate.send(mapping.exchange(), mapping.routingKey(), message);
+                event.getClass().getSimpleName(), mapping.getExchange(), mapping.getRoutingKey());
+        rabbitTemplate.send(mapping.getExchange(), mapping.getRoutingKey(), message);
     }
 }

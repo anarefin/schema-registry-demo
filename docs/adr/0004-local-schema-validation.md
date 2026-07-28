@@ -42,7 +42,7 @@ fast if `apicurio.auto-register=OFF`; `RegistryHealthIndicator` exposed registry
 
 But the JSON Schemas being fetched were already fully known at build time. [ADR-0001](0001-code-first-schema-generation.md)
 and [ADR-0003](0003-contracts-own-schema-generation.md) established that `schema-gen-tools`
-generates each event's schema from its code-first Java record and commits it into that domain's
+generates each event's schema from its code-first immutable Java class and commits it into that domain's
 `*-contracts` module (`order-contracts/src/main/resources/schemas/*.schema.json`,
 `customer-contracts/src/main/resources/schemas/*.schema.json`). Those files already land on
 producer-service's and consumer-service's runtime classpath as ordinary JAR resources, since both

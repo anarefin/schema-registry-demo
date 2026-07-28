@@ -3,7 +3,7 @@ package com.example.messaging.core.schema;
 import java.util.Locale;
 
 /**
- * Converts an event record's simple class name into its classpath schema resource filename, e.g.
+ * Converts an event class's simple name into its classpath schema resource filename, e.g.
  * {@code OrderCreated} -&gt; {@code order-created.schema.json} (looked up under
  * {@code schemas/} on the classpath by {@link LocalSchemaCatalog}).
  *

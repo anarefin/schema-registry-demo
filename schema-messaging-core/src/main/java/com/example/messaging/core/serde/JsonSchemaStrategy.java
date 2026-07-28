@@ -135,7 +135,7 @@ public class JsonSchemaStrategy implements SerializationStrategy {
         try {
             compile(schema);
         } catch (Exception e) {
-            throw new InvalidSchemaDefinitionException(schema.coordinates().toString(),
+            throw new InvalidSchemaDefinitionException(schema.getCoordinates().toString(),
                     "Failed to compile JSON schema: " + e.getMessage(), e);
         }
     }
@@ -146,7 +146,7 @@ public class JsonSchemaStrategy implements SerializationStrategy {
         try {
             return objectMapper.readTree(bytes);
         } catch (Exception e) {
-            throw new SchemaValidationException(schema.coordinates().toString(),
+            throw new SchemaValidationException(schema.getCoordinates().toString(),
                     "Failed to compile/validate JSON schema: " + e.getMessage(), e);
         }
     }
@@ -160,20 +160,20 @@ public class JsonSchemaStrategy implements SerializationStrategy {
                         .map(ValidationMessage::getMessage)
                         .limit(5)
                         .collect(Collectors.toList());
-                throw new SchemaValidationException(resolvedSchema.coordinates().toString(), errorMessages);
+                throw new SchemaValidationException(resolvedSchema.getCoordinates().toString(), errorMessages);
             }
         } catch (SchemaValidationException e) {
             throw e;
         } catch (Exception e) {
-            throw new SchemaValidationException(resolvedSchema.coordinates().toString(),
+            throw new SchemaValidationException(resolvedSchema.getCoordinates().toString(),
                     "Failed to compile/validate JSON schema: " + e.getMessage(), e);
         }
     }
 
     private JsonSchema compile(ResolvedSchema resolvedSchema) {
-        return compiledSchemaCache.computeIfAbsent(resolvedSchema.coordinates(), coords -> {
+        return compiledSchemaCache.computeIfAbsent(resolvedSchema.getCoordinates(), coords -> {
             JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
-            return factory.getSchema(new String(resolvedSchema.rawContent(), StandardCharsets.UTF_8));
+            return factory.getSchema(new String(resolvedSchema.getRawContent(), StandardCharsets.UTF_8));
         });
     }
 }

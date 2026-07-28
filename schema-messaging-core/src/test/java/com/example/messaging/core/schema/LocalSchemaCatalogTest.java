@@ -25,9 +25,9 @@ class LocalSchemaCatalogTest {
         LocalSchemaCatalog catalog = new LocalSchemaCatalog(registry);
 
         ResolvedSchema schema = catalog.get(FIXTURE_COORDS);
-        assertThat(schema.coordinates()).isEqualTo(FIXTURE_COORDS);
-        assertThat(schema.schemaType()).isEqualTo(SchemaType.JSON);
-        assertThat(new String(schema.rawContent())).contains("\"type\": \"object\"");
+        assertThat(schema.getCoordinates()).isEqualTo(FIXTURE_COORDS);
+        assertThat(schema.getSchemaType()).isEqualTo(SchemaType.JSON);
+        assertThat(new String(schema.getRawContent())).contains("\"type\": \"object\"");
     }
 
     @Test

@@ -6,7 +6,7 @@
 **Supersedes (in part):** [ADR-0010](ADR-0010-annotation-driven-event-mappings.md) — the runtime
 index-driven registration (`@RegisterEventMappings` + `EventMappingRegistrar` +
 `IndexedEventMappings` + `EventMappingIndexReader`/`Writer` + `META-INF/event-mappings.idx`)  
-**Retains from ADR-0010:** `@EventMapping` on the record as the single source of schema identity +
+**Retains from ADR-0010:** `@EventMapping` on the event class as the single source of schema identity +
 AMQP route; the locked `Introspector.decapitalize(simpleName) + "Mapping"` bean names;
 `@ConditionalOnMissingBean(name=…)` app-override-wins; `Mappings` as the sole `TypeMapping`
 construction path; mapping registration never declares an exchange  
@@ -21,7 +21,7 @@ ADR-0010 moved mapping registration off hand-written `@Bean` methods onto a **ru
 `*TypeMappingAutoConfiguration` was meta-annotated `@RegisterEventMappings("pkg")`, which imported
 `EventMappingRegistrar` (an `ImportBeanDefinitionRegistrar`). At context refresh the registrar read
 the build-time `META-INF/event-mappings.idx`, `Class.forName`-ed every FQCN, read `@EventMapping`
-reflectively, built a `TypeMapping` via `Mappings`, and registered one bean per record.
+reflectively, built a `TypeMapping` via `Mappings`, and registered one bean per event class.
 
 That works but pays for it at runtime: reflection, a classpath resource merge, `Class.forName`
 across all domains, and per-loader index loading (the reason the now-obsolete Spec 14 memoization
@@ -133,7 +133,7 @@ by codegen and isolated from the compile classpath.
 ## Accepted trade-off: the cross-jar bean-name-collision guard is gone
 
 ADR-0010's `IndexedEventMappings` validated bean-name collisions **across jars** at startup: if two
-domains contributed a record with the same Java simple name (both `StatusChanged` →
+domains contributed an event class with the same Java simple name (both `StatusChanged` →
 `statusChangedMapping`), startup aborted with a deterministic error.
 
 That guard is **removed**. Bean names are now assigned per-module by independent
@@ -149,7 +149,7 @@ case of two *distinct* event types, in two *different* domains, sharing a Java s
 bean name) while carrying *different* coordinates and javaTypes, so neither registry guard fires.
 For this two-domain POC (orders + customers, disjoint simple names) the case does not arise; the
 mitigation if it ever does is the same discipline the codebase already relies on — keep event
-record simple names unique across domains.
+event class simple names unique across domains.
 
 ## Rejected alternatives
 
@@ -175,7 +175,7 @@ consumer. If registration is compiled, the index has no reader — remove it.
   methods javac already compiled. Spec 14 (per-loader index memoization) is obsolete and deleted.
 - **Positive:** Registration errors (blank/non-JSON/within-module duplicate) fail the **module
   compile**, earlier than the old startup abort, before a broken jar ships.
-- **Positive:** New-event onboarding is unchanged for authors — annotate the record + build +
+- **Positive:** New-event onboarding is unchanged for authors — annotate the event class + build +
   commit the generated schema; **no** mapping `@Bean` (the codegen writes it).
 - **Positive:** The hand-written `OrderPublisherTopology` / `CustomerPublisherTopology` classes
   (ADR-0008) are gone — the same processor pass now generates them from the same `@EventMapping`

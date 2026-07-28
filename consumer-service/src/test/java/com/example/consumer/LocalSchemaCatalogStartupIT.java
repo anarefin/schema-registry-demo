@@ -31,7 +31,17 @@ class LocalSchemaCatalogStartupIT {
      * Probe type with no {@code schemas/missing-schema-probe.schema.json} on the classpath.
      * Filename comes from {@code SchemaFileNaming.toFileName(simpleName)}.
      */
-    record MissingSchemaProbe(String id) {}
+    static final class MissingSchemaProbe {
+        private final String id;
+
+        MissingSchemaProbe(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     @Configuration
     static class BrokenMappingConfig {

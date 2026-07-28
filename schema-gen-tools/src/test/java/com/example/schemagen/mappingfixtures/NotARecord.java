@@ -1,4 +1,4 @@
 package com.example.schemagen.mappingfixtures;
 
-/** Unsupported shape: a plain class, not a record. */
+/** Valid plain class fixture (no paired annotations). */
 public class NotARecord {}

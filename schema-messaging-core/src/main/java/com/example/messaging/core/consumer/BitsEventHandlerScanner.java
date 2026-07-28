@@ -25,7 +25,46 @@ import java.util.Set;
  */
 public final class BitsEventHandlerScanner {
 
-    public record HandlerBinding(String beanName, Set<Method> methods) {}
+    public static final class HandlerBinding {
+
+        private final String beanName;
+        private final Set<Method> methods;
+
+        public HandlerBinding(String beanName, Set<Method> methods) {
+            this.beanName = beanName;
+            this.methods = Set.copyOf(methods);
+        }
+
+        public String getBeanName() {
+            return beanName;
+        }
+
+        public Set<Method> getMethods() {
+            return methods;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof HandlerBinding that)) {
+                return false;
+            }
+            return java.util.Objects.equals(beanName, that.beanName)
+                    && java.util.Objects.equals(methods, that.methods);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(beanName, methods);
+        }
+
+        @Override
+        public String toString() {
+            return "HandlerBinding[beanName=" + beanName + ", methods=" + methods + "]";
+        }
+    }
 
     private BitsEventHandlerScanner() {}
 
@@ -57,7 +96,7 @@ public final class BitsEventHandlerScanner {
     public static Set<Class<?>> discoverHandledJavaTypes(ApplicationContext applicationContext) {
         Set<Class<?>> types = new LinkedHashSet<>();
         for (HandlerBinding binding : discoverHandlerBindings(applicationContext)) {
-            for (Method method : binding.methods()) {
+            for (Method method : binding.getMethods()) {
                 types.add(eventType(method));
             }
         }
@@ -101,7 +140,7 @@ public final class BitsEventHandlerScanner {
             ApplicationContext applicationContext, TypeMappingRegistry typeMappingRegistry) {
         Set<TypeMapping> mappings = new LinkedHashSet<>();
         for (HandlerBinding binding : discoverHandlerBindings(applicationContext)) {
-            for (Method method : binding.methods()) {
+            for (Method method : binding.getMethods()) {
                 mappings.add(mappingFor(typeMappingRegistry, method));
             }
         }

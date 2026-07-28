@@ -54,9 +54,9 @@ class CustomerTypeMappingRegistrationTest {
                             "customerAddressAddedMapping",
                             "customerRegisteredMapping",
                             "customerTierChangedMapping");
-                    assertThat(context.getBean("customerRegisteredMapping", TypeMapping.class).routingKey())
+                    assertThat(context.getBean("customerRegisteredMapping", TypeMapping.class).getRoutingKey())
                             .isEqualTo("app.override");
-                    assertThat(context.getBean("customerAddressAddedMapping", TypeMapping.class).routingKey())
+                    assertThat(context.getBean("customerAddressAddedMapping", TypeMapping.class).getRoutingKey())
                             .isEqualTo(CustomerEventRouting.ADDRESS_ADDED_ROUTING_KEY);
                 });
     }
@@ -103,12 +103,12 @@ class CustomerTypeMappingRegistrationTest {
 
     private static void assertMapping(TypeMapping mapping, Class<?> javaType, String artifactId,
                                       String routingKey) {
-        assertThat(mapping.javaType()).isEqualTo(javaType);
-        assertThat(mapping.coordinates()).isEqualTo(new SchemaCoordinates("events.customers", artifactId));
-        assertThat(mapping.schemaType()).isEqualTo(SchemaType.JSON);
-        assertThat(mapping.routingKey()).isEqualTo(routingKey);
-        assertThat(mapping.exchange()).isEqualTo(CustomerEventRouting.EXCHANGE);
-        assertThat(mapping.coordinates().artifactId()).isEqualTo(javaType.getSimpleName());
+        assertThat(mapping.getJavaType()).isEqualTo(javaType);
+        assertThat(mapping.getCoordinates()).isEqualTo(new SchemaCoordinates("events.customers", artifactId));
+        assertThat(mapping.getSchemaType()).isEqualTo(SchemaType.JSON);
+        assertThat(mapping.getRoutingKey()).isEqualTo(routingKey);
+        assertThat(mapping.getExchange()).isEqualTo(CustomerEventRouting.EXCHANGE);
+        assertThat(mapping.getCoordinates().getArtifactId()).isEqualTo(javaType.getSimpleName());
     }
 
     @Configuration(proxyBeanMethods = false)

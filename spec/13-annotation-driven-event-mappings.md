@@ -6,10 +6,10 @@
 ## What to build
 
 Replace the seven hand-written `TypeMapping` `@Bean` methods with declarative metadata on each
-event record. Keep schema generation, runtime mapping registration, and publisher-owned exchange
+event class. Keep schema generation, runtime mapping registration, and publisher-owned exchange
 declaration as separate concerns:
 
-- `@GenerateSchema` marks a record for build-time JSON Schema generation.
+- `@GenerateSchema` marks an event class for build-time JSON Schema generation.
 - New `@EventMapping` describes its schema identity and AMQP route.
 - `schema-gen-tools` validates both annotations and writes a deterministic event index during
   `process-classes`.
@@ -45,7 +45,7 @@ Example:
         groupId = "events.orders",
         exchange = OrderEventRouting.EXCHANGE,
         routingKey = OrderEventRouting.CREATED_ROUTING_KEY)
-public record OrderCreated(...) {}
+public final class OrderCreated { ... }
 ```
 
 Rules:
@@ -58,8 +58,8 @@ Rules:
 - Do not add queue, DLQ, retry, TTL, consumer, service, durability, or schema-version fields.
 - Keep one mapping per Java type. Do not make the annotation repeatable.
 - Annotation metadata never declares an exchange.
-- Annotated types must be top-level public records. Reject nested, local, abstract, interface,
-  enum, and non-public types.
+- Annotated types must be top-level public immutable classes. Reject nested, local, abstract, interface,
+  enum, Java record types, and non-public types.
 
 ## Build-time index
 
@@ -133,7 +133,7 @@ Add an index reader and reusable registrar in `event-contract-kit`.
      **fail startup**.
 4. Each contracts auto-configuration filters entries with
    `class.getPackageName().equals(expectedPackage)` — **exact package match**, not `startsWith`.
-   Event records must remain in that package (documented invariant).
+   Event classes must remain in that package (documented invariant).
 5. Load each indexed class and read its typed `@EventMapping`.
 6. Convert metadata to `TypeMapping` **only** via
    `Mappings.forDomain(groupId, exchange).json(javaType, artifactId, routingKey)` (or the
@@ -165,7 +165,7 @@ Unchanged. `events.mappings.include` / `exclude` match simple name, FQCN, or `gr
 
 ## Contracts changes
 
-- Annotate all four order records and all three customer records.
+- Annotate all four order event classes and all three customer event classes.
 - Replace manual methods in `OrderTypeMappingAutoConfiguration` and
   `CustomerTypeMappingAutoConfiguration` with `@Import` of the indexed registrar scoped to
   `com.example.contracts.orders` and `com.example.contracts.customers` respectively.
@@ -180,7 +180,7 @@ Unchanged. `events.mappings.include` / `exclude` match simple name, FQCN, or `gr
 
 ```mermaid
 flowchart LR
-    EventRecord["Event record: @GenerateSchema + @EventMapping"] --> BuildTool["schema-gen-tools at process-classes"]
+    EventClass["Event class: @GenerateSchema + @EventMapping"] --> BuildTool["schema-gen-tools at process-classes"]
     BuildTool --> SchemaFile["Generated JSON Schema under src"]
     BuildTool --> EventIndex["Build-output META-INF/event-mappings.idx"]
     EventIndex --> Registrar["ImportBeanDefinitionRegistrar"]
@@ -202,7 +202,7 @@ flowchart LR
 - No static initialization during discovery.
 - Paired-annotation enforcement.
 - Blank metadata and every duplicate/collision failure.
-- Unsupported type-shape failures (nested, non-record, etc.).
+- Unsupported type-shape failures (nested, Java record, etc.).
 - Bean-name algorithm + `Introspector.decapitalize` edge cases at build time.
 - Existing schema output remains byte-for-byte unchanged.
 - Index is written under outputDirectory only (not under `src/main/resources`).
@@ -235,7 +235,7 @@ flowchart LR
 - Add an ADR that **partially supersedes** ADR-0007's manual per-event `@Bean` decision while
   retaining named override semantics, `Mappings`, and ADR-0008 exchange ownership.
 - Update `CONTEXT.md`, `README.md`, and `docs/TUTORIAL.md`.
-- Document new-event onboarding: create record in the domain event package, add both annotations
+- Document new-event onboarding: create an event class in the domain event package, add both annotations
   (reuse `*EventRouting` constants), build, commit generated schema. No mapping `@Bean` method.
   Index is regenerated automatically — do not commit it.
 - Document index generation, deterministic format, override behavior, exact-package invariant,
@@ -243,7 +243,7 @@ flowchart LR
 
 ## Acceptance criteria
 
-- [ ] All seven event records carry `@GenerateSchema` and `@EventMapping`.
+- [ ] All seven event classes carry `@GenerateSchema` and `@EventMapping`.
 - [ ] `process-classes` generates schemas and one deterministic index per contracts module under
       build output (not committed under `src/main/resources`).
 - [ ] Registration uses `ImportBeanDefinitionRegistrar` + `containsBeanDefinition` skip.

@@ -34,7 +34,7 @@ public final class TypeMappingSelection {
             selected = mappings.stream().filter(m -> matchesAny(m, include)).toList();
         } else if (handledJavaTypes != null && !handledJavaTypes.isEmpty()) {
             selected = mappings.stream()
-                    .filter(m -> handledJavaTypes.contains(m.javaType()))
+                    .filter(m -> handledJavaTypes.contains(m.getJavaType()))
                     .toList();
         } else {
             selected = List.copyOf(mappings);
@@ -52,9 +52,9 @@ public final class TypeMappingSelection {
                 continue;
             }
             String trimmed = token.trim();
-            if (trimmed.equals(mapping.javaType().getSimpleName())
-                    || trimmed.equals(mapping.javaType().getName())
-                    || trimmed.equals(mapping.coordinates().toString())) {
+            if (trimmed.equals(mapping.getJavaType().getSimpleName())
+                    || trimmed.equals(mapping.getJavaType().getName())
+                    || trimmed.equals(mapping.getCoordinates().toString())) {
                 return true;
             }
         }

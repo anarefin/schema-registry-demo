@@ -12,9 +12,41 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class TypeMappingSelectionTest {
 
-    record OrderCreated(String id) {}
-    record OrderShipped(String id) {}
-    record CustomerRegistered(String id) {}
+    static final class OrderCreated {
+        private final String id;
+
+        OrderCreated(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
+
+    static final class OrderShipped {
+        private final String id;
+
+        OrderShipped(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
+
+    static final class CustomerRegistered {
+        private final String id;
+
+        CustomerRegistered(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     private static final TypeMapping ORDER_CREATED = mapping(OrderCreated.class, "events.orders", "OrderCreated", "orders.created");
     private static final TypeMapping ORDER_SHIPPED = mapping(OrderShipped.class, "events.orders", "OrderShipped", "orders.shipped");

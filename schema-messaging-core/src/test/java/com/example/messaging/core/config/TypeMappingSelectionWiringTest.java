@@ -51,7 +51,7 @@ class TypeMappingSelectionWiringTest {
                     assertThat(registry.all()).containsExactly(FIXTURE);
                     assertThat(registry.findByJavaType(OtherEvent.class)).isEmpty();
                     LocalSchemaCatalog catalog = context.getBean(LocalSchemaCatalog.class);
-                    assertThat(catalog.get(FIXTURE.coordinates()).coordinates()).isEqualTo(FIXTURE.coordinates());
+                    assertThat(catalog.get(FIXTURE.getCoordinates()).getCoordinates()).isEqualTo(FIXTURE.getCoordinates());
                 });
     }
 

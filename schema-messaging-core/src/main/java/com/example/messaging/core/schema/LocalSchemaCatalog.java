@@ -37,11 +37,11 @@ public class LocalSchemaCatalog {
     LocalSchemaCatalog(TypeMappingRegistry typeMappingRegistry, ClassLoader classLoader) {
         Map<SchemaCoordinates, ResolvedSchema> loaded = new LinkedHashMap<>();
         for (TypeMapping mapping : typeMappingRegistry.all()) {
-            String resourcePath = "schemas/" + SchemaFileNaming.toFileName(mapping.javaType().getSimpleName());
+            String resourcePath = "schemas/" + SchemaFileNaming.toFileName(mapping.getJavaType().getSimpleName());
             byte[] bytes = readResourceOrFail(classLoader, resourcePath, mapping);
             // Defensive copy — callers must not mutate the catalog's cached content.
-            loaded.put(mapping.coordinates(),
-                    new ResolvedSchema(mapping.coordinates(), mapping.schemaType(), bytes.clone()));
+            loaded.put(mapping.getCoordinates(),
+                    new ResolvedSchema(mapping.getCoordinates(), mapping.getSchemaType(), bytes.clone()));
         }
         this.schemas = Map.copyOf(loaded);
     }
@@ -61,7 +61,7 @@ public class LocalSchemaCatalog {
         try (InputStream in = classLoader.getResourceAsStream(resourcePath)) {
             if (in == null) {
                 throw new SchemaNotFoundException(
-                        "classpath:" + resourcePath + " (for " + mapping.javaType().getName() + ")");
+                        "classpath:" + resourcePath + " (for " + mapping.getJavaType().getName() + ")");
             }
             return in.readAllBytes();
         } catch (IOException e) {

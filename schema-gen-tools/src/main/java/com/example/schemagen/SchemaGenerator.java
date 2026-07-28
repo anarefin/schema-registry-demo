@@ -23,13 +23,13 @@ import java.util.List;
 
 /**
  * Domain-agnostic, byte-stable JSON Schema generator (spec: code-first). Given any annotated
- * event type (a Java record is the source of truth), produces a deterministic Draft-07
- * schema string suitable for committing next to the record and gating in CI.
+ * event type (a Java class is the source of truth), produces a deterministic Draft-07
+ * schema string suitable for committing next to the class and gating in CI.
  *
  * <p>Draft-07 (not 2020-12) is deliberate: Apicurio Registry 3.2.0's compatibility checker
  * (everit json-schema) only understands up to Draft-07 and returns HTTP 500
  * ("could not determine version") when asked to compare Draft 2020-12 schemas — which would
- * disable the FORWARD compatibility merge gate. Every keyword these records emit (format,
+ * disable the FORWARD compatibility merge gate. Every keyword these classes emit (format,
  * pattern, enum, numeric exclusiveMinimum, minLength/maxLength, allOf) is Draft-07-valid, so
  * semantics are unchanged.
  *
@@ -54,8 +54,8 @@ public final class SchemaGenerator {
     public static String generate(Class<?> eventType) {
         SchemaGeneratorConfigBuilder configBuilder = new SchemaGeneratorConfigBuilder(
                 SchemaVersion.DRAFT_7, OptionPreset.PLAIN_JSON)
-                // Record components are argument-free accessor methods — this is how their
-                // properties (and their annotations) are discovered.
+                // Immutable event classes expose argument-free accessor methods — this is how their
+                // fields (and their annotations) are discovered.
                 .with(Option.FIELDS_DERIVED_FROM_ARGUMENTFREE_METHODS)
                 .with(Option.INLINE_ALL_SCHEMAS)
                 .with(new JacksonModule())

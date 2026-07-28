@@ -10,4 +10,15 @@ import com.example.amqp.topology.mapping.GenerateSchema;
         exchange = "events.clash.exchange",
         routingKey = "clash.one",
         artifactId = "Same")
-public record CoordClashOne(String id) {}
+public final class CoordClashOne {
+
+    private final String id;
+
+    public CoordClashOne(String id) {
+        this.id = id;
+    }
+
+    public String getId() {
+        return id;
+    }
+}

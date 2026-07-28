@@ -56,9 +56,9 @@ class OrderTypeMappingRegistrationTest {
                             "orderCreatedMapping",
                             "orderFulfilledMapping",
                             "orderShippedMapping");
-                    assertThat(context.getBean("orderCreatedMapping", TypeMapping.class).routingKey())
+                    assertThat(context.getBean("orderCreatedMapping", TypeMapping.class).getRoutingKey())
                             .isEqualTo("app.override");
-                    assertThat(context.getBean("orderShippedMapping", TypeMapping.class).routingKey())
+                    assertThat(context.getBean("orderShippedMapping", TypeMapping.class).getRoutingKey())
                             .isEqualTo(OrderEventRouting.SHIPPED_ROUTING_KEY);
                 });
     }
@@ -104,12 +104,12 @@ class OrderTypeMappingRegistrationTest {
 
     private static void assertMapping(TypeMapping mapping, Class<?> javaType, String artifactId,
                                       String routingKey) {
-        assertThat(mapping.javaType()).isEqualTo(javaType);
-        assertThat(mapping.coordinates()).isEqualTo(new SchemaCoordinates("events.orders", artifactId));
-        assertThat(mapping.schemaType()).isEqualTo(SchemaType.JSON);
-        assertThat(mapping.routingKey()).isEqualTo(routingKey);
-        assertThat(mapping.exchange()).isEqualTo(OrderEventRouting.EXCHANGE);
-        assertThat(mapping.coordinates().artifactId()).isEqualTo(javaType.getSimpleName());
+        assertThat(mapping.getJavaType()).isEqualTo(javaType);
+        assertThat(mapping.getCoordinates()).isEqualTo(new SchemaCoordinates("events.orders", artifactId));
+        assertThat(mapping.getSchemaType()).isEqualTo(SchemaType.JSON);
+        assertThat(mapping.getRoutingKey()).isEqualTo(routingKey);
+        assertThat(mapping.getExchange()).isEqualTo(OrderEventRouting.EXCHANGE);
+        assertThat(mapping.getCoordinates().getArtifactId()).isEqualTo(javaType.getSimpleName());
     }
 
     @Configuration(proxyBeanMethods = false)

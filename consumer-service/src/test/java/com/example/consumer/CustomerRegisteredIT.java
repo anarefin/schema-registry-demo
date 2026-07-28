@@ -67,10 +67,10 @@ class CustomerRegisteredIT {
                 verify(customerEventListener).onCustomerRegistered(captor.capture()));
 
         CustomerRegistered received = captor.getValue();
-        assertThat(received.customerId()).isEqualTo(event.customerId());
-        assertThat(received.email()).isEqualTo("round@trip.com");
-        assertThat(received.firstName()).isEqualTo("Round");
-        assertThat(received.lastName()).isEqualTo("Trip");
+        assertThat(received.getCustomerId()).isEqualTo(event.getCustomerId());
+        assertThat(received.getEmail()).isEqualTo("round@trip.com");
+        assertThat(received.getFirstName()).isEqualTo("Round");
+        assertThat(received.getLastName()).isEqualTo("Trip");
     }
 
     // ---- TC-2.4: content-type + X-Schema-* headers -------------------------
@@ -120,8 +120,8 @@ class CustomerRegisteredIT {
 
         assertThat(result).isInstanceOf(CustomerRegistered.class);
         CustomerRegistered cr = (CustomerRegistered) result;
-        assertThat(cr.customerId()).isEqualTo(id);
-        assertThat(cr.email()).isEqualTo("extra@test.com");
+        assertThat(cr.getCustomerId()).isEqualTo(id);
+        assertThat(cr.getEmail()).isEqualTo("extra@test.com");
     }
 
     // ---- helpers -----------------------------------------------------------

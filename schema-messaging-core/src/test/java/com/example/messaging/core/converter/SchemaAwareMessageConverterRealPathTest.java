@@ -6,6 +6,8 @@ import com.example.amqp.topology.mapping.SchemaCoordinates;
 import com.example.amqp.topology.mapping.SchemaType;
 import com.example.messaging.core.schema.LocalSchemaCatalog;
 import com.example.messaging.core.serde.JsonSchemaStrategy;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
@@ -13,6 +15,7 @@ import org.springframework.amqp.core.MessageProperties;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,7 +26,39 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SchemaAwareMessageConverterRealPathTest {
 
     /** Simple name → {@code fixture-event.schema.json} via {@code SchemaFileNaming}. */
-    record FixtureEvent(String id) {}
+    static final class FixtureEvent {
+        private final String id;
+
+        @JsonCreator
+        FixtureEvent(@JsonProperty("id") String id) {
+            this.id = id;
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof FixtureEvent other)) {
+                return false;
+            }
+            return Objects.equals(id, other.id);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(id);
+        }
+
+        @Override
+        public String toString() {
+            return "FixtureEvent[id=" + id + "]";
+        }
+    }
 
     private SchemaAwareMessageConverter converter;
 

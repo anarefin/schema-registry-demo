@@ -48,7 +48,7 @@ Builds all six runtime/library modules (`schema-messaging-core`, `event-contract
 `order-contracts`, `customer-contracts`, `producer-service`, `consumer-service`, plus the
 build-only `schema-gen-tools`, seven total) and, as part of
 `schema-gen-tools`' `generateSchemas` phase, regenerates all seven JSON Schemas from the code-first
-records. Expect `BUILD SUCCESS`.
+event classes. Expect `BUILD SUCCESS`.
 
 ```bash
 ./gradlew test
@@ -58,7 +58,7 @@ Runs only Gradle test (`*Test.java`) — fast, mock-based, no Docker. Expect `BU
 counts across `schema-messaging-core`, `order-contracts`, `customer-contracts`, and
 `producer-service`.
 
-**What you verified:** the code-first records compile, schemas regenerate without error, and all
+**What you verified:** the code-first event classes compile, schemas regenerate without error, and all
 mock-based unit tests pass. The `*Test.java` (Gradle test) / `*IT.java` (integrationTest) split is
 load-bearing — don't put a Testcontainers test under `*Test.java` or it'll silently run twice (once
 here, once in §5) or not at all.
@@ -82,7 +82,7 @@ regenerated.
 **Now deliberately cause drift** to see the gate catch a real mismatch:
 
 ```bash
-# Add a comment/description-only edit to a record, e.g. tweak the @JsonPropertyDescription
+# Add a comment/description-only edit to an event class, e.g. tweak the @JsonPropertyDescription
 # on OrderCreated.quantity() in order-contracts, then:
 ./gradlew :order-contracts:generateSchemas
 git diff -- '*-contracts/src/main/resources/schemas/order-created.schema.json'   # see the diff
@@ -93,7 +93,7 @@ git checkout -- order-contracts/src/main/java/com/example/contracts/orders/Order
 git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'               # back to exit 0
 ```
 
-**What you verified:** schema generation is deterministic, and any drift between a Java record and
+**What you verified:** schema generation is deterministic, and any drift between a Java event class and
 its committed schema is mechanically detectable without touching the registry.
 
 ---
@@ -228,7 +228,7 @@ needed later for governance curls), and queue-depth health is wired before you s
 
 ## 8. Happy path — publish all seven events
 
-Each curl maps a request DTO to the code-first record; `SchemaAwareMessageConverter` validates
+Each curl maps a request DTO to the code-first event class; `SchemaAwareMessageConverter` validates
 against the resolved schema before the message is sent. Every call should return `201 Created`.
 
 ```bash
@@ -264,7 +264,7 @@ curl -si -X POST http://localhost:8081/api/customers/tier \
 ```
 
 For each: confirm `201 Created`, then confirm a matching `INFO` log line in the consumer terminal
-(`OrderEventListener`/`CustomerEventListener` log every field of the typed record it deserialized).
+(`OrderEventListener`/`CustomerEventListener` log every field of the typed event instance it deserialized).
 
 **Inspect the wire format** in the RabbitMQ management UI (http://localhost:15672, `guest`/`guest`)
 → Queues → e.g. `orders.created.consumer-service.queue` → Get messages (with "Requeue" unchecked if
@@ -401,11 +401,11 @@ git diff -- order-contracts/src/main/resources/schemas/order-created.schema.json
        -Papicurio.registry.url=http://localhost:8080
 ```
 
-Expect success — an additive optional property is FORWARD-compatible. Revert the record and schema
+Expect success — an additive optional property is FORWARD-compatible. Revert the event class and schema
 afterward (`git checkout --`) unless you intend to keep the change.
 
 **What you verified:** the code-first workflow supports safe, additive schema evolution end to end —
-edit the record, regenerate, register — with no manual schema authoring.
+edit the event class, regenerate, register — with no manual schema authoring.
 
 ---
 

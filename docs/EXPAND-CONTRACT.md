@@ -21,7 +21,7 @@ generator omits it from the schema `required` array.
 
 ### Step A — Expand (additive, FORWARD-compatible)
 
-1. **Author** — add the field to the record:
+1. **Author** — add the field to the event class:
 
 ```java
 @JsonPropertyDescription("Fulfillment priority hint, e.g. HIGH or NORMAL.")
@@ -110,10 +110,10 @@ Copy into every `*-contracts` PR description:
 | Check | Question |
 |-------|----------|
 | **FORWARD?** | Does this change only *add* optional properties (or other FORWARD-safe edits)? Run `verify `. |
-| **Optional?** | New record components lack `@NotNull` / `@NotBlank` / etc., so they stay out of `required`. |
+| **Optional?** | New fields lack `@NotNull` / `@NotBlank` / etc., so they stay out of `required`. |
 | **Producer first?** | Deploy order documented: publisher(s) before consumers. FORWARD assumes producers may lead. |
 | **Consumers listed?** | Every `@BitsEventHandler` owner for this event named, with adoption plan or "none lagging". |
-| **Schema committed?** | `generateSchemas` run; generated `*.schema.json` in the same PR as the Java record. |
+| **Schema committed?** | `generateSchemas` run; generated `*.schema.json` in the same PR as the Java event class. |
 | **Drift clean?** | `git diff --exit-code -- '*-contracts/src/main/resources/schemas/*'` passes. |
 
 If any box is "no" or "unknown", stop — this is not a Tier 1 change.
@@ -122,7 +122,7 @@ If any box is "no" or "unknown", stop — this is not a Tier 1 change.
 
 ## Deprecation (governance only — not runtime)
 
-Field-level deprecation in Java uses `@Deprecated` on the record component (Draft-07 has no
+Field-level deprecation in Java uses `@Deprecated` on the field (Draft-07 has no
 `deprecated` keyword). Registry **version state** is a separate, human/CI signal.
 
 ### When to flip `DEPRECATED`
@@ -159,7 +159,7 @@ Deprecation and removal need explicit ACK from every handler owner:
 
 Schemas grow monotonically under Tier 1 (see Step C), so removal candidates have to be found
 deliberately — nothing forces the question. Run a **quarterly** census: grep every `*-contracts`
-module for `@Deprecated` record components, then cross-reference each hit against the current
+module for `@Deprecated` fields, then cross-reference each hit against the current
 `@BitsEventHandler` inventory for that event type. A field becomes a removal candidate once the
 census shows no remaining handler reads it and no producer still emits it; open the Step C removal
 PR at that point rather than letting `@Deprecated` fields sit un-actioned across multiple censuses.

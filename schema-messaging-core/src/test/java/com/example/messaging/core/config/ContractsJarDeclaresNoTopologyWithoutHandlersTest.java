@@ -62,9 +62,29 @@ class ContractsJarDeclaresNoTopologyWithoutHandlersTest {
     }
 
     /** Reproduces what a contracts jar contributes post-flip: plain {@code TypeMapping} data beans. */
-    record ProbeA(String id) {}
+    static final class ProbeA {
+        private final String id;
 
-    record ProbeB(String id) {}
+        ProbeA(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
+
+    static final class ProbeB {
+        private final String id;
+
+        ProbeB(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     @Configuration(proxyBeanMethods = false)
     static class ContractsJarSimulation {

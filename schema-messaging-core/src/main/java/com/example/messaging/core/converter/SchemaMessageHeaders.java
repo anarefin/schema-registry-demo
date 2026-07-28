@@ -44,8 +44,8 @@ public final class SchemaMessageHeaders {
             SchemaCoordinates coords,
             SchemaType schemaType,
             String contentType) {
-        props.setHeader(GROUP_ID, coords.groupId());
-        props.setHeader(ARTIFACT_ID, coords.artifactId());
+        props.setHeader(GROUP_ID, coords.getGroupId());
+        props.setHeader(ARTIFACT_ID, coords.getArtifactId());
         props.setHeader(TYPE, schemaType.name());
         props.setContentType(contentType);
     }

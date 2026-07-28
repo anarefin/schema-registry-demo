@@ -55,10 +55,10 @@ public class BitsEventHandlerRegistrar implements RabbitListenerConfigurer {
 
         for (BitsEventHandlerScanner.HandlerBinding binding :
                 BitsEventHandlerScanner.discoverHandlerBindings(applicationContext)) {
-            Object bean = applicationContext.getBean(binding.beanName());
-            for (Method method : binding.methods()) {
+            Object bean = applicationContext.getBean(binding.getBeanName());
+            for (Method method : binding.getMethods()) {
                 registerEndpoint(
-                        registrar, containerFactory, handlerMethodFactory, binding.beanName(), bean, method);
+                        registrar, containerFactory, handlerMethodFactory, binding.getBeanName(), bean, method);
             }
         }
     }
@@ -71,7 +71,7 @@ public class BitsEventHandlerRegistrar implements RabbitListenerConfigurer {
             Object bean,
             Method method) {
         TypeMapping mapping = BitsEventHandlerScanner.mappingFor(typeMappingRegistry, method);
-        String queue = TopologyNaming.serviceQueueName(mapping.routingKey(), serviceName);
+        String queue = TopologyNaming.serviceQueueName(mapping.getRoutingKey(), serviceName);
         Method invocableMethod = AopUtils.selectInvocableMethod(method, bean.getClass());
 
         MethodRabbitListenerEndpoint endpoint = new MethodRabbitListenerEndpoint();

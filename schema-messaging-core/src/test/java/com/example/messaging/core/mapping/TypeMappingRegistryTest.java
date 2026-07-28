@@ -12,8 +12,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TypeMappingRegistryTest {
 
-    record A(String id) {}
-    record B(String id) {}
+    static final class A {
+        private final String id;
+
+        A(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
+
+    static final class B {
+        private final String id;
+
+        B(String id) {
+            this.id = id;
+        }
+
+        String getId() {
+            return id;
+        }
+    }
 
     @Test
     void duplicateJavaType_throwsWithClearMessage() {

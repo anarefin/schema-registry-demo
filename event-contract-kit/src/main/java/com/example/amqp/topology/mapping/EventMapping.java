@@ -7,7 +7,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Declarative schema identity and AMQP route for a code-first event record (spec §13). Sits
+ * Declarative schema identity and AMQP route for a code-first event class (spec §13). Sits
  * alongside {@link GenerateSchema}: the marker says "generate my JSON Schema", this annotation says
  * "here is my registry group/artifact and my publish exchange/routing key". {@code schema-gen-tools}
  * validates the pair at {@code process-classes} and writes the build-time event index; contracts

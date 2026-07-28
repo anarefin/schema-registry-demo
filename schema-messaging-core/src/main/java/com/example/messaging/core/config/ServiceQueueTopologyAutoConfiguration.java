@@ -90,7 +90,7 @@ public class ServiceQueueTopologyAutoConfiguration {
             Set<String> legacyQueueNames = new LinkedHashSet<>();
             for (TypeMapping mapping : handlerMappings) {
                 legacyQueueNames.addAll(
-                        TopologyNaming.legacySharedDomainQueueNames(mapping.routingKey(), tierTtls.length));
+                        TopologyNaming.legacySharedDomainQueueNames(mapping.getRoutingKey(), tierTtls.length));
             }
             for (String queueName : legacyQueueNames) {
                 rabbitAdmin.deleteQueue(queueName);
@@ -103,11 +103,11 @@ public class ServiceQueueTopologyAutoConfiguration {
             // exchanges: a Binding only needs the exchange name, and exchange ownership belongs to
             // the domain's *-contracts module. Declaring only queues + bindings keeps core's reach
             // to the exchange-name string.
-            DomainExchanges exchanges = DomainTopology.of(mapping.exchange());
+            DomainExchanges exchanges = DomainTopology.of(mapping.getExchange());
 
             List<Declarable> declarables = EventTopologyFactory.declarablesForEvent(
-                    mapping.routingKey(), serviceName,
-                    exchanges.main(), exchanges.dlx(), exchanges.retry(), tierTtls);
+                    mapping.getRoutingKey(), serviceName,
+                    exchanges.getMain(), exchanges.getDlx(), exchanges.getRetry(), tierTtls);
             for (Declarable declarable : declarables) {
                 declare(rabbitAdmin, declarable);
             }

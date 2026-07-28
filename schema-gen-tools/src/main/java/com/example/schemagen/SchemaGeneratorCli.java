@@ -30,7 +30,7 @@ public final class SchemaGeneratorCli {
         String basePackage = args[2];
 
         List<Class<?>> eventTypes = GenerateSchemaScanner.findAnnotatedTypes(classesDir, basePackage);
-        // Fail the build before writing anything if any event record breaks the paired-annotation
+        // Fail the build before writing anything if any event class breaks the paired-annotation
         // contract (shape, blank attribute, or duplicate coordinates/bean name).
         List<EventMappingMetadata> mappings = EventMappingValidator.validate(eventTypes);
 

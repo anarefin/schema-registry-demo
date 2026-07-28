@@ -6,12 +6,15 @@ import com.example.messaging.core.exception.SchemaValidationException;
 import com.example.messaging.core.model.ResolvedSchema;
 import com.example.amqp.topology.mapping.SchemaCoordinates;
 import com.example.amqp.topology.mapping.SchemaType;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -44,7 +47,45 @@ class JsonSchemaStrategyTest {
     private JsonSchemaStrategy strategy;
     private ResolvedSchema schema;
 
-    record Person(String name, Integer age) {}
+    static final class Person {
+        private final String name;
+        private final Integer age;
+
+        @JsonCreator
+        Person(@JsonProperty("name") String name, @JsonProperty("age") Integer age) {
+            this.name = name;
+            this.age = age;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public Integer getAge() {
+            return age;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Person other)) {
+                return false;
+            }
+            return Objects.equals(name, other.name) && Objects.equals(age, other.age);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(name, age);
+        }
+
+        @Override
+        public String toString() {
+            return "Person[name=" + name + ", age=" + age + "]";
+        }
+    }
 
     @BeforeEach
     void setUp() {

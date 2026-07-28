@@ -10,9 +10,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Value-object tests for the code-first customer events. The record IS the contract; the wire
+ * Value-object tests for the code-first customer events. The class IS the contract; the wire
  * format is the raw JSON document only (spec §6 — no envelope). These verify Jackson round-trips
- * the record shape faithfully, including the {@link CustomerTier} enum and nested {@link Address}
+ * the class shape faithfully, including the {@link CustomerTier} enum and nested {@link Address}
  * object that make these events the "enrichment" showcases in the generated schemas.
  */
 class CustomerEventsTest {
@@ -36,7 +36,7 @@ class CustomerEventsTest {
         CustomerRegistered parsed =
                 mapper.readValue(mapper.writeValueAsBytes(withoutPhone), CustomerRegistered.class);
         assertThat(parsed).isEqualTo(withoutPhone);
-        assertThat(parsed.phoneNumber()).isNull();
+        assertThat(parsed.getPhoneNumber()).isNull();
     }
 
     @Test
@@ -53,7 +53,7 @@ class CustomerEventsTest {
         CustomerAddressAdded parsed =
                 mapper.readValue(mapper.writeValueAsBytes(original), CustomerAddressAdded.class);
         assertThat(parsed).isEqualTo(original);
-        assertThat(parsed.address().line2()).isNull();
+        assertThat(parsed.getAddress().getLine2()).isNull();
     }
 
     @Test
@@ -80,6 +80,6 @@ class CustomerEventsTest {
                 mapper.readValue(mapper.writeValueAsBytes(original), CustomerTierChanged.class);
 
         assertThat(parsed).isEqualTo(original);
-        assertThat(parsed.previousTier()).isNull();
+        assertThat(parsed.getPreviousTier()).isNull();
     }
 }

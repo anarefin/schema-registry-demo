@@ -14,7 +14,8 @@ import java.util.Map;
  * type discovered by {@link GenerateSchemaScanner} must:
  *
  * <ul>
- *   <li>be a top-level, public {@code record} (no nested/local/anonymous/abstract/interface/enum);
+ *   <li>be a top-level, public concrete {@code class} (no nested/local/anonymous/abstract/
+ *       interface/enum/record);
  *   <li>carry a paired {@code @EventMapping} with non-blank {@code groupId}/{@code exchange}/
  *       {@code routingKey};
  *   <li>have distinct effective schema coordinates {@code (groupId, artifactId)} and a distinct
@@ -56,20 +57,20 @@ public final class EventMappingValidator {
                 throw new IllegalStateException(
                         "@GenerateSchema type " + fqcn + " is missing a paired @EventMapping");
             }
-            requireNonBlank(attrs.groupId(), "groupId", fqcn);
-            requireNonBlank(attrs.exchange(), "exchange", fqcn);
-            requireNonBlank(attrs.routingKey(), "routingKey", fqcn);
+            requireNonBlank(attrs.getGroupId(), "groupId", fqcn);
+            requireNonBlank(attrs.getExchange(), "exchange", fqcn);
+            requireNonBlank(attrs.getRoutingKey(), "routingKey", fqcn);
 
-            String artifactId = attrs.artifactId().isBlank()
+            String artifactId = attrs.getArtifactId().isBlank()
                     ? type.getSimpleName()
-                    : attrs.artifactId();
+                    : attrs.getArtifactId();
             String beanName = Introspector.decapitalize(type.getSimpleName()) + "Mapping";
 
-            String coordinateKey = attrs.groupId() + "/" + artifactId;
+            String coordinateKey = attrs.getGroupId() + "/" + artifactId;
             String coordinateOwner = seenCoordinates.putIfAbsent(coordinateKey, fqcn);
             if (coordinateOwner != null) {
                 throw new IllegalStateException(
-                        "Duplicate effective schema coordinates (" + attrs.groupId() + ", "
+                        "Duplicate effective schema coordinates (" + attrs.getGroupId() + ", "
                                 + artifactId + ") on " + fqcn + " and " + coordinateOwner);
             }
 
@@ -80,32 +81,37 @@ public final class EventMappingValidator {
                                 + " and " + beanNameOwner);
             }
 
-            metadata.add(new EventMappingMetadata(type, fqcn, attrs.groupId(), artifactId, beanName));
+            metadata.add(new EventMappingMetadata(
+                    type, fqcn, attrs.getGroupId(), artifactId, beanName));
         }
 
-        metadata.sort(Comparator.comparing(EventMappingMetadata::fqcn));
+        metadata.sort(Comparator.comparing(EventMappingMetadata::getFqcn));
         return List.copyOf(metadata);
     }
 
     private static void requireSupportedShape(Class<?> type, String fqcn) {
         if (type.isMemberClass() || type.isLocalClass() || type.isAnonymousClass()) {
             throw new IllegalStateException("@GenerateSchema type " + fqcn
-                    + " must be a top-level type (no nested, local, or anonymous event records)");
+                    + " must be a top-level type (no nested, local, or anonymous event classes)");
         }
         if (!Modifier.isPublic(type.getModifiers())) {
             throw new IllegalStateException("@GenerateSchema type " + fqcn + " must be public");
         }
         if (type.isInterface()) {
             throw new IllegalStateException(
-                    "@GenerateSchema type " + fqcn + " must be a record, not an interface");
+                    "@GenerateSchema type " + fqcn + " must be a class, not an interface");
         }
         if (type.isEnum()) {
             throw new IllegalStateException(
-                    "@GenerateSchema type " + fqcn + " must be a record, not an enum");
+                    "@GenerateSchema type " + fqcn + " must be a class, not an enum");
         }
-        if (!type.isRecord()) {
+        if (type.isRecord()) {
+            throw new IllegalStateException(
+                    "@GenerateSchema type " + fqcn + " must be a class, not a record");
+        }
+        if (Modifier.isAbstract(type.getModifiers())) {
             throw new IllegalStateException("@GenerateSchema type " + fqcn
-                    + " must be a record (abstract and plain classes are not supported)");
+                    + " must be a concrete class (abstract classes are not supported)");
         }
     }
 
